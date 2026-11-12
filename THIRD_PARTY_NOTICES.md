@@ -90,3 +90,10 @@ httpx（BSD-3）、cryptography（Apache-2.0 / BSD）、Pillow（MIT-CMU）、uv
 
 - @phosphor-icons/react（MIT）：界面图标，统一出口在 `frontend/src/components/icons.tsx`。
 - @fontsource/noto-serif-sc（SIL OFL 1.1）：标题与正文宋体。
+
+## 每本书的专属 Agent（v0.5）：只参考思路，未使用代码
+
+以下项目只借鉴了产品思路，没有复制任何代码、提示词或资源（其中部分为 GPL/AGPL 许可）：
+- reveric：「Agent Native」写作工作台——书内常驻助手、改动以卡片形式呈现。
+- ainovel-cli：「流程归代码、判断归 AI」——参数校验、冲突检测、快照与版本栈由程序负责，改什么、怎么改由模型决定。
+- oh-story：按作品组织的创作助手与工具调用流程。
