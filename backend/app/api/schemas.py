@@ -106,6 +106,24 @@ class IdeaRevise(BaseModel):
     route: str | None = None  # "渠道id:模型"，不填走策划路由
 
 
+class IdeaSuggest(BaseModel):
+    field: Literal["title", "genre", "logline", "selling_points", "hook", "expectations", "arc", "endgame"]
+    instruction: str = Field(default="", max_length=1000)
+    route: str | None = None
+    draft: dict[str, Any] | None = None
+
+
+class IdeaUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=40)
+    genre: str | None = None
+    logline: str | None = None
+    selling_points: list[str] | None = None
+    hook: str | None = None
+    expectations: list[str] | None = None
+    arc: list[str] | None = None
+    endgame: str | None = None
+
+
 CardType = Literal["world", "power", "faction", "character", "item", "location"]
 
 

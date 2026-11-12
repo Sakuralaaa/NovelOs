@@ -80,6 +80,102 @@ def _idea_text(i: Idea) -> str:
             f"长期期待：{'；'.join(i.expectations)}\n长线阶段：{' → '.join(i.arc)}\n终局：{i.endgame}")
 
 
+FIELD_SPEC: dict[str, tuple[str, str, bool]] = {
+    # 字段：(名称, 规则, 是否列表)
+    "title": ("书名", "番茄式大白话，8–16 字，不带题材前缀。", False),
+    "genre": ("题材", "用番茄的分类名。", False),
+    "logline": ("简介", "一到两句，80 字内：身份、外部压力、金手指、怎么越用越强。", False),
+    "selling_points": ("卖点", "3 条，每条 30 字内，说读者能看到的爽点，不写内部标签。", True),
+    "hook": ("钩子", "开篇第一个场面，60 字内。", False),
+    "expectations": ("长期期待", "2–3 条，读者追下去最想看到的事。", True),
+    "arc": ("长线阶段", "4–6 个阶段，每个阶段换一层地图，对手和实力跟着升，写清在哪、对谁、拿到什么。", True),
+    "endgame": ("终局", "一句话的终局目标。", False),
+}
+
+
+def suggest_field(idea_id: int, field: str, instruction: str, route: str | None, draft: dict[str, Any] | None,
+                  ctx: JobContext) -> dict[str, Any]:
+    """只改一项，结果作为建议返回，不落库，由作者确认后保存。"""
+    if field not in FIELD_SPEC:
+        raise ValueError("不支持的字段")
+    label, rule, is_list = FIELD_SPEC[field]
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        tmp = Idea(**{k: getattr(idea, k) for k in ("title", "logline", "selling_points", "hook", "expectations", "endgame", "arc", "genre", "gender")})
+    for k, v in (draft or {}).items():  # 用页面上还没保存的内容
+        if k in FIELD_SPEC and isinstance(v, (list, str)):
+            setattr(tmp, k, v)
+    user = render("idea_field", gender_label=common.GENDER_LABEL.get(tmp.gender, tmp.gender), field_label=label,
+                  idea=_idea_text(tmp), instruction=instruction.strip() or "写得更好、更抓人。",
+                  field_rule=f"「{label}」要求：{rule}", value_shape='["…","…"]' if is_list else '"…"')
+    ctx.progress(30, f"改{label}")
+    cur = getattr(tmp, field)
+    data = get_gateway().chat_json("idea_field", system_prompt("idea_field"), user,
+                                   meta={"field": field, "current": cur, "instruction": instruction}, route=route)
+    v = data.get("value") if isinstance(data, dict) else data
+    if is_list:
+        v = [str(x).strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()][:6]
+    else:
+        v = str(v or "").strip()
+        if field == "title":
+            v = _clean_title(v, tmp.genre)
+    if not v:
+        raise ValueError("模型没有给出修改")
+    return {"field": field, "value": v}
+
+
+def update_idea(idea_id: int, fields: dict[str, Any]) -> Idea:
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        cur = {k: getattr(idea, k) for k in _IDEA_FIELDS}
+        changed = False
+        for k, v in fields.items():
+            if k not in FIELD_SPEC or v is None:
+                continue
+            v = [str(x).strip() for x in v if str(x).strip()] if FIELD_SPEC[k][2] else str(v).strip()
+            if k == "title":
+                v = v.strip("《》")[:40]
+            if v != getattr(idea, k):
+                setattr(idea, k, v)
+                changed = True
+        if changed:
+            idea.versions = [*idea.versions, {**cur, "instruction": "手动修改"}][-10:]
+            s.add(idea)
+            s.commit()
+            s.refresh(idea)
+        return idea
+
+
+def rescore_idea(idea_id: int, ctx: JobContext) -> dict[str, Any]:
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        gender = idea.gender
+        it = {k: getattr(idea, k) for k in ("title", "logline", "selling_points", "endgame", "arc", "genre")}
+        trends = radar.compute_trends(s, gender=gender)
+    ctx.progress(30, "编辑复核打分")
+    rv = _review_scores([it], gender, trends).get(1)
+    if not rv:
+        raise ValueError("打分失败，检查审稿模型")
+    heat = _heat_for(it["genre"], trends)
+    novelty, fit = _clamp(rv.get("novelty")), _clamp(rv.get("fit"))
+    issue = str(rv.get("issue") or "").strip()
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        idea.scores = {"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
+                       "issue": "" if issue in ("无", "没有", "-") else issue[:40]}
+        s.add(idea)
+        s.commit()
+    return {"idea_id": idea_id}
+
+
 def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobContext) -> dict[str, Any]:
     with session_scope() as s:
         idea = s.get(Idea, idea_id)

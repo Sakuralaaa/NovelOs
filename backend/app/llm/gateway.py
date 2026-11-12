@@ -39,6 +39,7 @@ TASK_ROLE: dict[str, str] = {
     "ideation": "planner",
     "idea_score": "reviewer",
     "idea_revise": "planner",
+    "idea_field": "planner",
     "bible": "planner",
     "outline": "planner",
     "expand": "planner",

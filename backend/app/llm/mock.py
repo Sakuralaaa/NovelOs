@@ -165,6 +165,19 @@ def mock_idea_revise(meta: dict[str, Any]) -> str:
     return _j(out)
 
 
+def mock_idea_score(meta: dict[str, Any]) -> str:
+    n = int(meta.get("count") or 1)
+    return _j({"scores": [{"index": i, "novelty": 60 + (i * 7) % 25, "fit": 65 + (i * 5) % 20, "issue": "爽点兑现偏慢" if i == 2 else "无"} for i in range(1, n + 1)]})
+
+
+def mock_idea_field(meta: dict[str, Any]) -> str:
+    cur = meta.get("current")
+    note = str(meta.get("instruction") or "改写")[:12]
+    if isinstance(cur, list):
+        return _j({"value": [f"{x}（{note}）" for x in cur] or [note]})
+    return _j({"value": f"{cur}（{note}）"})
+
+
 # ---------------------------------------------------------------- 设定
 
 def mock_bible(meta: dict[str, Any]) -> str:
@@ -630,6 +643,8 @@ def mock_style_extract(meta: dict[str, Any]) -> str:
 HANDLERS = {
     "ideation": mock_ideation,
     "idea_revise": mock_idea_revise,
+    "idea_field": mock_idea_field,
+    "idea_score": mock_idea_score,
     "bible": mock_bible,
     "outline": mock_outline,
     "expand": mock_expand,

@@ -102,6 +102,8 @@ export interface Idea {
   last_instruction?: string
 }
 
+export type IdeaField = 'title' | 'genre' | 'logline' | 'selling_points' | 'hook' | 'expectations' | 'arc' | 'endgame'
+
 export type CardType = 'world' | 'power' | 'faction' | 'character' | 'item' | 'location'
 export interface Card {
   id: number

@@ -1,5 +1,5 @@
 import type {
-  Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, Job,
+  Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Style, TrendTopic, WritingSettings,
 } from './types'
 
@@ -99,6 +99,10 @@ export const api = {
   adoptIdea: (id: number) => post<Book>(`/ideas/${id}/adopt`),
   reviseIdea: (id: number, b: { instruction: string; route?: string | null }) => post<Job>(`/ideas/${id}/revise`, b),
   undoIdea: (id: number) => post<Idea>(`/ideas/${id}/undo`),
+  idea: (id: number) => get<Idea>(`/ideas/${id}`),
+  updateIdea: (id: number, b: Partial<Record<IdeaField, string | string[]>>) => patch<Idea>(`/ideas/${id}`, b),
+  suggestIdeaField: (id: number, b: { field: IdeaField; instruction: string; route?: string | null; draft?: Record<string, unknown> }) => post<Job>(`/ideas/${id}/suggest`, b),
+  rescoreIdea: (id: number) => post<Job>(`/ideas/${id}/rescore`),
 
   generateBible: (bookId: number) => post<Job>(`/books/${bookId}/bible/generate`),
   cards: (bookId: number, type?: CardType) => get<Card[]>(`/books/${bookId}/cards${qs({ type })}`),
@@ -179,6 +183,7 @@ export const qk = {
   books: ['books'] as const,
   book: (id: number) => ['book', id] as const,
   ideas: ['ideas'] as const,
+  idea: (id: number) => ['ideas', id] as const,
   cards: (bookId: number) => ['cards', bookId] as const,
   facts: (bookId: number) => ['facts', bookId] as const,
   outline: (bookId: number) => ['outline', bookId] as const,

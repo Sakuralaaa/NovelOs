@@ -315,6 +315,23 @@ on('POST', '/ideas/:id/revise', (m, b) => {
     return { idea_id: idea.id, change: '调整了简介' }
   })
 })
+on('GET', '/ideas/:id', (m) => must(db.ideas.find((x) => x.id === +m[1]), '选题'))
+on('PATCH', '/ideas/:id', (m, b) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
+  ;(ideaHist[idea.id] ??= []).push({ ...idea })
+  Object.assign(idea, b, { versions: ideaHist[idea.id].length, last_instruction: '手动修改' })
+  return idea
+})
+on('POST', '/ideas/:id/suggest', (m, b) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题') as any
+  const cur = (b.draft ?? idea)[b.field] ?? idea[b.field]
+  const note = String(b.instruction || '改写').slice(0, 10)
+  return createJob('idea_field', null, 1500, ['AI 改写…'], () => ({ field: b.field, value: Array.isArray(cur) ? cur.map((x: string) => `${x}（${note}）`) : `${cur}（${note}）` }))
+})
+on('POST', '/ideas/:id/rescore', (m) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
+  return createJob('idea_rescore', null, 1500, ['编辑复核打分…'], () => { idea.scores = { ...idea.scores, novelty: 70, fit: 78, overall: Math.round(0.3 * idea.scores.heat + 0.3 * 70 + 0.4 * 78) }; return { idea_id: idea.id } })
+})
 on('POST', '/ideas/:id/undo', (m) => {
   const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
   const prev = ideaHist[idea.id]?.pop()

@@ -8,9 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
-import { Field, Input, Textarea } from '@/components/ui/input'
-import { Select, type Opt } from '@/components/ui/select'
-import { useChannels } from '@/hooks/queries'
+import { Field, Input } from '@/components/ui/input'
 import { ScoreRing } from '@/components/ui/misc'
 import { Segmented } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
@@ -125,7 +123,6 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
       nav(`/books/${book.id}`)
     },
   })
-  const [editing, setEditing] = useState(false)
   const revJob = useActiveJob(`idea-revise:${i.id}`)
   const undo = useMutation({
     mutationFn: () => api.undoIdea(i.id),
@@ -143,7 +140,7 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
       {fresh && <Badge tone="primary" className="absolute -top-2.5 left-4 shadow-card"><Sparkles className="h-3 w-3" />新生成</Badge>}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="break-words text-[16px] font-semibold leading-snug tracking-tight">{i.title}</h3>
+          <Link to={`/ideas/${i.id}`} className="block break-words text-[16px] font-semibold leading-snug tracking-tight hover:text-primary">{i.title}</Link>
           <div className="mt-1 text-xs text-muted-foreground">{i.genre}</div>
         </div>
         <ScoreRing value={i.scores.overall} size={50} label="综合" />
@@ -192,54 +189,14 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
           <Button variant="primary" className="flex-1" loading={adopt.isPending} icon={<BookPlus className="h-4 w-4" />} onClick={() => adopt.mutate()}>采纳建书</Button>
         )}
         {!i.chosen && (
-          <Button variant="ghost" size="icon" aria-label="按意见修改" title="按意见修改" loading={!!revJob} onClick={() => setEditing(true)} className="shrink-0 text-muted-foreground hover:text-primary"><Pencil className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" aria-label="打开详情修改" title="打开详情修改" loading={!!revJob} onClick={() => nav(`/ideas/${i.id}`)} className="shrink-0 text-muted-foreground hover:text-primary"><Pencil className="h-4 w-4" /></Button>
         )}
         {!i.chosen && !!i.versions && (
           <Button variant="ghost" size="icon" aria-label="撤回上一次修改" title={i.last_instruction ? `撤回：${i.last_instruction}` : '撤回上一次修改'} loading={undo.isPending} disabled={!!revJob} onClick={() => undo.mutate()} className="shrink-0 text-muted-foreground hover:text-foreground"><RotateCcw className="h-4 w-4" /></Button>
         )}
         <Button variant="ghost" size="icon" aria-label="删除选题" loading={rm.isPending} onClick={() => rm.mutate()} className="shrink-0 text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button>
       </div>
-      <ReviseDialog idea={i} open={editing} onOpenChange={setEditing} />
     </motion.div>
-  )
-}
-
-const ROUTE_KEY = 'novelos.idea-revise-route'
-
-function ReviseDialog({ idea, open, onOpenChange }: { idea: Idea; open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [text, setText] = useState('')
-  const [route, setRoute] = useState<string | null>(() => localStorage.getItem(ROUTE_KEY) || null)
-  const { start } = useJobs()
-  const channels = useChannels()
-  const opts: Opt[] = (channels.data ?? []).filter((c) => c.enabled).flatMap((c) => c.models.map((m) => ({ value: `${c.id}:${m}`, label: <span className="font-mono text-[12.5px]">{m}</span>, group: c.name })))
-  const valid = route && opts.some((o) => o.value === route) ? route : null
-  const submit = () => {
-    const instruction = text.trim()
-    if (!instruction) return
-    if (valid) localStorage.setItem(ROUTE_KEY, valid); else localStorage.removeItem(ROUTE_KEY)
-    start(api.reviseIdea(idea.id, { instruction, route: valid }), {
-      key: `idea-revise:${idea.id}`, label: `修改《${idea.title}》`,
-      successMsg: (j) => (j.result?.change as string) || '选题已修改',
-    })
-    setText('')
-    onOpenChange(false)
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={`修改《${idea.title}》`} wide
-        footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button><Button variant="primary" icon={<Wand2 className="h-4 w-4" />} disabled={!text.trim()} onClick={submit}>开始修改</Button></>}>
-        <div className="space-y-4">
-          <Field label="你的想法">
-            <Textarea autoFocus rows={5} value={text} onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit() }}
-              placeholder="例如：主角换成武道高考生；金手指改成能看到功法词条；第三阶段别去异界，留在本土打世家" />
-          </Field>
-          <Field label="用哪个模型">
-            <Select value={valid} onChange={setRoute} options={opts} allowEmpty emptyLabel="默认（策划模型）" placeholder="默认（策划模型）" />
-          </Field>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }
 

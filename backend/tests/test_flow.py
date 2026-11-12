@@ -58,6 +58,14 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     assert jb["status"] == "failed" and "不可用" in (jb["error"] or "")
     back = client.post(f"/api/ideas/{other}/undo").json()
     assert back["logline"] == old["logline"] and back["versions"] == 0
+    # 详情页：单项建议（不落库）→ 手动保存 → 重新打分
+    one = client.get(f"/api/ideas/{other}").json()
+    sj = wait_job(client, client.post(f"/api/ideas/{other}/suggest", json={"field": "selling_points", "instruction": "更爽", "draft": {"hook": "草稿钩子"}}).json())
+    assert sj["result"]["field"] == "selling_points" and len(sj["result"]["value"]) == len(one["selling_points"])
+    assert client.get(f"/api/ideas/{other}").json()["selling_points"] == one["selling_points"]
+    up = client.patch(f"/api/ideas/{other}", json={"title": "《我的新书名》", "arc": ["一", " ", "二"]}).json()
+    assert up["title"] == "我的新书名" and up["arc"] == ["一", "二"] and up["versions"] == 1
+    wait_job(client, client.post(f"/api/ideas/{other}/rescore").json())
     book = client.post(f"/api/ideas/{idea['id']}/adopt").json()
     assert book["status"] == "bible" and book["stats"] == {"chapters": 0, "words": 0, "foreshadow_open": 0}
     bid = book["id"]

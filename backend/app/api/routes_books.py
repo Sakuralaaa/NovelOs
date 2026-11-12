@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.api.schemas import (
     AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CoversIn, IdeasGenerate, OutlineUpdate,
-    IdeaRevise, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
+    IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
 from app.config import get_settings
@@ -132,6 +132,42 @@ async def revise_idea(idea_id: int, body: IdeaRevise, s: Session = Depends(get_s
     if idea.chosen:
         raise HTTPException(409, "已建书的选题不能再改，去书里改设定")
     return job_out(submit("idea_revise", lambda ctx: planning.revise_idea(idea_id, body.instruction, body.route, ctx)))
+
+
+@router.get("/ideas/{idea_id}")
+def get_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    idea = s.get(Idea, idea_id)
+    if idea is None:
+        raise HTTPException(404, "选题不存在")
+    return idea_out(idea)
+
+
+def _editable(s: Session, idea_id: int) -> Idea:
+    idea = s.get(Idea, idea_id)
+    if idea is None:
+        raise HTTPException(404, "选题不存在")
+    if idea.chosen:
+        raise HTTPException(409, "已建书的选题不能再改，去书里改设定")
+    return idea
+
+
+@router.patch("/ideas/{idea_id}")
+def update_idea(idea_id: int, body: IdeaUpdate, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _editable(s, idea_id)
+    return idea_out(planning.update_idea(idea_id, body.model_dump(exclude_none=True)))
+
+
+@router.post("/ideas/{idea_id}/suggest")
+async def suggest_idea_field(idea_id: int, body: IdeaSuggest, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _editable(s, idea_id)
+    return job_out(submit("idea_field", lambda ctx: planning.suggest_field(idea_id, body.field, body.instruction, body.route, body.draft, ctx)))
+
+
+@router.post("/ideas/{idea_id}/rescore")
+async def rescore_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    if s.get(Idea, idea_id) is None:
+        raise HTTPException(404, "选题不存在")
+    return job_out(submit("idea_rescore", lambda ctx: planning.rescore_idea(idea_id, ctx)))
 
 
 @router.post("/ideas/{idea_id}/undo")

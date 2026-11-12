@@ -12,6 +12,7 @@ import { PageSkeleton } from '@/pages/_skeleton'
 const Home = lazy(() => import('@/pages/Home'))
 const RadarPage = lazy(() => import('@/pages/Radar'))
 const Ideas = lazy(() => import('@/pages/Ideas'))
+const IdeaDetail = lazy(() => import('@/pages/IdeaDetail'))
 const Books = lazy(() => import('@/pages/Books'))
 const BookOverview = lazy(() => import('@/pages/book/Overview'))
 const Bible = lazy(() => import('@/pages/book/Bible'))
@@ -53,6 +54,7 @@ export function App() {
                 <Route index element={<S><Home /></S>} />
                 <Route path="radar" element={<S><RadarPage /></S>} />
                 <Route path="ideas" element={<S><Ideas /></S>} />
+                <Route path="ideas/:ideaId" element={<S><IdeaDetail /></S>} />
                 <Route path="books" element={<S><Books /></S>} />
                 <Route path="books/:bookId" element={<S><BookOverview /></S>} />
                 <Route path="books/:bookId/bible" element={<S><Bible /></S>} />

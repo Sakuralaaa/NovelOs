@@ -65,6 +65,8 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   'radar.refresh': '刷新热点榜单',
   ideas_generate: '生成选题',
   idea_revise: '修改选题',
+  idea_field: 'AI 改写',
+  idea_rescore: '重新打分',
   'ideas.generate': '生成选题',
   bible_generate: '生成设定',
   'bible.generate': '生成设定',
