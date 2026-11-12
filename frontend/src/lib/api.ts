@@ -1,4 +1,5 @@
 import type {
+  BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Style, TrendTopic, WritingSettings,
 } from './types'
@@ -117,7 +118,7 @@ export const api = {
   expandOutline: (nodeId: number) => post<Job>(`/outline/${nodeId}/expand`),
   outline: (bookId: number) => get<OutlineNode[]>(`/books/${bookId}/outline`),
   deleteOutline: (nodeId: number) => del<{ deleted: number }>(`/outline/${nodeId}`),
-  updateOutline: (nodeId: number, b: Partial<OutlineNode>) => put<OutlineNode>(`/outline/${nodeId}`, b),
+  updateOutline: (nodeId: number, b: Partial<OutlineNode> & { instruction?: string }) => put<OutlineNode>(`/outline/${nodeId}`, b),
 
   chapters: (bookId: number) => get<Chapter[]>(`/books/${bookId}/chapters`),
   chapter: (id: number) => get<Chapter>(`/chapters/${id}`),
@@ -135,6 +136,32 @@ export const api = {
   extractStyle: (bookId: number) => post<Job>(`/books/${bookId}/style/extract`),
 
   foreshadows: (bookId: number) => get<Foreshadow[]>(`/books/${bookId}/foreshadows`),
+  foreshadowOverview: (bookId: number) => get<ForeshadowOverview>(`/books/${bookId}/foreshadows/overview`),
+  createForeshadow: (bookId: number, b: Partial<Foreshadow>) => post<Foreshadow>(`/books/${bookId}/foreshadows`, b),
+  updateForeshadow: (id: number, b: Partial<Foreshadow>) => put<Foreshadow>(`/foreshadows/${id}`, b),
+  deleteForeshadow: (id: number) => del<{ ok: boolean }>(`/foreshadows/${id}`),
+  planForeshadows: (bookId: number, b: { instruction: string; route?: string | null; count?: number }) => post<Job>(`/books/${bookId}/foreshadows/plan`, b),
+  addForeshadows: (bookId: number, b: { items: (ForeshadowPlanItem & { source?: string })[]; attach: boolean }) => post<{ created: number; attached: number }>(`/books/${bookId}/foreshadows/batch`, b),
+
+  // v0.4：按要求让 AI 改
+  reviseBook: (bookId: number, b: { instruction: string; route?: string | null }) => post<Job>(`/books/${bookId}/revise`, b),
+  applyBookInfo: (bookId: number, b: Partial<BookInfo> & { instruction: string }) => post<Book>(`/books/${bookId}/info`, b),
+  undoBook: (bookId: number) => post<Book>(`/books/${bookId}/undo`),
+  bookImpact: (bookId: number, terms: string[]) => post<Impact>(`/books/${bookId}/impact`, { terms }),
+  syncBook: (bookId: number, b: { instruction: string; terms: string[]; replacements: Record<string, string>; targets?: ('bible' | 'outline')[]; route?: string | null }) => post<Job>(`/books/${bookId}/sync`, b),
+  proposeBible: (bookId: number, b: { mode: 'rewrite' | 'add' | 'optimize'; instruction: string; route?: string | null }) => post<Job>(`/books/${bookId}/bible/propose`, b),
+  applyBible: (bookId: number, b: { mode: string; instruction: string; ops: BibleOp[]; facts?: any[] }) => post<{ created: number; updated: number; deleted: number; snapshot_id: number }>(`/books/${bookId}/bible/apply`, b),
+  bibleSnapshots: (bookId: number) => get<BibleSnapshot[]>(`/books/${bookId}/bible/snapshots`),
+  restoreBible: (bookId: number, sid: number) => post<{ restored: number; snapshot_id: number }>(`/books/${bookId}/bible/snapshots/${sid}/restore`),
+  suggestOutline: (nodeId: number, b: { instruction: string; route?: string | null }) => post<Job>(`/outline/${nodeId}/suggest`, b),
+  undoOutline: (nodeId: number) => post<OutlineNode>(`/outline/${nodeId}/undo`),
+  applyOutline: (bookId: number, b: { instruction: string; items: { node_id: number; title?: string; summary?: string; beats?: Record<string, any> }[] }) => post<{ updated: number }>(`/books/${bookId}/outline/apply`, b),
+  rewriteChapter: (id: number, b: { instruction: string; route?: string | null; scope: 'all' | 'selection'; start?: number; end?: number }) => post<Job>(`/chapters/${id}/rewrite`, b),
+  applyRewrite: (id: number, b: { content: string; label?: string }) => post<Chapter>(`/chapters/${id}/apply-rewrite`, b),
+  undoChapter: (id: number) => post<Chapter>(`/chapters/${id}/undo`),
+  detropeIdea: (id: number, b: { route?: string | null }) => post<Job>(`/ideas/${id}/detrope`, b),
+  tropes: () => get<{ banned: Trope[]; defaults: Trope[] }>('/settings/tropes'),
+  saveTropes: (banned: Trope[]) => put<{ banned: Trope[]; defaults: Trope[] }>('/settings/tropes', { banned }),
 
   generatePackage: (bookId: number) => post<Job>(`/books/${bookId}/package/generate`),
   reviseCoverPrompt: (bookId: number, b: { instruction: string; current?: string; route?: string | null }) => post<Job>(`/books/${bookId}/covers/prompt`, b),
@@ -196,4 +223,7 @@ export const qk = {
   foreshadows: (bookId: number) => ['foreshadows', bookId] as const,
   package: (bookId: number) => ['package', bookId] as const,
   style: (bookId: number) => ['style', bookId] as const,
+  foreshadowOverview: (bookId: number) => ['foreshadows', bookId, 'overview'] as const,
+  bibleSnapshots: (bookId: number) => ['cards', bookId, 'snapshots'] as const,
+  tropes: ['tropes'] as const,
 }

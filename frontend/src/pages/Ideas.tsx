@@ -14,6 +14,7 @@ import { Segmented } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
+import { TropeAlert } from '@/components/common/AiAsk'
 import { GridSkeleton } from './_skeleton'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
@@ -127,6 +128,8 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
     },
   })
   const revJob = useActiveJob(`idea-revise:${i.id}`)
+  const { start: startJob } = useJobs()
+  const detrope = () => startJob(api.detropeIdea(i.id, {}), { key: `idea-revise:${i.id}`, label: '换掉套路', successMsg: '已换掉套路，不满意可以撤回' })
   const undo = useMutation({
     mutationFn: () => api.undoIdea(i.id),
     meta: { errorTitle: '撤回失败' },
@@ -184,6 +187,7 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
         ))}
       </div>
       {i.issue && <div className="mt-3 flex gap-1.5 text-[12.5px] leading-relaxed text-warning"><AlertCircle className="mt-[3px] h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{i.issue}</span></div>}
+      <TropeAlert hits={i.trope_hits} compact className="mt-3" busy={!!revJob} onReplace={i.chosen ? undefined : detrope} />
       {revJob && <div className="mt-3"><JobInline job={revJob} /></div>}
       <div className="mt-auto flex gap-2 pt-5">
         {i.chosen && i.book_id ? (

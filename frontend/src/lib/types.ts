@@ -82,7 +82,15 @@ export interface Book {
   created_at: string
   updated_at: string
   stats: { chapters: number; words: number; foreshadow_open: number }
+  /** v0.4：核心设定、旧版本数、本书追加的禁用套路 */
+  premise?: string
+  versions?: number
+  last_instruction?: string
+  banned_tropes?: Trope[]
 }
+
+export interface Trope { name: string; keywords: string[] }
+export interface TropeHit { name: string; hits: string[] }
 
 export interface Idea {
   id: number
@@ -101,6 +109,7 @@ export interface Idea {
   chosen: boolean
   versions?: number
   last_instruction?: string
+  trope_hits?: TropeHit[]
 }
 
 export type IdeaField = 'title' | 'genre' | 'logline' | 'selling_points' | 'hook' | 'expectations' | 'arc' | 'endgame'
@@ -115,6 +124,7 @@ export interface Card {
   data: Record<string, any>
   known_by: string[]
   updated_at: string
+  trope_hits?: TropeHit[]
 }
 export interface Fact {
   id: number
@@ -139,6 +149,8 @@ export interface OutlineNode {
   beats: Record<string, any> | null
   status: 'planned' | 'expanded' | 'written'
   chapter_id: number | null
+  versions?: number
+  last_instruction?: string
 }
 
 export interface ReviewIssue {
@@ -184,6 +196,9 @@ export interface Chapter {
   /** v0.1 增补：多版本 */
   variants?: ChapterVariant[]
   updated_at: string
+  /** v0.4：可撤回的旧正文数 */
+  history?: number
+  last_history_label?: string
 }
 export interface ChapterVariant {
   id: number
@@ -201,14 +216,64 @@ export interface Style {
   extracted: Record<string, any> | null
 }
 
+export type ForeshadowStatus = 'planned' | 'planted' | 'advancing' | 'resolved' | 'dropped'
+export type ForeshadowTier = '' | 'short' | 'mid' | 'long'
 export interface Foreshadow {
   id: number
   book_id: number
   desc: string
-  status: 'planted' | 'advancing' | 'resolved' | 'dropped'
+  status: ForeshadowStatus
   planted_ch: number
   last_ch: number
   resolved_ch: number | null
+  tier?: ForeshadowTier
+  plan_plant_ch?: number | null
+  plan_resolve_ch?: number | null
+  note?: string
+  source?: 'chapter' | 'ai' | 'manual' | 'outline'
+}
+export interface ForeshadowPlanItem {
+  desc: string; tier: ForeshadowTier; plant_ch: number | null; resolve_ch: number | null; note: string; related: string[]
+  duplicate_of?: number | null; in_outline?: boolean
+}
+export interface ForeshadowOverview {
+  outline_planned: { desc: string; chapter: number; node_id: number; tier: string }[]
+  committed: number; drafts: number; outline_nodes: number; last_committed: number
+}
+
+// ---------- v0.4：按要求让 AI 改 ----------
+export interface CardDraft { type: CardType; name: string; summary: string; data: Record<string, any>; known_by: string[] }
+export interface BibleConflict { card_id: number; name: string; type: CardType; reason: string; source: 'program' | 'ai' }
+export type BibleChoice = 'add' | 'skip' | 'keep_old' | 'replace' | 'both' | 'delete_old'
+export interface BibleItem {
+  key: string; action: 'add' | 'update'; card: CardDraft; target_id: number | null; old: (CardDraft & { id: number }) | null
+  conflicts: BibleConflict[]; trope_hits: TropeHit[]; default: BibleChoice
+}
+export interface BibleProposal {
+  book_id: number; mode: 'rewrite' | 'add' | 'optimize'; instruction: string; change: string
+  items: BibleItem[]; removals: { card_id: number; name: string; type: CardType; summary: string }[]; facts: any[]
+  counts: { add: number; review: number; removals: number }
+}
+export interface BibleOp { op: 'create' | 'update' | 'delete'; card_id?: number | null; card?: CardDraft }
+export interface BibleSnapshot { id: number; note: string; count: number; created_at: string; names: string[] }
+export interface Impact {
+  terms: string[]; total: number
+  cards: { id: number; name: string; type: CardType; terms: string[]; snippet: string }[]
+  outline: { id: number; level: OutlineLevel; order: number; title: string; status: string; terms: string[]; snippet: string }[]
+  chapters: { id: number; number: number; title: string; status: string; terms: string[]; count: number; snippet: string }[]
+}
+export interface BookInfo { title: string; tagline: string; premise: string }
+export interface BookRevision {
+  book_id: number; instruction: string; current: BookInfo; proposal: BookInfo; change: string; terms: string[]
+  replacements: Record<string, string>; impact: Impact; trope_hits: TropeHit[]
+}
+export interface OutlineSyncItem {
+  node_id: number; level: OutlineLevel; old: { title: string; summary: string }
+  new: { title: string; summary: string; beats?: Record<string, any> }; reason: string; beats_changed?: boolean
+}
+export interface SyncResult {
+  terms: string[]; replacements: Record<string, string>; bible: BibleProposal | null; outline: { items: OutlineSyncItem[] }
+  chapters: Impact['chapters']
 }
 
 export interface Package {

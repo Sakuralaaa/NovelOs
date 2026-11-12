@@ -10,6 +10,7 @@ import { ScoreRing, Skeleton } from '@/components/ui/misc'
 import { Select, type Opt } from '@/components/ui/select'
 import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
+import { TropeAlert } from '@/components/common/AiAsk'
 import { useChannels } from '@/hooks/queries'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
@@ -106,6 +107,13 @@ export default function IdeaDetail() {
       },
       onError: (j) => toast.error('AI 改写失败', { description: j.error ?? undefined }),
     })
+  const detrope = async () => {
+    if (dirty) await save.mutateAsync()
+    start(api.detropeIdea(id, { route: model }), {
+      key: `idea-revise:${id}`, label: '换掉套路', successMsg: '已换掉套路，不满意可以撤回',
+      onSuccess: () => { setDraft(null); refresh() },
+    })
+  }
   const rescore = () => start(api.rescoreIdea(id), { key: `idea-rescore:${id}`, label: '重新打分', successMsg: '分数已更新', onSuccess: () => refresh() })
 
   const fieldProps = (k: IdeaField) => ({ field: k, ideaId: id, locked, changed: touched.has(k) && dirtyKeys.includes(k), onSuggest: suggest })
@@ -135,6 +143,8 @@ export default function IdeaDetail() {
           )}
         </div>
       </div>
+
+      <TropeAlert hits={idea.trope_hits} className="mt-5" busy={!!reviseJob} onReplace={locked ? undefined : detrope} />
 
       {!locked && (
         <Card className="mt-6">

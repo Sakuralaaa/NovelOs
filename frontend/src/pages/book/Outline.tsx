@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Pencil, Plus, Sparkles, Trash2, UnfoldVertical, X } from '@/components/icons'
+import { Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Pencil, Plus, RotateCcw, Sparkles, Trash2, UnfoldVertical, X } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
+import { AskBox, CompareRow, useModelRoute } from '@/components/common/AiAsk'
 import { BookCrumb } from './_shared'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
@@ -137,38 +138,84 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
   )
 }
 
+type BeatRow = { k: string; v: string; json?: boolean }
+
 function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClose: () => void; bookId: number }) {
-  const [f, setF] = useState<{ title: string; summary: string; beats: { k: string; v: string }[] }>({ title: '', summary: '', beats: [] })
+  const [f, setF] = useState<{ title: string; summary: string; beats: BeatRow[] }>({ title: '', summary: '', beats: [] })
   const [cur, setCur] = useState<OutlineNode | null>(null)
+  const [ask, setAsk] = useState('')
+  const [prop, setProp] = useState<{ title: string; summary: string; instruction: string; change: string; before: { title: string; summary: string } } | null>(null)
+  const storage = useModelRoute('novelos.outline-route')
+  const { start } = useJobs()
+  const job = useActiveJob(node ? `outline-ai:${node.id}` : undefined)
+  const load = (n: OutlineNode) => setF({ title: n.title, summary: n.summary, beats: Object.entries(n.beats ?? {}).map(([k, v]) => (typeof v === 'string' ? { k, v } : { k, v: JSON.stringify(v), json: true })) })
   if (node && node !== cur) {
     setCur(node)
-    setF({ title: node.title, summary: node.summary, beats: Object.entries(node.beats ?? {}).map(([k, v]) => ({ k, v: typeof v === 'string' ? v : JSON.stringify(v) })) })
+    load(node)
+    setProp(null)
   }
   const qc = useQueryClient()
+  // 列表、对象类的节拍按 JSON 还原后再存（以前直接存成字符串，伏笔和出场人物会丢）
+  const beatsOut = () => Object.fromEntries(f.beats.filter((b) => b.k.trim()).map((b) => {
+    if (b.json) { try { return [b.k.trim(), JSON.parse(b.v)] } catch { /* 保留字符串 */ } }
+    return [b.k.trim(), b.v]
+  }))
   const m = useMutation({
-    mutationFn: () => api.updateOutline(node!.id, { title: f.title, summary: f.summary, beats: f.beats.length ? Object.fromEntries(f.beats.filter((b) => b.k.trim()).map((b) => [b.k.trim(), b.v])) : node!.beats }),
+    mutationFn: (o?: { title: string; summary: string; instruction?: string }) => api.updateOutline(node!.id, {
+      title: o?.title ?? f.title, summary: o?.summary ?? f.summary, instruction: o?.instruction,
+      ...(node!.level === 'chapter' ? { beats: f.beats.length ? beatsOut() : node!.beats } : {}),
+    }),
     meta: { errorTitle: '保存失败' },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); toast.success('大纲已保存'); onClose() },
+    onSuccess: (_n, o) => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); toast.success(o?.instruction ? '已采纳 AI 的修改，旧版本可撤回' : '大纲已保存'); setProp(null); setAsk(''); onClose() },
   })
+  const undo = useMutation({
+    mutationFn: () => api.undoOutline(node!.id),
+    meta: { errorTitle: '撤回失败' },
+    onSuccess: (n) => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); setCur(n); load(n); toast.success('已退回上一版') },
+  })
+  const suggest = () => {
+    if (!node) return
+    const instruction = ask.trim()
+    start(api.suggestOutline(node.id, { instruction, route: storage.model }), {
+      key: `outline-ai:${node.id}`, label: `AI 重写${LEVEL[node.level].label}`, silent: true,
+      onSuccess: (j) => { const r = j.result as any; setProp({ ...r.proposal, instruction, change: r.change ?? '', before: { title: f.title, summary: f.summary } }) },
+    })
+  }
   const [confirmDel, setConfirmDel] = useState(false)
   const rm = useMutation({
     mutationFn: () => api.deleteOutline(node!.id),
     meta: { errorTitle: '删除失败' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); qc.invalidateQueries({ queryKey: qk.chapters(bookId) }); toast.success('已删除'); setConfirmDel(false); onClose() },
   })
+  const versions = cur?.versions ?? 0
   return (
-    <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`}
+    <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`} width={620}
       footer={<div className="flex w-full items-center gap-2">
         {node && node.level !== 'book' && <Button variant="ghost" className="text-danger hover:bg-danger-soft" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDel(true)}>删除</Button>}
-        <div className="ml-auto flex gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></div>
+        {versions > 0 && <Tip content={cur?.last_instruction ? `撤回：${cur.last_instruction}` : '撤回上一次修改'}><Button variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={undo.isPending} onClick={() => undo.mutate()}>撤回（{versions}）</Button></Tip>}
+        <div className="ml-auto flex gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate(undefined)}>保存</Button></div>
       </div>}>
       <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
         <DialogContent title={`删除「${node?.title ?? ''}」？`} desc={node?.level === 'chapter' ? '未提交的草稿会一起删除。' : '下面的所有子节点和未提交的草稿会一起删除。'}
           footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rm.isPending} onClick={() => rm.mutate()}>删除</Button></>} />
       </Dialog>
       <div className="space-y-4">
+        {prop ? (
+          <div className="space-y-3 rounded-xl bg-primary-soft/30 p-3 hairline">
+            <div className="text-[13px] font-semibold">AI 改好了，看看再决定{prop.change && <span className="font-normal text-muted-foreground"> · {prop.change}</span>}</div>
+            <CompareRow label="标题" before={prop.before.title} after={prop.title} onChange={(v) => setProp({ ...prop, title: v })} />
+            <CompareRow label="内容概要" before={prop.before.summary} after={prop.summary} onChange={(v) => setProp({ ...prop, summary: v })} multiline />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setProp(null)}>放弃</Button>
+              <Button size="sm" variant="primary" icon={<Check className="h-3.5 w-3.5" />} loading={m.isPending} onClick={() => m.mutate({ title: prop.title, summary: prop.summary, instruction: prop.instruction || 'AI 重写' })}>采纳并保存</Button>
+            </div>
+          </div>
+        ) : node && (
+          <AskBox title={`让 AI 重写这个${LEVEL[node.level].label}的概要`} storage={storage} value={ask} onChange={setAsk} onSubmit={suggest} job={job}
+            placeholder={node.level === 'book' ? '例如：主线别再围着身世转，改成揭开码头旧案' : node.level === 'volume' ? '例如：这一卷的卷末爆点更大，让反派当众翻车' : '例如：节奏快一点，弧末加一场反杀'} />
+        )}
         <Field label="标题"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-        <Field label="内容概要"><Textarea value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} className="min-h-[160px] leading-relaxed" /></Field>
+        <Field label="内容概要" hint={versions > 0 ? `改过 ${versions} 次，可撤回` : undefined}><Textarea value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} className="min-h-[160px] leading-relaxed" /></Field>
         {node?.level === 'chapter' && (
           <div>
             <div className="mb-1.5 flex items-center justify-between"><span className="text-[13px] font-medium">节拍</span><Button size="xs" variant="ghost" icon={<Plus className="h-3 w-3" />} onClick={() => setF({ ...f, beats: [...f.beats, { k: '', v: '' }] })}>添加</Button></div>
@@ -176,7 +223,7 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
               {f.beats.map((b, i) => (
                 <div key={i} className="flex gap-1.5">
                   <Input className="w-[110px] shrink-0" value={b.k} placeholder="如：章尾钩子" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} />
-                  <Input value={b.v} onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
+                  <Input value={b.v} className={cn(b.json && 'font-mono text-xs')} onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
                   <Button size="icon" variant="ghost" onClick={() => setF({ ...f, beats: f.beats.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></Button>
                 </div>
               ))}

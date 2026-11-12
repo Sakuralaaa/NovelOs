@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy,
+  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
 import { Kbd, Skeleton } from '@/components/ui/misc'
 import { Select } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Segmented } from '@/components/ui/tabs'
+import { AskBox, useModelRoute } from '@/components/common/AiAsk'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tip } from '@/components/ui/tooltip'
 import { EmptyState, ErrorState } from '@/components/common/States'
@@ -121,7 +124,10 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const [showBare, setShowBare] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [variantId, setVariantId] = useState<number | null>(null)
-  const [diff, setDiff] = useState<{ title: string; before: string; after: string } | null>(null)
+  const [diff, setDiff] = useState<{ title: string; before: string; after: string; kind?: 'rewrite' } | null>(null)
+  const [rwOpen, setRwOpen] = useState(false)
+  const [rwSel, setRwSel] = useState<{ start: number; end: number; text: string } | null>(null)
+  const [confirmUndo, setConfirmUndo] = useState(false)
 
   const scroller = useRef<HTMLDivElement>(null)
   const editor = useRef<EditorHandle>(null)
@@ -187,8 +193,9 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const reviewJob = useActiveJob(`review:${id}`)
   const humanizeJob = useActiveJob(`humanize:${id}`)
   const thickenJob = useActiveJob(`thicken:${id}`)
-  const busy = !!(reviewJob || humanizeJob || thickenJob)
-  const rewriting = !!(humanizeJob || thickenJob)
+  const rewriteJob = useActiveJob(`rewrite:${id}`)
+  const busy = !!(reviewJob || humanizeJob || thickenJob || rewriteJob)
+  const rewriting = !!(humanizeJob || thickenJob || rewriteJob)
 
   const runRewrite = async (kind: 'humanize' | 'thicken') => {
     if (!(await save())) return
@@ -213,6 +220,43 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     if (!(await save())) return
     start(api.reviewChapter(id), { key: `review:${id}`, label: '审稿', successMsg: '审稿完成', onSuccess: () => setTab('review') })
   }
+
+  const openRewrite = () => {
+    const sel = editor.current?.getSelection()
+    const text = sel && sel.end > sel.start ? latest.current.content.slice(sel.start, sel.end) : ''
+    setRwSel(text.trim() ? { start: sel!.start, end: sel!.end, text } : null)
+    setRwOpen(true)
+  }
+  const runCustomRewrite = async (o: { instruction: string; scope: 'all' | 'selection'; route: string | null; autoReview: boolean }) => {
+    if (!(await save())) return
+    const sel = o.scope === 'selection' ? rwSel : null
+    if (o.scope === 'selection' && (!sel || latest.current.content.slice(sel.start, sel.end) !== sel.text)) { toast.error('选中的文字变了，请重新选择'); return }
+    setRwOpen(false)
+    start(api.rewriteChapter(id, { instruction: o.instruction, route: o.route, scope: o.scope, ...(sel ? { start: sel.start, end: sel.end } : {}) }), {
+      key: `rewrite:${id}`, label: '按要求改写', silent: true,
+      onSuccess: (j) => {
+        const r = j.result as any
+        if (!r?.changed) { toast.info('改写稿和原文一样，没有可采纳的改动'); return }
+        if (latest.current.content !== r.before) { toast.error('改写期间正文被改过，为免覆盖已丢弃这次改写稿，请重试'); return }
+        autoReviewRef.current = o.autoReview
+        setDiff({ title: `按要求改写${o.scope === 'selection' ? '（选中的文字）' : ''} · 逐段对比，确定后才写入`, before: r.before, after: r.after, kind: 'rewrite' })
+      },
+    })
+  }
+  const autoReviewRef = useRef(true)
+  const applyRewrite = useMutation({
+    mutationFn: (c: string) => api.applyRewrite(id, { content: c, label: '按要求改写前' }),
+    meta: { errorTitle: '采纳改写失败' },
+  })
+  const undoMut = useMutation({
+    mutationFn: () => api.undoChapter(id),
+    meta: { errorTitle: '撤回失败' },
+    onSuccess: (c) => {
+      qc.setQueryData(qk.chapter(id), c); qc.invalidateQueries({ queryKey: qk.chapters(bookId) })
+      dirty.current = false; setContent(c.content ?? ''); setTitle(c.title); setSaveState('saved'); setConfirmUndo(false)
+      toast.success('已撤回到上一版正文')
+    },
+  })
 
   const applyDiff = useMutation({
     mutationFn: (c: string) => api.saveChapter(id, { title: latest.current.title, content: c }),
@@ -300,7 +344,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     </Tabs>
   )
 
-  const runningJob = thickenJob ?? humanizeJob ?? reviewJob
+  const runningJob = rewriteJob ?? thickenJob ?? humanizeJob ?? reviewJob
 
   return (
     <div className="flex h-full min-h-0">
@@ -319,6 +363,13 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <Button size="sm" variant="ghost" loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onClick={runReview}><span className="hidden sm:inline">审稿</span></Button>
             <Button size="sm" variant="ghost" loading={!!humanizeJob} disabled={busy || hasVariants} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={() => runRewrite('humanize')}><span className="hidden sm:inline">人味修整</span></Button>
             <Button size="sm" variant="ghost" loading={!!thickenJob} disabled={busy || hasVariants} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => runRewrite('thicken')}><span className="hidden sm:inline">描写增厚</span></Button>
+            <Tip content="写要求让 AI 改写全章或选中的文字，对比后再决定采纳"><Button size="sm" variant="ghost" loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onClick={openRewrite}><span className="hidden sm:inline">按要求改写</span></Button></Tip>
+            {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
+            <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
+              <DialogContent title="撤回到上一版正文？" desc={`恢复「${ch.last_history_label || '上一版'}」时的正文，之后的修改会丢掉。`}
+                footer={<><Button variant="ghost" onClick={() => setConfirmUndo(false)}>取消</Button><Button variant="primary" loading={undoMut.isPending} onClick={() => undoMut.mutate()}>撤回</Button></>} />
+            </Dialog>
+            <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} />
             {ch.status !== 'committed' && <Tip content="删除草稿"><Button size="icon-sm" variant="ghost" disabled={busy} onClick={() => setConfirmDel(true)} aria-label="删除草稿" className="text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button></Tip>}
             <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
               <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
@@ -338,8 +389,19 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
 
         {diff ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <DiffView title={diff.title} before={diff.before} after={diff.after} applying={applyDiff.isPending} onClose={() => setDiff(null)}
+            <DiffView title={diff.title} before={diff.before} after={diff.after} applying={applyDiff.isPending || applyRewrite.isPending}
+              onClose={() => { if (diff.kind === 'rewrite') toast.info('已丢弃改写稿，正文没有变'); setDiff(null) }}
               onApply={(c, s) => {
+                if (diff.kind === 'rewrite') {
+                  if (s.accepted === 0) { setDiff(null); toast.info('一处都没接受，正文没有变'); return }
+                  applyRewrite.mutate(c, { onSuccess: (res) => {
+                    qc.setQueryData(qk.chapter(id), res); qc.invalidateQueries({ queryKey: qk.chapters(bookId) })
+                    dirty.current = false; setContent(res.content ?? c); setSaveState('saved'); setDiff(null)
+                    toast.success(`已采纳 ${s.accepted} 处改写`, { description: '旧正文已保留，可点「撤回」恢复' })
+                    if (autoReviewRef.current) start(api.reviewChapter(id), { key: `review:${id}`, label: '审稿', successMsg: '改写后审稿完成', onSuccess: () => setTab('review') })
+                  } })
+                  return
+                }
                 if (s.reverted === 0) { setDiff(null); toast.success(`已接受全部 ${s.accepted} 处修改`); return }
                 applyDiff.mutate(c, { onSuccess: (res) => {
                   qc.setQueryData(qk.chapter(id), (old: Chapter | undefined) => ({ ...(old ?? res), ...res, content: c }))
@@ -408,6 +470,33 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
       {panelOpen && <aside className="hidden w-[336px] shrink-0 border-l bg-surface/60 xl:block">{panel}</aside>}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="审稿与人味" width={400}><div className="-mx-6 -my-5 h-[calc(100dvh-80px)]">{panel}</div></Sheet>
     </div>
+  )
+}
+
+function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit }: {
+  open: boolean; onOpenChange: (o: boolean) => void; selection: { start: number; end: number; text: string } | null; committed: boolean
+  onSubmit: (o: { instruction: string; scope: 'all' | 'selection'; route: string | null; autoReview: boolean }) => void
+}) {
+  const [ask, setAsk] = useState('')
+  const [scope, setScope] = useState<'all' | 'selection'>('all')
+  const [autoReview, setAutoReview] = useState(() => localStorage.getItem('novelos-rewrite-review') !== '0')
+  const storage = useModelRoute('novelos.rewrite-route')
+  useEffect(() => { if (open) setScope(selection ? 'selection' : 'all') }, [open, selection])
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent wide title="按要求改写" desc="AI 只生成改写稿，逐段对比后你决定接受哪些；采纳后旧正文保留，可撤回。">
+        <div className="space-y-3">
+          <Segmented block value={scope} onChange={(v) => (v === 'selection' && !selection ? toast.info('先在正文里选中要改的文字，再点「按要求改写」') : setScope(v))}
+            options={[{ value: 'all', label: '全章' }, { value: 'selection', label: selection ? `选中的文字（${countWords(selection.text)} 字）` : '选中的文字（未选中）' }]} />
+          {scope === 'selection' && selection && <p className="line-clamp-3 rounded-md bg-subtle px-3 py-2 font-serif text-[13px] leading-relaxed text-foreground/75">{selection.text}</p>}
+          {committed && <p className="rounded-md bg-warning-soft px-3 py-2 text-[12.5px] text-warning">这一章已提交入账：改写只改正文，不会改人物状态和伏笔底账。情节有大改时记得核对。</p>}
+          <AskBox title="改写要求" storage={storage} emptyLabel="默认（正文模型）" value={ask} onChange={setAsk} submitLabel="生成改写稿"
+            placeholder="例如：节奏加快，删掉中间那段回忆；对话多一点；把打斗写得更短更狠"
+            onSubmit={() => { onSubmit({ instruction: ask.trim(), scope, route: storage.model, autoReview }); setAsk('') }}
+            extra={<label className="flex cursor-pointer items-center justify-between gap-3 text-[12.5px] text-muted-foreground"><span>采纳后自动重新审稿（人味检查会自动跑）</span><Switch checked={autoReview} onCheckedChange={(v) => { setAutoReview(v); localStorage.setItem('novelos-rewrite-review', v ? '1' : '0') }} /></label>} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

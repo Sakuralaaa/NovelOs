@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef } fro
 import { cn } from '@/lib/utils'
 
 export interface Range { start: number; end: number; kind: 'focus' | 'bare' | 'summary' }
-export interface EditorHandle { reveal: (start: number, end: number) => void; focus: () => void }
+export interface EditorHandle { reveal: (start: number, end: number) => void; focus: () => void; getSelection: () => { start: number; end: number } }
 
 const MARK: Record<Range['kind'], string> = {
   focus: 'rounded-sm bg-warning/40 animate-flash',
@@ -39,6 +39,7 @@ export const HighlightEditor = forwardRef<EditorHandle, {
 
   useImperativeHandle(ref, () => ({
     focus: () => ta.current?.focus(),
+    getSelection: () => ({ start: ta.current?.selectionStart ?? 0, end: ta.current?.selectionEnd ?? 0 }),
     reveal: (start, end) => {
       const el = ta.current, sc = scroller.current
       if (!el || !sc) return

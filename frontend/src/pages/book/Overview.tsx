@@ -3,12 +3,16 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
-  ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, Waypoints, X,
+  AlertTriangle, ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, RotateCcw, Waypoints, Wand2, X,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
+import { TagInput } from '@/components/ui/tag-input'
+import { Badge } from '@/components/ui/badge'
+import { AskBox, CompareRow, TropeAlert, useModelRoute } from '@/components/common/AiAsk'
+import { ConflictReview } from '@/components/common/ConflictReview'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Progress, Skeleton, Stat } from '@/components/ui/misc'
 import { BookCover, StageBadge } from '@/components/common/BookBits'
@@ -20,7 +24,7 @@ import { useBook, useJobsList } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { Book, BookStatus } from '@/lib/types'
+import type { Book, BookInfo, BookRevision, BookStatus, Impact, SyncResult } from '@/lib/types'
 import { STAGES, cn, fmtNum, fmtTime, jobLabel, stageIndex } from '@/lib/utils'
 
 const ICONS = [Lightbulb, Layers, ListTree, PenLine, Package, BookOpenCheck]
@@ -198,26 +202,251 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
 }
 
 function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [f, setF] = useState({ title: book.title, tagline: book.tagline, target_words: book.target_words, chapter_words: book.chapter_words })
-  useEffect(() => { if (open) setF({ title: book.title, tagline: book.tagline, target_words: book.target_words, chapter_words: book.chapter_words }) }, [open, book])
+  const init = () => ({ title: book.title, tagline: book.tagline, premise: book.premise ?? '', target_words: book.target_words, chapter_words: book.chapter_words,
+    tropes: (book.banned_tropes ?? []).map((t) => t.name) })
+  const [f, setF] = useState(init)
+  const [aiOpen, setAiOpen] = useState(false)
+  useEffect(() => { if (open) setF(init()) }, [open, book]) // eslint-disable-line react-hooks/exhaustive-deps
   const qc = useQueryClient()
+  const done = (b: Book, msg: string) => { qc.setQueryData(qk.book(book.id), b); qc.invalidateQueries({ queryKey: ['books'] }); toast.success(msg) }
   const m = useMutation({
-    mutationFn: () => api.updateBook(book.id, f),
+    mutationFn: () => api.updateBook(book.id, {
+      title: f.title, tagline: f.tagline, premise: f.premise, target_words: f.target_words, chapter_words: f.chapter_words,
+      banned_tropes: f.tropes.map((t) => (book.banned_tropes ?? []).find((x) => x.name === t) ?? { name: t, keywords: [t] }),
+    }),
     meta: { errorTitle: '保存失败' },
-    onSuccess: (b) => { qc.setQueryData(qk.book(book.id), b); qc.invalidateQueries({ queryKey: ['books'] }); toast.success('已保存'); onOpenChange(false) },
+    onSuccess: (b) => { done(b, '已保存'); onOpenChange(false) },
+  })
+  const undo = useMutation({
+    mutationFn: () => api.undoBook(book.id), meta: { errorTitle: '撤回失败' },
+    onSuccess: (b) => { done(b, '已退回上一版'); setF({ ...f, title: b.title, tagline: b.tagline, premise: b.premise ?? '' }) },
   })
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="编辑作品信息" footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></>}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent wide title="编辑作品信息" footer={<>
+          {!!book.versions && <Button variant="ghost" className="mr-auto" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={undo.isPending} onClick={() => undo.mutate()} title={book.last_instruction ? `撤回：${book.last_instruction}` : undefined}>撤回上一版</Button>}
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button>
+        </>}>
+          <div className="space-y-4">
+            <button type="button" onClick={() => { onOpenChange(false); setAiOpen(true) }}
+              className="flex w-full items-center gap-3 rounded-xl bg-primary-soft/50 px-3.5 py-3 text-left transition hairline hover:bg-primary-soft">
+              <Wand2 className="h-5 w-5 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1"><span className="block text-[13.5px] font-semibold">让 AI 改书名和简介</span><span className="block text-xs text-muted-foreground">写要求，预览对比后再采纳；会告诉你设定、大纲、正文里哪些地方受影响，可一键同步。</span></span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </button>
+            <Field label="书名"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
+            <Field label="一句话简介"><Textarea value={f.tagline} onChange={(e) => setF({ ...f, tagline: e.target.value })} className="min-h-[64px]" /></Field>
+            <Field label="核心设定" hint="生成设定库、大纲时都会读它"><Textarea value={f.premise} onChange={(e) => setF({ ...f, premise: e.target.value })} className="min-h-[110px]" /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="目标总字数"><Input type="number" step={10000} value={f.target_words} onChange={(e) => setF({ ...f, target_words: Number(e.target.value) })} /></Field>
+              <Field label="每章字数"><Input type="number" step={100} value={f.chapter_words} onChange={(e) => setF({ ...f, chapter_words: Number(e.target.value) })} /></Field>
+            </div>
+            <Field label="本书额外禁用的套路" hint="全局列表在「设置」里改"><TagInput value={f.tropes} onChange={(v) => setF({ ...f, tropes: v })} placeholder="例如：赘婿、系统签到（回车添加，生成时避开，命中会标黄）" /></Field>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <BookAiSheet book={book} open={aiOpen} onOpenChange={setAiOpen} />
+    </>
+  )
+}
+
+const LEVEL_LABEL: Record<string, string> = { book: '总纲', volume: '卷', arc: '弧', chapter: '章细纲' }
+
+/** 作品信息让 AI 改：要求 → 对比预览 → 采纳（可撤回）→ 下游影响 → 跳过或交给 AI 同步到设定/大纲 */
+function BookAiSheet({ book, open, onOpenChange }: { book: Book; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const qc = useQueryClient()
+  const { start } = useJobs()
+  const storage = useModelRoute('novelos.book-route')
+  const [ask, setAsk] = useState('')
+  const [rev, setRev] = useState<BookRevision | null>(null)
+  const [draft, setDraft] = useState<BookInfo | null>(null)
+  const [step, setStep] = useState<'ask' | 'preview' | 'impact' | 'sync'>('ask')
+  const [impact, setImpact] = useState<Impact | null>(null)
+  const [targets, setTargets] = useState({ bible: true, outline: true })
+  const [sync, setSync] = useState<SyncResult | null>(null)
+  const [nodePick, setNodePick] = useState<Set<number>>(new Set())
+  const [bibleDone, setBibleDone] = useState(false)
+  const job = useActiveJob(`book-revise:${book.id}`)
+  const syncJob = useActiveJob(`book-sync:${book.id}`)
+  const reset = () => { setStep('ask'); setRev(null); setDraft(null); setImpact(null); setSync(null); setBibleDone(false) }
+
+  const go = () => start(api.reviseBook(book.id, { instruction: ask.trim(), route: storage.model }), {
+    key: `book-revise:${book.id}`, label: 'AI 改作品信息', silent: true,
+    onSuccess: (j) => { const r = j.result as BookRevision; setRev(r); setDraft({ ...r.proposal }); setStep('preview') },
+  })
+  const adopt = useMutation({
+    mutationFn: () => api.applyBookInfo(book.id, { ...draft!, instruction: rev!.instruction }),
+    meta: { errorTitle: '采纳失败' },
+    onSuccess: async (b) => {
+      qc.setQueryData(qk.book(book.id), b); qc.invalidateQueries({ queryKey: ['books'] })
+      toast.success('作品信息已更新', { description: '旧版本已保留，可在「编辑信息」里撤回' })
+      const imp = rev!.terms.length ? await api.bookImpact(book.id, rev!.terms).catch(() => rev!.impact) : rev!.impact
+      setImpact(imp); setStep('impact')
+    },
+  })
+  const undo = useMutation({
+    mutationFn: () => api.undoBook(book.id), meta: { errorTitle: '撤回失败' },
+    onSuccess: (b) => { qc.setQueryData(qk.book(book.id), b); toast.success('已撤回这次修改'); reset() },
+  })
+  const runSync = () => start(api.syncBook(book.id, {
+    instruction: rev!.instruction, terms: impact!.terms, replacements: rev!.replacements, route: storage.model,
+    targets: (Object.keys(targets) as ('bible' | 'outline')[]).filter((k) => targets[k]),
+  }), {
+    key: `book-sync:${book.id}`, label: '同步到设定/大纲', silent: true,
+    onSuccess: (j) => { const r = j.result as SyncResult; setSync(r); setNodePick(new Set(r.outline.items.map((x) => x.node_id))); setStep('sync') },
+  })
+  const applyNodes = useMutation({
+    mutationFn: () => api.applyOutline(book.id, { instruction: rev!.instruction, items: sync!.outline.items.filter((x) => nodePick.has(x.node_id)).map((x) => ({ node_id: x.node_id, ...x.new })) }),
+    meta: { errorTitle: '采纳失败' },
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: qk.outline(book.id) }); toast.success(`大纲已更新 ${r.updated} 处`, { description: '每个节点的旧版本都保留了，可在大纲里撤回' }); setSync((s) => s && { ...s, outline: { items: [] } }) },
+  })
+
+  const hasImpact = !!impact && impact.total > 0
+  return (
+    <Sheet open={open} onOpenChange={(o) => { onOpenChange(o); if (!o && step !== 'ask' && step !== 'preview') reset() }} width={820} title="让 AI 改作品信息"
+      desc={step === 'ask' ? '写下你想怎么改，AI 给出新的书名、一句话简介和核心设定，你对比后再决定。' : step === 'preview' ? '还没有写入：可以再手改，满意了点「采纳」。' : step === 'impact' ? '已采纳。下面是还写着旧说法的地方。' : '同步建议：逐条确认后才写入。'}>
+      {step === 'ask' && (
+        <AskBox title="修改要求" storage={storage} value={ask} onChange={setAsk} onSubmit={go} job={job} submitLabel="生成修改"
+          placeholder="例如：不要强调拳法，不要非叫『碎星神通』；简介突出主角当码头账房的反差" />
+      )}
+
+      {step === 'preview' && rev && draft && (
         <div className="space-y-4">
-          <Field label="书名"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-          <Field label="一句话简介"><Textarea value={f.tagline} onChange={(e) => setF({ ...f, tagline: e.target.value })} className="min-h-[64px]" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="目标总字数"><Input type="number" step={10000} value={f.target_words} onChange={(e) => setF({ ...f, target_words: Number(e.target.value) })} /></Field>
-            <Field label="每章字数"><Input type="number" step={100} value={f.chapter_words} onChange={(e) => setF({ ...f, chapter_words: Number(e.target.value) })} /></Field>
+          {rev.change && <p className="rounded-lg bg-subtle px-3 py-2 text-[13px]">{rev.change}</p>}
+          <CompareRow label="书名" before={rev.current.title} after={draft.title} onChange={(v) => setDraft({ ...draft, title: v })} />
+          <CompareRow label="一句话简介" before={rev.current.tagline} after={draft.tagline} onChange={(v) => setDraft({ ...draft, tagline: v })} multiline />
+          <CompareRow label="核心设定" before={rev.current.premise} after={draft.premise} onChange={(v) => setDraft({ ...draft, premise: v })} multiline />
+          <TropeAlert hits={rev.trope_hits} />
+          {rev.impact.total > 0 && (
+            <div className="flex gap-2 rounded-lg bg-warning-soft px-3 py-2.5 text-[12.5px] leading-relaxed text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>改掉的说法（{rev.terms.map((t) => `「${t}」`).join('')}）在 {rev.impact.cards.length} 张设定卡、{rev.impact.outline.length} 个大纲节点、{rev.impact.chapters.length} 章正文里还在用。采纳后可以选择跳过，或者交给 AI 按同一要求同步设定和大纲。</span>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setStep('ask')}>重新提要求</Button>
+            <Button variant="primary" icon={<Check className="h-4 w-4" />} loading={adopt.isPending} onClick={() => adopt.mutate()}>采纳</Button>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+
+      {step === 'impact' && impact && (
+        <div className="space-y-4">
+          {!hasImpact ? (
+            <p className="rounded-lg bg-success-soft px-3 py-3 text-[13px] text-success">设定库、大纲和正文里都没有用到被改掉的说法，不需要同步。</p>
+          ) : <ImpactList impact={impact} bookId={book.id} />}
+          {hasImpact && (impact.cards.length > 0 || impact.outline.length > 0) && (
+            <div className="space-y-2.5 rounded-xl bg-primary-soft/40 p-3 hairline">
+              <div className="text-[13px] font-semibold">交给 AI 按同一要求同步</div>
+              <div className="flex flex-wrap gap-4 text-[13px]">
+                <label className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4 accent-primary" checked={targets.bible} disabled={!impact.cards.length} onChange={() => setTargets({ ...targets, bible: !targets.bible })} />设定库（{impact.cards.length} 张，走冲突审阅）</label>
+                <label className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4 accent-primary" checked={targets.outline} disabled={!impact.outline.length} onChange={() => setTargets({ ...targets, outline: !targets.outline })} />大纲（{impact.outline.length} 个节点，逐条勾选）</label>
+              </div>
+              {impact.chapters.length > 0 && <p className="text-xs text-muted-foreground">已写的正文不会自动改，可以到对应章节用「按要求改写」。</p>}
+              {syncJob && <JobInline job={syncJob} />}
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={undo.isPending} onClick={() => undo.mutate()}>撤回这次修改</Button>
+            <Button variant={hasImpact ? 'ghost' : 'primary'} onClick={() => { onOpenChange(false); reset() }}>{hasImpact ? '跳过，以后再说' : '完成'}</Button>
+            {hasImpact && (impact.cards.length > 0 || impact.outline.length > 0) && (
+              <Button variant="primary" icon={<Wand2 className="h-4 w-4" />} loading={!!syncJob} disabled={!(targets.bible && impact.cards.length) && !(targets.outline && impact.outline.length)} onClick={runSync}>交给 AI 同步</Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {step === 'sync' && sync && (
+        <div className="space-y-8">
+          {sync.bible && !bibleDone && sync.bible.items.length > 0 && (
+            <section>
+              <h3 className="mb-3 text-[15px] font-semibold">设定库</h3>
+              <ConflictReview bookId={book.id} proposal={sync.bible} applyMode="sync" onDone={() => setBibleDone(true)} onCancel={() => setBibleDone(true)} />
+            </section>
+          )}
+          {sync.outline.items.length > 0 && (
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-[15px] font-semibold">大纲 <span className="text-xs font-normal text-muted-foreground">勾选要采纳的</span></h3>
+                <Button size="xs" variant="ghost" onClick={() => setNodePick(nodePick.size === sync.outline.items.length ? new Set() : new Set(sync.outline.items.map((x) => x.node_id)))}>{nodePick.size === sync.outline.items.length ? '全不选' : '全选'}</Button>
+              </div>
+              <div className="space-y-2.5">
+                {sync.outline.items.map((x) => (
+                  <label key={x.node_id} className={cn('flex cursor-pointer gap-2.5 rounded-xl bg-surface p-3 shadow-card hairline', !nodePick.has(x.node_id) && 'opacity-55')}>
+                    <input type="checkbox" className="mt-1 h-4 w-4 accent-primary" checked={nodePick.has(x.node_id)} onChange={() => setNodePick((s) => { const n = new Set(s); n.has(x.node_id) ? n.delete(x.node_id) : n.add(x.node_id); return n })} />
+                    <div className="min-w-0 flex-1 space-y-1.5 text-[13px]">
+                      <div className="flex items-center gap-1.5"><Badge tone="outline" className="h-5 text-[11px]">{LEVEL_LABEL[x.level] ?? x.level}</Badge><span className="font-medium">{x.new.title}</span>{x.beats_changed && <span className="text-[11px] text-muted-foreground">（细纲节拍里的旧名也一起换）</span>}</div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <p className="rounded-md bg-danger-soft/50 px-2.5 py-1.5 text-foreground/60">{x.old.summary || '（空）'}</p>
+                        <p className="rounded-md bg-success-soft/60 px-2.5 py-1.5">{x.new.summary || '（空）'}</p>
+                      </div>
+                      {x.reason && <p className="text-xs text-muted-foreground">{x.reason}</p>}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 flex justify-end"><Button variant="primary" loading={applyNodes.isPending} disabled={!nodePick.size} onClick={() => applyNodes.mutate()}>采纳 {nodePick.size} 处大纲修改</Button></div>
+            </section>
+          )}
+          {sync.chapters.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-[15px] font-semibold">正文 <span className="text-xs font-normal text-muted-foreground">不会自动改，点进去用「按要求改写」</span></h3>
+              <div className="space-y-1.5">
+                {sync.chapters.map((c) => (
+                  <Link key={c.id} to={`/books/${book.id}/chapters/${c.id}`} onClick={() => onOpenChange(false)} className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-[13px] hairline hover:text-primary">
+                    <span className="num shrink-0 text-muted-foreground">第{c.number}章</span><span className="min-w-0 flex-1 truncate">{c.title}</span><span className="shrink-0 text-xs text-muted-foreground">出现 {c.count} 次</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+          {(!sync.bible || bibleDone || !sync.bible.items.length) && !sync.outline.items.length && (
+            <div className="flex items-center justify-between rounded-lg bg-success-soft px-3 py-3 text-[13px] text-success">
+              <span>同步处理完了{sync.chapters.length ? '，正文按需逐章改写即可' : ''}。</span>
+              <Button size="sm" variant="ghost" onClick={() => { onOpenChange(false); reset() }}>完成</Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Sheet>
+  )
+}
+
+function ImpactList({ impact, bookId }: { impact: Impact; bookId: number }) {
+  const chip = (ts: string[]) => ts.map((t) => <span key={t} className="rounded bg-warning-soft px-1 text-[11px] text-warning">{t}</span>)
+  return (
+    <div className="space-y-4 text-[13px]">
+      {impact.cards.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-semibold">设定卡（{impact.cards.length}）</div>
+          <div className="space-y-1.5">{impact.cards.map((c) => (
+            <Link key={c.id} to={`/books/${bookId}/bible`} className="block rounded-lg bg-surface px-3 py-2 hairline hover:text-primary">
+              <div className="flex items-center gap-1.5"><span className="font-medium">{c.name}</span>{chip(c.terms)}</div>
+              <p className="truncate text-xs text-muted-foreground">{c.snippet}</p>
+            </Link>))}</div>
+        </div>
+      )}
+      {impact.outline.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-semibold">大纲（{impact.outline.length}）</div>
+          <div className="space-y-1.5">{impact.outline.map((n) => (
+            <Link key={n.id} to={`/books/${bookId}/outline`} className="block rounded-lg bg-surface px-3 py-2 hairline hover:text-primary">
+              <div className="flex items-center gap-1.5"><Badge tone="outline" className="h-5 text-[11px]">{LEVEL_LABEL[n.level] ?? n.level}</Badge><span className="truncate font-medium">{n.title}</span>{chip(n.terms)}</div>
+              <p className="truncate text-xs text-muted-foreground">{n.snippet}</p>
+            </Link>))}</div>
+        </div>
+      )}
+      {impact.chapters.length > 0 && (
+        <div>
+          <div className="mb-1.5 font-semibold">已写章节（{impact.chapters.length}）</div>
+          <div className="space-y-1.5">{impact.chapters.map((c) => (
+            <Link key={c.id} to={`/books/${bookId}/chapters/${c.id}`} className="block rounded-lg bg-surface px-3 py-2 hairline hover:text-primary">
+              <div className="flex items-center gap-1.5"><span className="num text-muted-foreground">第{c.number}章</span><span className="truncate font-medium">{c.title}</span>{chip(c.terms)}<span className="ml-auto shrink-0 text-xs text-muted-foreground">{c.count} 处</span></div>
+              <p className="truncate text-xs text-muted-foreground">{c.snippet}</p>
+            </Link>))}</div>
+        </div>
+      )}
+    </div>
   )
 }

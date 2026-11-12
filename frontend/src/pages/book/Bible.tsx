@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Eye, Globe2, Gem, MapPin, MessageSquareQuote, Plus, Shield, Sparkles, Trash2, User, Wand2, X, Zap } from '@/components/icons'
+import { AlertTriangle, Eye, Globe2, Gem, MapPin, MessageSquareQuote, Plus, RotateCcw, Shield, Sparkles, Trash2, User, Wand2, X, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,12 +12,15 @@ import { useChannels } from '@/hooks/queries'
 import { TagInput } from '@/components/ui/tag-input'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
+import { AskBox, TropeAlert, useModelRoute } from '@/components/common/AiAsk'
+import { ConflictReview } from '@/components/common/ConflictReview'
+import { Segmented } from '@/components/ui/tabs'
 import { GridSkeleton } from '../_skeleton'
 import { BookCrumb } from './_shared'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { Card as CardT, CardType } from '@/lib/types'
+import type { BibleProposal, Card as CardT, CardType } from '@/lib/types'
 import { CARD_TYPES, cn, fmtTime } from '@/lib/utils'
 
 const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, cheat: Sparkles, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
@@ -42,6 +45,9 @@ export default function Bible() {
   const charNames = list.filter((c) => c.type === 'character').map((c) => c.name)
 
   const gen = () => start(api.generateBible(id), { key: `bible:${id}`, label: '生成设定', successMsg: '设定库已生成，挑几张看看吧' })
+  const [aiOpen, setAiOpen] = useState(false)
+  const [histOpen, setHistOpen] = useState(false)
+  const tropeCount = list.filter((c) => c.trope_hits?.length).length
 
   return (
     <div className="page">
@@ -49,9 +55,15 @@ export default function Bible() {
       <PageHeader className="mt-3" title="设定库"
         actions={<>
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ type: filter === 'all' ? 'character' : filter, name: '', summary: '', data: {}, known_by: [] })}>新建设定</Button>
-          <Button variant="primary" loading={!!job} icon={<Wand2 className="h-4 w-4" />} onClick={gen}>AI 生成设定</Button>
+          <Button variant="ghost" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setHistOpen(true)}>历史版本</Button>
+          <Button variant="primary" loading={!!job} icon={<Wand2 className="h-4 w-4" />} onClick={() => (list.length ? setAiOpen(true) : gen())}>AI 生成设定</Button>
         </>} />
       {job && <JobInline job={job} className="mb-5" />}
+      {tropeCount > 0 && (
+        <div className="mb-5 flex items-center gap-2 rounded-lg bg-warning-soft px-3.5 py-2.5 text-[13px] text-warning">
+          <AlertTriangle className="h-4 w-4 shrink-0" />有 {tropeCount} 张设定命中禁用套路（卡片上标黄），点开卡片可以一键让 AI 换掉。
+        </div>
+      )}
 
       <div className="mb-5 flex flex-wrap items-center gap-1.5">
         <TypeChip active={filter === 'all'} onClick={() => setFilter('all')}>全部 <span className="opacity-60">{list.length}</span></TypeChip>
@@ -88,7 +100,73 @@ export default function Bible() {
       )}
 
       <CardEditor bookId={id} card={editing} onClose={() => setEditing(null)} charNames={charNames} />
+      <BibleAiSheet bookId={id} open={aiOpen} onOpenChange={setAiOpen} />
+      <SnapshotSheet bookId={id} open={histOpen} onOpenChange={setHistOpen} />
     </div>
+  )
+}
+
+const MODES: { value: 'rewrite' | 'add' | 'optimize'; label: string; desc: string; ph: string }[] = [
+  { value: 'optimize', label: '优化', desc: '在现有设定上改进，可以改写已有的卡，也会补新卡。', ph: '例如：反派动机写得更具体；金手指的边界改成每天三次' },
+  { value: 'add', label: '纯增加', desc: '只新增，不动旧卡。', ph: '例如：补两个第二卷会出场的对手势力和一个中立情报贩子' },
+  { value: 'rewrite', label: '完全重写', desc: '基于书的信息和你的要求重新生成整套设定，替换前先预览，旧版本可回滚。', ph: '例如：世界观换成近未来都市，主角不要是世家子弟' },
+]
+
+/** AI 生成设定：三种模式 → 预览 → 冲突审阅 → 采纳（自动快照，可回滚） */
+function BibleAiSheet({ bookId, open, onOpenChange }: { bookId: number; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const [mode, setMode] = useState<'rewrite' | 'add' | 'optimize'>('optimize')
+  const [ask, setAsk] = useState('')
+  const [proposal, setProposal] = useState<BibleProposal | null>(null)
+  const storage = useModelRoute('novelos.bible-route')
+  const { start } = useJobs()
+  const job = useActiveJob(`bible-propose:${bookId}`)
+  const m = MODES.find((x) => x.value === mode)!
+  const go = () => start(api.proposeBible(bookId, { mode, instruction: ask.trim(), route: storage.model }), {
+    key: `bible-propose:${bookId}`, label: `AI ${m.label}设定`, silent: true,
+    onSuccess: (j) => { setProposal(j.result as BibleProposal); toast.success('生成好了，看看再决定采纳哪些') },
+  })
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} width={780} title="AI 生成设定" desc="什么都不会直接写入设定库：先预览，有冲突的逐条决定，采纳前自动存快照。">
+      {proposal ? (
+        <ConflictReview bookId={bookId} proposal={proposal} onCancel={() => setProposal(null)} onDone={() => { setProposal(null); setAsk(''); onOpenChange(false) }} />
+      ) : (
+        <div className="space-y-4">
+          <Segmented block value={mode} onChange={setMode} options={MODES.map((x) => ({ value: x.value, label: x.label }))} />
+          <p className="text-[13px] text-muted-foreground">{m.desc}</p>
+          <AskBox title="写要求（可留空）" placeholder={m.ph} value={ask} onChange={setAsk} onSubmit={go} job={job} storage={storage} allowEmpty submitLabel={`AI ${m.label}`} />
+        </div>
+      )}
+    </Sheet>
+  )
+}
+
+function SnapshotSheet({ bookId, open, onOpenChange }: { bookId: number; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: qk.bibleSnapshots(bookId), queryFn: () => api.bibleSnapshots(bookId), enabled: open })
+  const [confirm, setConfirm] = useState<number | null>(null)
+  const m = useMutation({
+    mutationFn: (sid: number) => api.restoreBible(bookId, sid),
+    meta: { errorTitle: '回滚失败' },
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: qk.cards(bookId) }); setConfirm(null); toast.success(`已回滚，恢复 ${r.restored} 张设定`, { description: '回滚前的样子也存了一份快照' }) },
+  })
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} title="设定库历史版本" desc="每次 AI 批量改设定、重新生成、回滚之前都会自动存一份快照。">
+      {!q.data?.length ? <p className="py-10 text-center text-sm text-muted-foreground">{q.isLoading ? '加载中…' : '还没有快照。AI 批量改设定后这里会出现可回滚的旧版本。'}</p> : (
+        <div className="space-y-2">
+          {q.data.map((s) => (
+            <div key={s.id} className="rounded-lg bg-surface p-3 hairline">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0"><div className="truncate text-[13.5px] font-medium">{s.note || '快照'}</div><div className="text-xs text-muted-foreground">{fmtTime(s.created_at)} · {s.count} 张卡</div></div>
+                {confirm === s.id
+                  ? <Button size="sm" variant="danger" loading={m.isPending} onClick={() => m.mutate(s.id)}>确认回滚</Button>
+                  : <Button size="sm" variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => setConfirm(s.id)}>回滚到这里</Button>}
+              </div>
+              {s.names.length > 0 && <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">{s.names.join('、')}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Sheet>
   )
 }
 
@@ -105,6 +183,7 @@ function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
       <div className="flex items-center gap-2.5">
         <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br to-transparent', TYPE_COLOR[c.type])}><Icon className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1 truncate font-semibold group-hover:text-primary">{c.name}</div>
+        {!!c.trope_hits?.length && <span title={`命中禁用套路：${c.trope_hits.map((h) => h.name).join('、')}`} className="shrink-0 rounded bg-warning-soft px-1.5 py-0.5 text-[11px] text-warning">套路</span>}
       </div>
       <p className="mt-2.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{c.summary || '暂无简介'}</p>
       {c.type === 'character' && (c.data?.voice || cp.length > 0) && (
@@ -129,6 +208,9 @@ function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
     </motion.button>
   )
 }
+
+const tropeReplaceInstruction = (hits: { name: string; hits: string[] }[]) =>
+  `去掉这些俗套：${hits.map((h) => h.name).join('、')}（命中：${hits.flatMap((h) => h.hits).join('、')}）。换成更新鲜的来历、动机或金手指来源，其余没提到的内容尽量保留，不要再出现上面这些词。`
 
 /** data 约定键用英文存（写作上下文按键取值），界面上一律显示中文 */
 const KEY_LABEL: Record<string, string> = {
@@ -247,6 +329,7 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
         <Button variant="primary" disabled={!form.name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存</Button>
       </>}>
       <div className="space-y-5">
+        {!isNew && <TropeAlert hits={(card as CardT | null)?.trope_hits} busy={busy === '__card'} onReplace={() => suggest(null, tropeReplaceInstruction((card as CardT).trope_hits ?? []))} />}
         <div className="space-y-2 rounded-xl bg-primary-soft/40 p-3 hairline">
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-[13px] font-semibold"><Wand2 className="h-4 w-4 text-primary" />{isNew ? '让 AI 写这张' : '让 AI 改这张'}</span>

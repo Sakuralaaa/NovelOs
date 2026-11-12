@@ -96,6 +96,14 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   'chapter.thicken': '描写增厚',
   style_extract: '提炼文风',
   'style.extract': '提炼文风',
+  book_revise: 'AI 改作品信息',
+  book_sync: '同步到设定/大纲',
+  bible_propose: 'AI 改设定库',
+  card_suggest: 'AI 改设定',
+  outline_node: 'AI 重写大纲',
+  chapter_rewrite: '按要求改写',
+  foreshadow_plan: 'AI 规划伏笔',
+  cover_prompt: '改封面提示词',
 }
 export const jobLabel = (kind: string) => JOB_KIND_LABEL[kind] ?? kind
 

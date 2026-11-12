@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, CheckCircle2, Copy, Download, LogOut, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, XCircle, Zap } from '@/components/icons'
+import { AlertTriangle, Check, CheckCircle2, Copy, Download, LogOut, RotateCcw, X, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, XCircle, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import { useChannels } from '@/hooks/queries'
 import { useAuth } from '@/components/auth/AuthGate'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { api, qk } from '@/lib/api'
-import type { ApiFormat, Channel, ImageMode, RouteKey, Routing } from '@/lib/types'
+import type { ApiFormat, Channel, ImageMode, RouteKey, Routing, Trope } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const PRESETS: { key: string; name: string; base_url: string; format: ApiFormat; models: string[]; color: string }[] = [
@@ -56,6 +56,7 @@ export default function SettingsPage() {
         <Channels />
         <RoutingCard />
         <WritingCard />
+        <TropesCard />
         <RadarCard />
         <AccountCard />
         <Appearance />
@@ -372,6 +373,42 @@ function WritingCard() {
             </label>
           </div>
         )}
+      </CardBody>
+    </Card>
+  )
+}
+
+/** 禁用套路：生成选题、设定、大纲等时注入提示词；生成结果命中关键词会标黄，可一键让 AI 换掉 */
+function TropesCard() {
+  const q = useQuery({ queryKey: qk.tropes, queryFn: api.tropes })
+  const qc = useQueryClient()
+  const [rows, setRows] = useState<Trope[] | null>(null)
+  useEffect(() => { if (q.data && rows === null) setRows(q.data.banned) }, [q.data, rows])
+  const m = useMutation({
+    mutationFn: (b: Trope[]) => api.saveTropes(b),
+    meta: { errorTitle: '保存失败' },
+    onSuccess: (d) => { qc.setQueryData(qk.tropes, d); setRows(d.banned); qc.invalidateQueries({ queryKey: qk.ideas }); toast.success('禁用套路已保存') },
+  })
+  if (q.isError) return null
+  const dirty = !!rows && !!q.data && JSON.stringify(rows) !== JSON.stringify(q.data.banned)
+  const upd = (i: number, p: Partial<Trope>) => setRows((r) => r && r.map((x, j) => (j === i ? { ...x, ...p } : x)))
+  return (
+    <Card>
+      <CardHeader divider title="禁用套路" icon={<AlertTriangle className="h-4 w-4" />}
+        action={<div className="flex gap-1.5">
+          <Button size="sm" variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => q.data && setRows(q.data.defaults)}>恢复预置</Button>
+          {dirty && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => rows && m.mutate(rows.filter((r) => r.name.trim() || r.keywords.length))}>保存</Button>}
+        </div>} />
+      <CardBody className="space-y-3 pt-4">
+        <p className="text-[12.5px] leading-relaxed text-muted-foreground">AI 生成选题、设定、大纲、伏笔时默认避开这些俗套（你在要求里明确点名想要的除外）；生成结果里出现关键词会标黄提醒，可一键让 AI 换掉。每本书还可以在「编辑信息」里单独追加。</p>
+        {!rows ? <Skeleton className="h-28" /> : rows.map((r, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <Input value={r.name} onChange={(e) => upd(i, { name: e.target.value })} placeholder="套路名" className="w-[160px] shrink-0" />
+            <div className="min-w-0 flex-1"><TagInput value={r.keywords} onChange={(v) => upd(i, { keywords: v })} placeholder="检测关键词，回车添加" /></div>
+            <Button size="icon" variant="ghost" aria-label="删除" onClick={() => setRows(rows.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+          </div>
+        ))}
+        {rows && <Button size="xs" variant="ghost" icon={<Plus className="h-3 w-3" />} onClick={() => setRows([...rows, { name: '', keywords: [] }])}>添加一条</Button>}
       </CardBody>
     </Card>
   )
