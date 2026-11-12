@@ -112,3 +112,36 @@ Package { book_id, titles: [{title, score}], blurb, tags[], cover_prompt, covers
 - 人物卡 `Card.data` 对 character 约定键：`voice`（说话方式）、`catchphrases[]`（口头禅）、`habits[]`（小动作）、`demeanor`（神态习惯）。
 - 多版本：`write-next` body 可选 `{variants: 1|2|3}`（默认 1）。`Chapter` 新增 `variants: [{id, content, words, lint, review_overall}]`，status 为 `"draft"` 时作者挑选；`POST /api/chapters/{id}/adopt-variant` (variant_id) → Chapter。默认设置可选“自动采纳最高分”。
 - 精修：`POST /api/chapters/{id}/thicken` → Job（“描写增厚”：只改写干对白/概述段落，补动作、神态、环境、心理，保持情节不变）。
+
+## v0.4 增补：按要求让 AI 改
+
+生成类接口均返回 Job，结果在 `job.result` 里，**不落库**；采纳类接口同步返回。`route` 为 `"渠道id:模型"`，不填走默认路由。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/books/{id}/revise` | `{instruction, route?}` → Job，result：`{current, proposal:{title,tagline,premise}, change, terms[], replacements{}, impact, trope_hits}` |
+| POST | `/api/books/{id}/info` | 采纳作品信息 `{title?, tagline?, premise?, instruction}`，旧版本入栈 |
+| POST | `/api/books/{id}/undo` | 撤回作品信息上一版 |
+| POST | `/api/books/{id}/impact` | `{terms[]}` → `{terms, cards[], outline[], chapters[], total}` |
+| POST | `/api/books/{id}/sync` | `{instruction, terms[], replacements{}, targets:["bible","outline"], route?}` → Job，result：`{bible: 设定建议|null, outline:{items[]}, chapters[]}` |
+| POST | `/api/books/{id}/bible/propose` | `{mode: rewrite|add|optimize, instruction, route?}` → Job，result：`{mode, items[{key, action, card, target_id, old, conflicts[], trope_hits[], default}], removals[], facts[], counts}` |
+| POST | `/api/books/{id}/bible/apply` | `{mode, instruction, ops:[{op:create|update|delete, card_id?, card?}], facts?}`，执行前自动快照 → `{created, updated, deleted, snapshot_id}` |
+| GET | `/api/books/{id}/bible/snapshots` | 设定库快照列表 |
+| POST | `/api/books/{id}/bible/snapshots/{sid}/restore` | 回滚（回滚前也存快照） |
+| PUT | `/api/outline/{id}` | 新增可选 `instruction`；title/summary/beats 变化时旧版本入栈 |
+| POST | `/api/outline/{id}/suggest` | `{instruction, route?}` → Job，result：`{current, proposal:{title, summary}, change}` |
+| POST | `/api/outline/{id}/undo` | 撤回节点上一版 |
+| POST | `/api/books/{id}/outline/apply` | 批量采纳 `{instruction, items:[{node_id, title?, summary?, beats?}]}` |
+| POST | `/api/chapters/{id}/rewrite` | `{instruction, route?, scope: all|selection, start?, end?}` → Job，result：`{before, after, changed, ...}` |
+| POST | `/api/chapters/{id}/apply-rewrite` | `{content, label?}`，旧正文进 history，重跑 lint |
+| POST | `/api/chapters/{id}/undo` | 撤回到 history 最后一版 |
+| GET | `/api/books/{id}/foreshadows/overview` | `{outline_planned[], committed, drafts, outline_nodes, last_committed}` |
+| POST | `/api/books/{id}/foreshadows` | 手动新增 `{desc, status?, tier?, planted_ch?, resolved_ch?, plan_plant_ch?, plan_resolve_ch?, note?}` |
+| PUT / DELETE | `/api/foreshadows/{id}` | 编辑 / 删除 |
+| POST | `/api/books/{id}/foreshadows/plan` | `{instruction, route?, count}` → Job，result：`{items[{desc, tier, plant_ch, resolve_ch, note, related, duplicate_of, in_outline}]}` |
+| POST | `/api/books/{id}/foreshadows/batch` | `{items[], attach}` → `{created, attached}`；状态为 planned，attach 时写进对应章细纲 |
+| POST | `/api/ideas/{id}/detrope` | `{route?}` → Job（走整体修改，可撤回）；没命中禁用套路时 409 |
+| GET / PUT | `/api/settings/tropes` | `{banned:[{name, keywords[]}]}`，GET 另返回 `defaults` |
+
+输出增补：Book 增加 `premise`、`versions`、`last_instruction`、`banned_tropes`；Idea / Card（列表接口）增加 `trope_hits[{name, hits[]}]`；OutlineNode 增加 `versions`、`last_instruction`；Chapter 增加 `history`、`last_history_label`；Foreshadow 增加 `tier`、`plan_plant_ch`、`plan_resolve_ch`、`note`、`source`，`status` 新增 `planned`。PATCH `/api/books/{id}` 可改 `premise`、`banned_tropes`。
+
