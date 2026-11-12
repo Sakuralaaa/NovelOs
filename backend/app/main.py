@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -46,6 +50,29 @@ def create_app() -> FastAPI:
             task.cancel()
 
     app = FastAPI(title="NovelOS", version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def password_protection(request: Request, call_next):
+        if not settings.basic_password or request.url.path == "/api/health":
+            return await call_next(request)
+        header = request.headers.get("authorization", "")
+        scheme, _, encoded = header.partition(" ")
+        try:
+            decoded = base64.b64decode(encoded, validate=True) if scheme.lower() == "basic" else b""
+        except (ValueError, binascii.Error):
+            decoded = b""
+        username, separator, password = decoded.partition(b":")
+        if not (separator and secrets.compare_digest(username, settings.basic_user.encode())
+                and secrets.compare_digest(password, settings.basic_password.encode())):
+            return PlainTextResponse("Authentication required", status_code=401,
+                                     headers={"WWW-Authenticate": 'Basic realm="NovelOS", charset="UTF-8"'})
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin:
+            parsed = urlsplit(origin)
+            if parsed.scheme not in ("http", "https") or parsed.netloc.lower() != request.headers.get("host", "").lower():
+                return PlainTextResponse("Origin not allowed", status_code=403)
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
         allow_methods=["*"], allow_headers=["*"],

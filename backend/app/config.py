@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("./data")
     secret: str | None = None  # Fernet 主密钥；为空时自动生成并存入 data_dir/secret.key
+    basic_user: str = "novelos"
+    basic_password: str | None = None
     static_dir: Path = Path("/app/static")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     disable_scheduler: bool = False
