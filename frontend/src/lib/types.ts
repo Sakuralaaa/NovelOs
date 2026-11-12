@@ -91,6 +91,10 @@ export interface Idea {
   logline: string
   selling_points: string[]
   hook: string
+  expectations?: string[]
+  endgame?: string
+  arc?: string[]
+  issue?: string
   genre: string
   scores: { heat: number; novelty: number; fit: number; overall: number }
   chosen: boolean

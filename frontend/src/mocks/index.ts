@@ -293,15 +293,15 @@ on('DELETE', '/books/:id', (m) => { db.books = db.books.filter((x) => x.id !== +
 on('POST', '/ideas/generate', (_m, b) => createJob('ideas_generate', null, 3800, ['读取热点题材…', '构建题材矩阵…', '生成选题卡…', '读者小组预评…'], () => {
   const genre = b.genre || (b.gender === 'female' ? '年代重生' : '都市高武')
   const pool = [
-    { title: `${genre}：我能看见所有人的隐藏属性`, logline: '主角意外获得洞察能力，从被人看不起的小角色一步步翻盘。', hook: '开局就看见上司头顶写着“明天被抓”。', sp: ['信息差爽点', '打脸', '升级明确'] },
-    { title: `开局签到一座城：${genre}`, logline: '每日签到获得城市模块，在乱世里亲手建起一座城。', hook: '第一天签到，得到的是一座废弃火车站。', sp: ['基建经营', '收服人才', '节奏快'] },
-    { title: `${genre}之我的影子会说话`, logline: '主角的影子拥有独立意识，替他做出每一个“正确”的选择——直到它开始撒谎。', hook: '影子说：“别开门，门外那个是你自己。”', sp: ['悬疑反转', '高概念', '人设新'] },
+    { title: '我能看见所有人的隐藏属性', logline: '主角意外获得洞察能力，从被人看不起的小角色一步步翻盘。', hook: '开局就看见上司头顶写着“明天被抓”。', sp: ['信息差爽点', '打脸', '升级明确'] },
+    { title: '开局签到一座城', logline: '每日签到获得城市模块，在乱世里亲手建起一座城。', hook: '第一天签到，得到的是一座废弃火车站。', sp: ['基建经营', '收服人才', '节奏快'] },
+    { title: '我的影子会说话', logline: '主角的影子拥有独立意识，替他做出每一个“正确”的选择——直到它开始撒谎。', hook: '影子说：“别开门，门外那个是你自己。”', sp: ['悬疑反转', '高概念', '人设新'] },
   ]
   const ids: number[] = []
   for (let i = 0; i < (b.count || 3); i++) {
     const p = pool[i % pool.length]
     const id = nid(); ids.push(id)
-    db.ideas.unshift({ id, book_id: null, title: p.title, logline: p.logline, selling_points: p.sp, hook: p.hook, genre, scores: { heat: 70 + i * 7, novelty: 85 - i * 9, fit: 78, overall: 80 - i * 4 }, chosen: false })
+    db.ideas.unshift({ id, book_id: null, title: p.title, logline: p.logline, selling_points: p.sp, hook: p.hook, genre, arc: ['小城立足，收服第一批班底', '打进州府，压服本地世家', '登临王朝，与皇权正面交锋', '飞升上界，挑战旧神秩序'], endgame: '查清金手指的来历，站到这个世界的最顶端', issue: i === 2 ? '高概念好，但爽点兑现偏慢' : '', scores: { heat: 82 - i * 6, novelty: 74 - i * 5, fit: 76 - i * 4, overall: 77 - i * 5 }, chosen: false })
   }
   return { idea_ids: ids }
 }))

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2 } from '@/components/icons'
+import { ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -154,6 +154,18 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
         <Quote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary/60" />
         <span className="min-w-0 break-words"><span className="text-muted-foreground">钩子：</span>{i.hook}</span>
       </div>
+      {(i.arc?.length || i.endgame) ? (
+        <div className="mt-3 rounded-lg px-3 py-2.5 text-[12.5px] leading-relaxed hairline">
+          {i.arc && i.arc.length > 0 && (
+            <ol className="space-y-1">
+              {i.arc.map((a, k) => (
+                <li key={k} className="flex gap-2"><span className="num w-4 shrink-0 text-right text-primary/70">{k + 1}</span><span className="min-w-0 break-words text-foreground/80">{a.replace(/^第[一二三四五六七八九十\d]+(阶段|卷)[:：]\s*/, '')}</span></li>
+              ))}
+            </ol>
+          )}
+          {i.endgame && <div className={cn('flex gap-2 font-medium', i.arc?.length && 'mt-1.5 border-t border-dashed pt-1.5')}><Flag className="mt-[3px] h-3.5 w-3.5 shrink-0 text-primary" /><span className="min-w-0 break-words">{i.endgame}</span></div>}
+        </div>
+      ) : null}
       <div className="mt-4 grid grid-cols-3 gap-3">
         {([['热度', i.scores.heat], ['新颖', i.scores.novelty], ['适配', i.scores.fit]] as const).map(([l, v]) => (
           <div key={l}>
@@ -162,6 +174,7 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
           </div>
         ))}
       </div>
+      {i.issue && <div className="mt-3 flex gap-1.5 text-[12.5px] leading-relaxed text-warning"><AlertCircle className="mt-[3px] h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{i.issue}</span></div>}
       <div className="mt-auto flex gap-2 pt-5">
         {i.chosen && i.book_id ? (
           <Link to={`/books/${i.book_id}`} className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md bg-success-soft text-[13px] font-medium text-success">已建书，去看看 <ArrowUpRight className="h-3.5 w-3.5" /></Link>

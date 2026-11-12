@@ -37,6 +37,7 @@ IMAGE_MODE_KEY = "image_mode"  # images：/images/generations；chat：对话接
 # 任务默认走哪个角色
 TASK_ROLE: dict[str, str] = {
     "ideation": "planner",
+    "idea_score": "reviewer",
     "bible": "planner",
     "outline": "planner",
     "expand": "planner",

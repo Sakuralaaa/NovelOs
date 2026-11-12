@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlmodel import select
@@ -19,13 +20,56 @@ from app.skills.loader import render, system_prompt
 
 
 def _heat_for(genre: str, trends: list[dict[str, Any]]) -> int:
+    """按题材在榜单里的名次给分：第 1 名 90，往后递减，没上榜 40。"""
     if not trends:
         return 50
-    top = max(t["heat"] for t in trends) or 1
-    for t in trends:
+    for i, t in enumerate(trends):
         if t["category"] and (t["category"] in genre or genre in t["category"]):
-            return int(round(30 + 70 * t["heat"] / top))
-    return 35
+            rising = t.get("rising", 0) / max(1, t.get("books", 1))
+            return int(round(max(45, 90 - 6 * i) + min(8, 20 * rising)))
+    return 40
+
+
+_PREFIX_RE = re.compile(r"^\s*[^：:，,！!？?\s]{1,4}[：:]\s*")
+
+
+def _clean_title(title: str, genre: str) -> str:
+    t = str(title).strip().strip("《》")
+    m = _PREFIX_RE.match(t)
+    if m and len(t) - m.end() >= 4:
+        t = t[m.end():]
+    return t[:40]
+
+
+def _clamp(v: Any, default: int = 50) -> int:
+    try:
+        return max(0, min(100, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _review_scores(items: list[dict[str, Any]], gender: str, trends: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """让审稿模型横向复核新颖和适配，压住模型自评虚高。失败时返回空，沿用自评。"""
+    tops = [x for t in trends[:8] for x in t.get("sample_titles", [])[:4]]
+    listing = "\n".join(
+        f"{i}. 《{it.get('title')}》［{it.get('genre', '')}］{it.get('logline', '')} 卖点：{'；'.join(map(str, it.get('selling_points') or []))}"
+        f" 终局：{it.get('endgame', '')} 长线：{' → '.join(map(str, it.get('arc') or []))}"
+        for i, it in enumerate(items, 1)
+    )
+    try:
+        data = get_gateway().chat_json(
+            "idea_score", system_prompt("idea_score"),
+            render("idea_score", gender_label=common.GENDER_LABEL.get(gender, gender),
+                   top_titles="、".join(tops) or "（无榜单数据）", ideas=listing),
+            meta={"count": len(items)}, temperature=0.2,
+        )
+    except Exception:  # noqa: BLE001
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    for sc in (data.get("scores") if isinstance(data, dict) else None) or []:
+        if isinstance(sc, dict) and str(sc.get("index", "")).isdigit():
+            out[int(sc["index"])] = sc
+    return out
 
 
 def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
@@ -48,20 +92,31 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
     items = data.get("ideas") if isinstance(data, dict) else data
     if not isinstance(items, list) or not items:
         raise ValueError("模型没有返回选题")
+    items = [it for it in items if isinstance(it, dict) and it.get("title")][:count]
+    if not items:
+        raise ValueError("模型没有返回选题")
+    ctx.progress(70, "编辑复核打分")
+    reviewed = _review_scores(items, gender, trends) if len(items) else {}
     ids: list[int] = []
     with session_scope() as s:
-        for it in items[:count]:
-            if not isinstance(it, dict) or not it.get("title"):
-                continue
+        for n, it in enumerate(items, 1):
             g = str(it.get("genre") or genre or "")
             heat = _heat_for(g, trends)
-            novelty = max(0, min(100, int(it.get("novelty") or 50)))
-            fit = max(0, min(100, int(it.get("fit") or 50)))
+            rv = reviewed.get(n) or {}
+            # 复核分为主，自评只占两成，避免模型自己给自己打 95
+            novelty = round(0.8 * _clamp(rv["novelty"]) + 0.2 * _clamp(it.get("novelty"))) if "novelty" in rv else min(80, _clamp(it.get("novelty")))
+            fit = round(0.8 * _clamp(rv["fit"]) + 0.2 * _clamp(it.get("fit"))) if "fit" in rv else min(80, _clamp(it.get("fit")))
+            issue = str(rv.get("issue") or "").strip()
             idea = Idea(
-                title=str(it["title"])[:60], logline=str(it.get("logline", "")),
-                selling_points=[str(x) for x in (it.get("selling_points") or [])][:6], hook=str(it.get("hook", "")),
+                title=_clean_title(it["title"], g), logline=str(it.get("logline", "")),
+                selling_points=[str(x) for x in (it.get("selling_points") or [])][:4], hook=str(it.get("hook", "")),
+                expectations=[str(x) for x in (it.get("expectations") or [])][:3],
+                endgame=str(it.get("endgame") or "")[:120],
+                arc=[str(x) for x in (it.get("arc") or [])][:6],
                 genre=g, gender=gender,
-                scores={"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.4 * heat + 0.3 * novelty + 0.3 * fit)},
+                scores={"heat": heat, "novelty": novelty, "fit": fit,
+                        "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
+                        "issue": "" if issue in ("无", "没有", "-") else issue[:40]},
             )
             s.add(idea)
             s.flush()
@@ -82,7 +137,9 @@ def adopt_idea(idea_id: int) -> Book:
         st = get_settings()
         book = Book(
             title=idea.title, genre=idea.genre, gender=idea.gender, tagline=idea.hook,
-            premise=f"{idea.logline}\n卖点：{'；'.join(idea.selling_points)}", status="bible",
+            premise=f"{idea.logline}\n卖点：{'；'.join(idea.selling_points)}" + (f"\n长期期待：{'；'.join(idea.expectations)}" if idea.expectations else "")
+            + (f"\n终局目标：{idea.endgame}" if idea.endgame else "")
+            + (f"\n长线阶段：{' → '.join(idea.arc)}" if idea.arc else ""), status="bible",
             target_words=st.default_target_words, chapter_words=st.default_chapter_words,
         )
         s.add(book)

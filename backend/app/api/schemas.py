@@ -207,6 +207,7 @@ def idea_out(i: Idea) -> dict[str, Any]:
     sc = i.scores or {}
     return {"id": i.id, "book_id": i.book_id, "title": i.title, "logline": i.logline,
             "selling_points": list(i.selling_points or []), "hook": i.hook, "genre": i.genre,
+            "expectations": list(i.expectations or []), "endgame": i.endgame, "arc": list(i.arc or []), "issue": str(sc.get("issue") or ""),
             "scores": {k: sc.get(k, 0) for k in ("heat", "novelty", "fit", "overall")}, "chosen": i.chosen}
 
 

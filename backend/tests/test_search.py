@@ -91,3 +91,12 @@ def test_delete_endpoints(client):
     assert client.delete("/api/outline/999999").status_code == 404
     rt = client.get("/api/settings/routing").json()
     assert "search" in rt and rt["image_mode"] in ("images", "chat")
+
+
+def test_idea_title_and_heat():
+    from app.services.planning import _clean_title, _heat_for
+    assert _clean_title("高武：我把宗师绝学修成大众版", "都市高武") == "我把宗师绝学修成大众版"
+    assert _clean_title("末世种田：我的麦田会反击", "科幻末世") == "我的麦田会反击"
+    assert _clean_title("宗门判我废人，我把废峰炼成神山", "玄幻") == "宗门判我废人，我把废峰炼成神山"
+    trends = [{"category": "都市高武", "heat": 100, "books": 30, "rising": 3}, {"category": "玄幻脑洞", "heat": 80, "books": 30, "rising": 0}]
+    assert _heat_for("都市高武", trends) == 92 and _heat_for("玄幻脑洞", trends) == 84 and _heat_for("悬疑", trends) == 40
