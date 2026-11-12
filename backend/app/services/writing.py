@@ -26,7 +26,7 @@ from app.llm.gateway import get_gateway
 from app.llm.mock import kit_for
 from app.models.tables import Book, Card, Chapter, Fact, Foreshadow, OutlineNode, utcnow
 from app.services import common
-from app.services.changes import ChangeSet, check_against_ledger, parse_changes, split_output
+from app.services.changes import ChangeSet, check_against_ledger, match_foreshadow, parse_changes, split_output
 from app.services.common import Conflict, NotFound
 from app.services.context import ContextPack, build_context_pack
 from app.services.outline import ensure_next_chapter_node, node_plan_text
@@ -487,8 +487,17 @@ def commit_chapter(chapter_id: int) -> Chapter:
                     p.to_chapter = max(p.from_chapter, n - 1)
                     s.add(p)
                 s.add(Fact(book_id=bid, entity_id=eid, key=sc.key, value=sc.value, from_chapter=n, visibility=sc.visibility))
+            planned = {x.id or 0: x.desc for x in s.exec(select(Foreshadow).where(Foreshadow.book_id == bid, Foreshadow.status == "planned"))}
             for f in cs.foreshadow:
                 if f.action == "plant":
+                    pid = match_foreshadow(f.desc, planned)
+                    if pid is not None:  # 规划好的伏笔（计划中）这一章真正埋下了
+                        fo = s.get(Foreshadow, pid)
+                        assert fo is not None
+                        fo.status, fo.planted_ch, fo.last_ch = "planted", n, n
+                        s.add(fo)
+                        planned.pop(pid, None)
+                        continue
                     s.add(Foreshadow(book_id=bid, desc=f.desc, status="planted", planted_ch=n, last_ch=n))
                     continue
                 fo = s.get(Foreshadow, f.id) if f.id else None
@@ -501,6 +510,23 @@ def commit_chapter(chapter_id: int) -> Chapter:
                     fo.status = "resolved"
                     fo.resolved_ch = n
                 s.add(fo)
+            # 兜底：细纲安排在本章“埋下”的伏笔，变更声明里漏了（模型没写 ---CHANGES--- 或漏项）→ 仍按细纲登记，
+            # 标注来源让作者核对，避免伏笔页一直是空的
+            declared = [f.desc for f in cs.foreshadow if f.action == "plant"]
+            for a in (beats.get("foreshadow") or []):
+                d = str(a.get("desc") or "").strip() if isinstance(a, dict) and a.get("action") == "plant" else ""
+                if not d or match_foreshadow(d, dict(enumerate(declared))) is not None:
+                    continue
+                pid = match_foreshadow(d, planned)
+                fo = s.get(Foreshadow, pid) if pid is not None else Foreshadow(book_id=bid, desc=d, source="outline")
+                assert fo is not None
+                fo.status, fo.planted_ch, fo.last_ch = "planted", n, n
+                fo.tier = fo.tier or str(a.get("tier") or "")
+                fo.note = (fo.note + "\n" if fo.note else "") + f"第{n}章细纲安排埋下，变更声明里没有确认，请核对正文是否写到"
+                s.add(fo)
+                planned.pop(pid, None) if pid is not None else None
+                declared.append(d)
+                warns.append(f"细纲要求埋下伏笔「{d}」，变更声明漏了，已按细纲登记，请核对正文")
             ch.summary = summary
             ch.status = "committed"
             ch.changes = {**cs.model_dump(), "warnings": warns}
@@ -593,6 +619,8 @@ def humanize_chapter_job(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
         ch = s.get(Chapter, chapter_id)
         assert ch is not None
         after = lint_for(s, ch.book_id, content, ch.number, ch.id)
+        if content != ch.content:
+            push_history(ch, "人味修整前")
         ch.content, ch.words, ch.lint, ch.updated_at = content, count_words(content), after.to_dict(), utcnow()
         s.add(ch)
         s.commit()
@@ -611,6 +639,8 @@ def thicken_chapter_job(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
         ch = s.get(Chapter, chapter_id)
         assert ch is not None
         after = lint_for(s, ch.book_id, content, ch.number, ch.id)
+        if content != ch.content:
+            push_history(ch, "描写增厚前")
         ch.content, ch.words, ch.lint, ch.updated_at = content, count_words(content), after.to_dict(), utcnow()
         s.add(ch)
         s.commit()
@@ -652,6 +682,106 @@ def update_chapter(chapter_id: int, title: str | None, content: str | None) -> C
             ch.content = content
             ch.words = count_words(content)
             ch.lint = lint_for(s, ch.book_id, content, ch.number, ch.id).to_dict()
+        ch.updated_at = utcnow()
+        s.add(ch)
+        s.commit()
+        s.refresh(ch)
+        return ch
+
+
+# ------------------------------------------------------------------ 按要求改写（v0.4）
+
+MAX_HISTORY = 10
+
+
+def push_history(ch: Chapter, label: str) -> None:
+    ch.history = [*(ch.history or []), {"content": ch.content, "title": ch.title, "words": ch.words, "label": label[:60],
+                                        "at": utcnow().isoformat()}][-MAX_HISTORY:]
+
+
+def _clean_rewrite(text: str) -> str:
+    body, _ = split_output(text)
+    body = re.sub(r"^```[a-z]*\s*|\s*```$", "", body.strip())
+    body = body.strip().strip("<>").strip()
+    return body
+
+
+def rewrite_chapter_job(chapter_id: int, instruction: str, route: str | None, scope: str, start: int | None, end: int | None,
+                        ctx: JobContext) -> dict[str, Any]:
+    """按作者要求改写全章或选中的文字。只生成改写稿，不落库；作者对比后采纳（apply_rewrite）或丢弃。"""
+    with session_scope() as s:
+        ch = _require_content(s.get(Chapter, chapter_id))
+        pack, meta, plan = _pack_for_chapter(s, ch)
+        content, number = ch.content, ch.number
+    if scope == "selection":
+        if start is None or end is None or not (0 <= start < end <= len(content)):
+            raise ValueError("选中的范围不对，请重新选择要改的文字")
+        text = content[start:end]
+        if not text.strip():
+            raise ValueError("选中的是空白，请重新选择")
+        context = (f"上文（不要改）：…{content[max(0, start - 300):start]}\n下文（不要改）：{content[end:end + 300]}…")
+        scope_label = "中选中的一段文字（只改这一段，和上下文衔接）"
+    else:
+        start, end, text = 0, len(content), content
+        context = ""
+        scope_label = "（全章）"
+    voices = "\n".join(f"- {n}：{v.get('voice', '')}；口头禅：{'、'.join(v.get('catchphrases') or [])}" for n, v in pack.voices.items()) or "（未设定）"
+    user = render("chapter_rewrite", number=number, scope_label=scope_label, chapter_plan=plan, voices=voices, context=context,
+                  text=text, instruction=instruction.strip())
+    ctx.progress(20, "按要求改写" + ("选中的文字" if scope == "selection" else "全章"))
+    out = get_gateway().chat(
+        "chapter_rewrite", [{"role": "system", "content": system_prompt("chapter_rewrite")}, {"role": "user", "content": user}],
+        meta={**meta, "text": text, "instruction": instruction, "scope": scope}, temperature=0.8, route=route,
+    )
+    new = _clean_rewrite(out)
+    if not new.strip():
+        raise ValueError("模型没有给出改写稿")
+    if scope != "selection" and len(new) < 0.3 * len(text) and not re.search(r"(删|缩|压|精简|短)", instruction):
+        raise ValueError("改写稿比原文短太多，疑似被截断，请重试或换个模型")
+    after = content[:start] + new + content[end:]
+    ctx.progress(85, "人味检查")
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        assert ch is not None
+        lint = lint_for(s, ch.book_id, after, number, chapter_id)
+    return {"chapter_id": chapter_id, "scope": scope, "start": start, "end": end, "instruction": instruction.strip(),
+            "before": content, "after": after, "changed": after != content, "words_before": count_words(content),
+            "words_after": count_words(after), "ai_score_after": lint.ai_score}
+
+
+def apply_rewrite(chapter_id: int, content: str, label: str) -> Chapter:
+    """采纳改写稿：旧正文进历史（可撤回），新正文落库并重跑 lint。审稿由前端随后发起。"""
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        if ch is None:
+            raise NotFound("章节不存在")
+        if ch.status == "draft" and ch.variants and not ch.content.strip():
+            raise Conflict("多版本章节请先采纳一个版本")
+        if content != ch.content:
+            push_history(ch, label or "按要求改写前")
+            ch.content = content
+            ch.words = count_words(content)
+            ch.lint = lint_for(s, ch.book_id, content, ch.number, ch.id).to_dict()
+            ch.updated_at = utcnow()
+            s.add(ch)
+            s.commit()
+            s.refresh(ch)
+        return ch
+
+
+def undo_chapter(chapter_id: int) -> Chapter:
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        if ch is None:
+            raise NotFound("章节不存在")
+        if not ch.history:
+            raise Conflict("没有可以撤回的版本")
+        prev = ch.history[-1]
+        ch.content = prev.get("content", ch.content)
+        ch.title = prev.get("title", ch.title)
+        ch.words = count_words(ch.content)
+        ch.lint = lint_for(s, ch.book_id, ch.content, ch.number, ch.id).to_dict()
+        ch.history = ch.history[:-1]
         ch.updated_at = utcnow()
         s.add(ch)
         s.commit()

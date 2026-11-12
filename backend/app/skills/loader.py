@@ -29,6 +29,12 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "idea_score": (),
     "idea_revise": ("ideation",),
     "idea_field": ("ideation",),
+    "book_revise": ("ideation",),
+    "bible_propose": ("bible",),
+    "outline_node": ("outline",),
+    "outline_sync": ("outline",),
+    "chapter_rewrite": ("writing", "humanize"),
+    "foreshadow_plan": ("outline",),
 }
 
 

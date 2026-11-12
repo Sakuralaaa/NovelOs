@@ -74,7 +74,18 @@ CHAPTER_SCHEMA = (
 )
 
 
+def _maybe_json(v: Any) -> Any:
+    """编辑器把列表/对象存成了 JSON 字符串时还原（旧版前端保存细纲会这样，导致伏笔和出场人物丢失）。"""
+    if isinstance(v, str) and v.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
 def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dict[str, Any]:
+    raw = {k: _maybe_json(v) if k in ("foreshadow", "characters", "must_avoid", "strand", "scenes") else v for k, v in (raw or {}).items()}
     fs = []
     for f in raw.get("foreshadow") or []:
         if isinstance(f, dict) and f.get("action") in ("plant", "advance", "resolve"):
@@ -225,6 +236,18 @@ def rhythm_ledger(beats_list: list[dict[str, Any]], before: int, n: int = 8) -> 
     return "\n".join(lines)
 
 
+def _planned_text(s: Session, book_id: int) -> str:
+    """作者 / AI 规划好、还没写进正文的伏笔，展开细纲时按计划章号安排“埋下”。"""
+    from app.models.tables import Foreshadow
+
+    rows = s.exec(select(Foreshadow).where(Foreshadow.book_id == book_id, Foreshadow.status == "planned")).all()
+    if not rows:
+        return ""
+    return "\n计划中的伏笔（还没写进正文，到计划章号时在细纲里安排 plant，desc 原样照抄）：\n" + "\n".join(
+        f"- {f.desc}" + (f"（计划第{f.plan_plant_ch}章埋" if f.plan_plant_ch else "（埋的章号未定")
+        + (f"，第{f.plan_resolve_ch}章收）" if f.plan_resolve_ch else "）") for f in rows)
+
+
 def _children(s: Session, parent_id: int) -> list[OutlineNode]:
     return list(s.exec(select(OutlineNode).where(OutlineNode.parent_id == parent_id).order_by(OutlineNode.order)))
 
@@ -343,7 +366,8 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
             "expand", book_context=common.book_context(s, book), node_level=node.level, node_title=node.title,
             node_summary=node.summary, siblings="、".join(siblings) or "无",
             recent="\n".join(f"第{c.number}章：{c.summary}" for c in recent) or "无",
-            open_foreshadows="\n".join(f"#{f.id} {f.desc}（第{f.planted_ch}章埋，{foreshadow_age_label(f, next_no)}）" for f in opens) or "无",
+            open_foreshadows=("\n".join(f"#{f.id} {f.desc}（第{f.planted_ch}章埋，{foreshadow_age_label(f, next_no)}）" for f in opens) or "无")
+            + _planned_text(s, book.id or 0),
             rhythm=ledger or "（尚无节奏标注）",
             pacing="\n".join(f"- {x}" for x in audit) or "（无）",
             instruction=instruction, schema=schema,
@@ -433,3 +457,98 @@ def node_plan_text(node: OutlineNode) -> str:
     b = dict(node.beats or {})
     b.pop("scenes", None)
     return json.dumps(b, ensure_ascii=False, indent=1)
+
+
+# ------------------------------------------------------------------ 节点概要：手动编辑留版本 / 按要求让 AI 重写 / 撤回
+
+LEVEL_LABEL = {"book": "总纲", "volume": "卷", "arc": "弧", "chapter": "章细纲"}
+LEVEL_RULE = {
+    "book": "总纲概要写清主线、终局和读者追下去的长期期待。",
+    "volume": "卷概要写清卷目标、主要冲突和卷末大爆点。",
+    "arc": "弧概要写清弧目标和弧末高潮。",
+    "chapter": "章概要写清本章戏剧问题和冲突。",
+}
+MAX_NODE_VERSIONS = 10
+
+
+def push_node_version(node: OutlineNode, instruction: str) -> None:
+    node.versions = [*(node.versions or []), {"title": node.title, "summary": node.summary, "beats": node.beats,
+                                              "instruction": instruction[:200], "at": utcnow().isoformat()}][-MAX_NODE_VERSIONS:]
+
+
+def suggest_node(node_id: int, instruction: str, route: str | None, ctx: JobContext) -> dict[str, Any]:
+    """按要求重写一个节点的标题和概要，结果只是建议，作者预览后采纳。"""
+    from app.services import tropes
+
+    with common_session() as s:
+        node = s.get(OutlineNode, node_id)
+        if node is None:
+            raise NotFound("大纲节点不存在")
+        book = common.get_book(s, node.book_id)
+        parent = s.get(OutlineNode, node.parent_id) if node.parent_id else None
+        sibs = [n for n in s.exec(select(OutlineNode).where(OutlineNode.parent_id == node.parent_id, OutlineNode.book_id == node.book_id)).all()
+                if n.id != node.id] if node.parent_id else []
+        kids = _children(s, node.id or 0)
+        tl = tropes.tropes_for(s, book)
+        user = render("outline_node", book_context=common.book_context(s, book), node_level=LEVEL_LABEL.get(node.level, node.level),
+                      parent=f"{parent.title}：{parent.summary}" if parent else "（无）",
+                      siblings="；".join(f"{n.title}" for n in sorted(sibs, key=lambda n: n.order)[:12]) or "（无）",
+                      children="；".join(n.title for n in kids[:20]) or "（无）",
+                      node_title=node.title, node_summary=node.summary or "（空）", instruction=instruction.strip(),
+                      level_rule=LEVEL_RULE.get(node.level, ""))
+        user += tropes.prompt_block(tl, instruction)
+        cur = {"title": node.title, "summary": node.summary}
+        meta = {**cur, "level": node.level, "instruction": instruction, "banned_keywords": tropes.keywords(tl, instruction)}
+    ctx.progress(30, f"AI 重写{LEVEL_LABEL.get(meta['level'], '')}")
+    out = get_gateway().chat_json("outline_node", system_prompt("outline_node"), user, meta=meta, route=route)
+    if not isinstance(out, dict) or not (out.get("summary") or out.get("title")):
+        raise ValueError("模型没有给出修改")
+    return {"node_id": node_id, "current": cur,
+            "proposal": {"title": str(out.get("title") or cur["title"]).strip()[:80], "summary": str(out.get("summary") or cur["summary"]).strip()},
+            "change": str(out.get("change") or "")[:120], "instruction": instruction.strip()}
+
+
+def undo_node(node_id: int) -> OutlineNode:
+    with common_session() as s:
+        node = s.get(OutlineNode, node_id)
+        if node is None:
+            raise NotFound("大纲节点不存在")
+        if not node.versions:
+            raise Conflict("没有可以撤回的版本")
+        prev = node.versions[-1]
+        node.title, node.summary = prev.get("title", node.title), prev.get("summary", node.summary)
+        if "beats" in prev and node.level == "chapter":
+            node.beats = prev["beats"]
+        node.versions = node.versions[:-1]
+        s.add(node)
+        s.commit()
+        s.refresh(node)
+        return node
+
+
+def apply_nodes(book_id: int, items: list[dict[str, Any]], instruction: str) -> dict[str, Any]:
+    """批量采纳节点修改（同步作品信息时用），每个节点各存一个旧版本。"""
+    n = 0
+    with common_session() as s:
+        for it in items:
+            node = s.get(OutlineNode, int(it.get("node_id") or 0))
+            if node is None or node.book_id != book_id:
+                continue
+            title = it.get("title")
+            summary = it.get("summary")
+            beats = it.get("beats")
+            changed = (title is not None and title != node.title) or (summary is not None and summary != node.summary) or \
+                      (isinstance(beats, dict) and node.level == "chapter" and beats != node.beats)
+            if not changed:
+                continue
+            push_node_version(node, instruction or "同步修改")
+            if title is not None:
+                node.title = str(title)[:80]
+            if summary is not None:
+                node.summary = str(summary)
+            if isinstance(beats, dict) and node.level == "chapter" and node.status != "written":
+                node.beats = beats
+            s.add(node)
+            n += 1
+        s.commit()
+    return {"updated": n}

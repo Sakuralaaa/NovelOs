@@ -159,7 +159,8 @@ def mock_ideation(meta: dict[str, Any]) -> str:
 
 def mock_idea_revise(meta: dict[str, Any]) -> str:
     out = {k: meta.get(k) for k in ("title", "logline", "selling_points", "hook", "expectations", "endgame", "arc", "genre")}
-    note = str(meta.get("instruction") or "")[:20]
+    out = _strip_words(out, [str(x) for x in meta.get("banned_keywords") or []])
+    note = _strip_words(str(meta.get("instruction") or "")[:20], [str(x) for x in meta.get("banned_keywords") or []])
     out["logline"] = f"{out.get('logline') or ''}（已按“{note}”调整）"
     out.update({"novelty": 70, "fit": 75, "change": f"按“{note}”调整了简介"})
     return _j(out)
@@ -184,13 +185,13 @@ def mock_cover_prompt(meta: dict[str, Any]) -> str:
 
 
 def mock_card_suggest(meta: dict[str, Any]) -> str:
-    note = str(meta.get("instruction") or "改写")[:12]
+    note = _strip_words(str(meta.get("instruction") or "改写")[:12], [str(x) for x in meta.get("banned_keywords") or []])
     cur = meta.get("current")
     if meta.get("field"):
         if isinstance(cur, list):
             return _j({"value": [*cur, note]})
         return _j({"value": f"{cur or ''}（{note}）"})
-    card = dict(cur or {})
+    card = _strip_words(dict(cur or {}), [str(x) for x in meta.get("banned_keywords") or []])
     card["summary"] = f"{card.get('summary') or ''}（{note}）"
     card["name"] = card.get("name") or "新人物"
     return _j({"card": card})
@@ -247,7 +248,7 @@ CH_TEMPLATES: list[dict[str, str]] = [
     {"title": "跟踪", "goal": "跟上{ally}，看他见谁", "conflict": "{faction}的暗哨发现了{p}", "outcome": "no-and",
      "payoff": "{p}甩掉暗哨，反手摸清了对方一处据点", "hook_end": "据点墙上挂着一张照片，照片上是年轻时的{ally}"},
     {"title": "设局", "goal": "让{villain}主动来找{p}", "conflict": "{villain}也在设局，想引{p}入套", "outcome": "yes-but",
-     "payoff": "{villain}以为抓住了{p}的把柄，当众亮牌，却正中下怀", "hook_end": "{p}收到一条消息：你父亲没死"},
+     "payoff": "{villain}以为抓住了{p}的把柄，当众亮牌，却正中下怀", "hook_end": "{p}收到一条消息：旧案还有一个活口没死"},
     {"title": "对赌", "goal": "和{villain}对赌，赢回{loc}", "conflict": "赌局被做了手脚", "outcome": "yes",
      "payoff": "{p}当场拆穿出千，{villain}输掉{loc}，脸色铁青", "hook_end": "{faction}的家主亲自打来电话，只说了一句：明天见"},
     {"title": "家主", "goal": "在{faction}家主面前保住命", "conflict": "家主要{p}交出{item}", "outcome": "no",
@@ -659,6 +660,148 @@ def mock_style_extract(meta: dict[str, Any]) -> str:
     })
 
 
+# ---------------------------------------------------------------- v0.4：按要求改（作品信息 / 设定库 / 大纲 / 正文 / 伏笔）
+
+def _strip_words(v: Any, words: list[str], repl: dict[str, str] | None = None) -> Any:
+    """把禁用词或被拿掉的词从字符串（及嵌套结构）里去掉；有改名对照时换成新名。"""
+    repl = repl or {}
+    if isinstance(v, str):
+        for w in sorted(set(words), key=len, reverse=True):
+            if w:
+                v = v.replace(w, repl.get(w, ""))
+        return re.sub(r"[，,]{2,}", "，", v).strip("，, ")
+    if isinstance(v, list):
+        return [x for x in (_strip_words(i, words, repl) for i in v) if x not in ("", None)]
+    if isinstance(v, dict):
+        return {k: _strip_words(x, words, repl) for k, x in v.items()}
+    return v
+
+
+def mock_replacements(terms: list[str], instruction: str) -> dict[str, str]:
+    """mock 的改名规则：要求里用引号点名“不要叫”的词换成新名，其余词直接拿掉。"""
+    out: dict[str, str] = {}
+    for t in terms:
+        quoted = any(f"{a}{t}{b}" in instruction for a, b in (("『", "』"), ("「", "」"), ("“", "”"), ('"', '"')))
+        out[t] = (f"无名{t[-2:]}" if len(t) >= 3 else "") if quoted else ""
+    return out
+
+
+def mock_book_revise(meta: dict[str, Any]) -> str:
+    terms = [str(t) for t in meta.get("terms") or []]
+    ins = str(meta.get("instruction") or "")
+    repl = mock_replacements(terms, ins)
+    ban = [str(x) for x in meta.get("banned_keywords") or []]
+    cur = {k: str(meta.get(k) or "") for k in ("title", "tagline", "premise")}
+    out = {k: _strip_words(v, terms + ban, repl) for k, v in cur.items()}
+    note = _strip_words(ins[:16], terms)
+    out["tagline"] = (out["tagline"] or cur["tagline"]) + "（已按作者要求调整）"
+    out["title"] = out["title"] or cur["title"]
+    return _j({**out, "removed_terms": terms, "replacements": repl, "change": f"按“{note}”改了简介" + ("和书名" if out["title"] != cur["title"] else "")})
+
+
+def mock_bible_propose(meta: dict[str, Any]) -> str:
+    mode = meta.get("mode") or "add"
+    note = str(meta.get("instruction") or "调整")[:12]
+    existing: list[dict[str, Any]] = list(meta.get("existing") or [])
+    ban = [str(x) for x in meta.get("banned_keywords") or []]
+    terms = [str(x) for x in meta.get("terms") or []]
+    repl = dict(meta.get("replacements") or {})
+    cards: list[dict[str, Any]] = []
+    if mode == "rewrite":
+        base = json.loads(mock_bible(meta))
+        for c in base["cards"]:
+            c = _strip_words(c, ban)
+            c["summary"] = f"{c['summary']}（按“{note}”重写）"
+            cards.append({"action": "add", **c})
+        return _j({"cards": cards, "facts": base["facts"], "change": f"按“{note}”重写了整套设定"})
+    if mode == "optimize":
+        targets = existing[:2] if not terms else existing
+        for c in targets:
+            new = _strip_words({k: c.get(k) for k in ("type", "name", "summary", "data", "known_by")}, terms + ban, repl)
+            new["name"] = new.get("name") or c.get("name")
+            if not terms:
+                new["summary"] = f"{c.get('summary') or ''}（{note}）"
+            cards.append({"action": "update", "target": c.get("name"), **new, "conflicts": []})
+        if not terms:
+            cards.append({"action": "add", "type": "location", "name": f"{note[:4]}旧市集", "summary": "主角常去打听消息的旧市集。",
+                          "data": {"sensory": "炸油条的焦香，摊主吆喝声此起彼伏"}, "known_by": [], "conflicts": []})
+        return _j({"cards": cards, "change": f"按“{note}”优化了 {len(targets)} 张卡"})
+    # add：一张干净新卡 + 一张同名卡 + 一张重复金手指（演示冲突审阅）
+    cards.append({"action": "add", "type": "character", "name": f"{note[:4]}掌柜", "summary": "消息灵通的茶馆掌柜，两头下注。",
+                  "data": {"role": "supporting", "voice": "说话绕弯子，爱用俗语"}, "known_by": [], "conflicts": []})
+    if existing:
+        first = existing[0]
+        cards.append({"action": "add", "type": first.get("type") or "world", "name": first.get("name"), "summary": f"另一版本：{note}",
+                      "data": {}, "known_by": [], "conflicts": [{"name": first.get("name"), "reason": "同名设定，简介与旧卡矛盾"}]})
+    cheat = next((c for c in existing if c.get("type") == "cheat"), None)
+    if cheat:
+        cards.append({"action": "add", "type": "cheat", "name": f"{note[:4]}秘术", "summary": "第二个金手指。", "data": {"input": "念诵口诀"},
+                      "known_by": [], "conflicts": [{"name": cheat.get("name"), "reason": "主角已经有金手指"}]})
+    return _j({"cards": cards, "change": f"按“{note}”新增 {len(cards)} 张卡"})
+
+
+def mock_outline_node(meta: dict[str, Any]) -> str:
+    note = str(meta.get("instruction") or "改写")[:16]
+    ban = [str(x) for x in meta.get("banned_keywords") or []]
+    summ = _strip_words(str(meta.get("summary") or ""), ban)
+    return _j({"title": str(meta.get("title") or "未命名"), "summary": f"{summ}（按“{note}”重写）".lstrip(), "change": f"按“{note}”重写了概要"})
+
+
+def mock_outline_sync(meta: dict[str, Any]) -> str:
+    terms = [str(t) for t in meta.get("terms") or []]
+    repl = dict(meta.get("replacements") or {})
+    out = []
+    for n in meta.get("nodes") or []:
+        t, sm = _strip_words(str(n.get("title") or ""), terms, repl), _strip_words(str(n.get("summary") or ""), terms, repl)
+        if t != n.get("title") or sm != n.get("summary"):
+            out.append({"id": n.get("id"), "title": t or n.get("title"), "summary": sm, "reason": "拿掉/改名了：" + "、".join(x for x in terms if x in json.dumps(n, ensure_ascii=False))})
+    return _j({"nodes": out})
+
+
+def mock_chapter_rewrite(meta: dict[str, Any]) -> str:
+    text = str(meta.get("text") or "")
+    ins = str(meta.get("instruction") or "")
+    paras = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    # 要求里引号点名的段落内容 → 删掉所在段落
+    kill = re.findall(r"[『「“\"]([^』」”\"]{2,30})[』」”\"]", ins) if re.search(r"(删|去掉|拿掉)", ins) else []
+    out = []
+    for i, p in enumerate(paras):
+        if any(k in p for k in kill) or any(m in p for m in SUMMARY_MARKERS[:6]):
+            continue
+        for a, b in PLAIN_REPLACEMENTS.items():
+            p = p.replace(a, b)
+        if "对话" in ins and i % 3 == 1 and "“" not in p:
+            p += "“就这样？”有人低声问了一句。"
+        elif ("节奏" in ins or "快" in ins) and len(p) > 60 and i % 2 == 1:
+            cut = p.rfind("，", 0, len(p) - 10)
+            p = (p[:cut] + "。") if cut > 20 else p
+        out.append(p)
+    res = "\n\n".join(out) or text
+    if res == text:  # 保证演示时能看到改动
+        res = re.sub(r"。", "。\n\n", text, count=1) if "。" in text[:-1] else text + "——"
+    return res
+
+
+def mock_foreshadow_plan(meta: dict[str, Any]) -> str:
+    ctx = _ctx(meta)
+    nxt = int(meta.get("next") or 1)
+    n = max(1, min(8, int(meta.get("count") or 3)))
+    pool = [
+        ("short", f"{ctx['villain']}袖口沾着的码头机油味", 2, 8, f"第{{p}}章{ctx['p']}闻到机油味记在心里，第{{r}}章靠它认出夜里的跟踪者。"),
+        ("mid", f"{ctx['ally']}每月初去城西寄出的那封信", 3, 25, "先写他寄信的习惯，中途让主角捡到信封一角，回收时揭开收信人。"),
+        ("long", f"{ctx['item']}内页被撕掉的那一页", 4, 60, "开篇只写缺页，中途有人出高价收购，长线回收时揭开缺页记着谁的账。"),
+        ("mid", f"{ctx['faction']}账房里多出来的一把椅子", 5, 30, "前面当环境细节写，后面揭开那把椅子是给内鬼留的。"),
+        ("short", f"{ctx['loc']}墙上新刷的一块白漆", 6, 12, "白漆下面盖着一行字，回收时被雨水冲出来。"),
+    ]
+    items = []
+    for i in range(n):
+        tier, desc, pc, rc, note = pool[i % len(pool)]
+        p, r = nxt + pc - 2, nxt + rc - 2
+        items.append({"desc": desc if i < len(pool) else f"{desc}（其{i // len(pool) + 1}）", "tier": tier, "plant_ch": p, "resolve_ch": r,
+                      "note": note.format(p=p, r=r), "related": [ctx["p"]]})
+    return _j({"foreshadows": items})
+
+
 HANDLERS = {
     "ideation": mock_ideation,
     "idea_revise": mock_idea_revise,
@@ -677,6 +820,12 @@ HANDLERS = {
     "card_suggest": mock_card_suggest,
     "cover_prompt": mock_cover_prompt,
     "style_extract": mock_style_extract,
+    "book_revise": mock_book_revise,
+    "bible_propose": mock_bible_propose,
+    "outline_node": mock_outline_node,
+    "outline_sync": mock_outline_sync,
+    "chapter_rewrite": mock_chapter_rewrite,
+    "foreshadow_plan": mock_foreshadow_plan,
 }
 
 

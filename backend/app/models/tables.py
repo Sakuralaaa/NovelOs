@@ -97,6 +97,10 @@ class Book(SQLModel, table=True):
     target_words: int = 1_000_000
     chapter_words: int = 2200
     cover_url: Optional[str] = None
+    # 书名/一句话简介/核心设定的旧版本（最近的在最后），用于撤回
+    versions: list[dict[str, Any]] = _json_list()
+    # 本书追加的禁用套路 [{name, keywords:[]}]，与全局列表合并使用
+    banned_tropes: list[dict[str, Any]] = _json_list()
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -153,6 +157,7 @@ class OutlineNode(SQLModel, table=True):
     beats: Optional[dict[str, Any]] = _json_dict_nullable()
     status: str = "planned"
     chapter_id: Optional[int] = None
+    versions: list[dict[str, Any]] = _json_list()  # 标题/概要的旧版本，最近的在最后
 
 
 class Chapter(SQLModel, table=True):
@@ -170,6 +175,7 @@ class Chapter(SQLModel, table=True):
     # 多版本：[{id, content, words, lint, review_overall, review, changes, warnings}]；对外只暴露合约字段
     variants: list[dict[str, Any]] = _json_list()
     outline_node_id: Optional[int] = None
+    history: list[dict[str, Any]] = _json_list()  # 改写/精修前的旧正文 [{content, title, label, at}]，用于撤回
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -177,10 +183,25 @@ class Foreshadow(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     book_id: int = Field(index=True)
     desc: str
+    # planned（计划中，还没写进正文）/ planted / advancing / resolved / dropped
     status: str = "planted"
     planted_ch: int = 0
     last_ch: int = 0
     resolved_ch: Optional[int] = None
+    tier: str = ""  # short / mid / long
+    plan_plant_ch: Optional[int] = None
+    plan_resolve_ch: Optional[int] = None
+    note: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    source: str = "chapter"  # chapter（提交章节时登记）/ ai（AI 规划）/ manual（作者手动）/ outline（来自细纲）
+
+
+class BibleSnapshot(SQLModel, table=True):
+    """设定库整体快照：批量改设定前自动保存，可一键回滚。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    note: str = ""
+    cards: list[dict[str, Any]] = _json_list()
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Package(SQLModel, table=True):

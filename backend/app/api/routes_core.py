@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, WritingSettingsIn, channel_out, job_out, rank_item_out,
+    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TropesIn, WritingSettingsIn, channel_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
@@ -208,6 +208,22 @@ def writing_put(body: WritingSettingsIn, s: Session = Depends(get_session)) -> d
     cur.update({k: v for k, v in body.model_dump().items() if v is not None})
     kv_set(s, WRITING_SETTINGS_KEY, cur)
     return writing_settings(s)
+
+
+@router.get("/settings/tropes")
+def tropes_get(s: Session = Depends(get_session)) -> dict[str, Any]:
+    """全局禁用套路列表（生成选题、设定等时注入提示词，生成结果命中关键词时标黄提醒）。"""
+    from app.services import tropes
+
+    return {"banned": tropes.global_tropes(s), "defaults": tropes.DEFAULT_TROPES}
+
+
+@router.put("/settings/tropes")
+def tropes_put(body: TropesIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from app.services import tropes
+
+    kv_set(s, tropes.TROPES_KEY, {"banned": tropes.clean([t.model_dump() for t in body.banned])})
+    return {"banned": tropes.global_tropes(s), "defaults": tropes.DEFAULT_TROPES}
 
 
 @router.get("/settings/usage")

@@ -58,6 +58,9 @@ def _add_missing_columns(engine: Engine) -> None:
                     conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}{null}'))
                     continue
                 default = col.default.arg if col.default is not None and not callable(col.default.arg) else None
+                if default is None and col.nullable:  # 可空列（Optional[int] 等）直接补 NULL，不填 0
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}'))
+                    continue
                 if default is None:
                     default = "" if "CHAR" in ddl_type.upper() or "TEXT" in ddl_type.upper() else 0
                 lit = f"'{default}'" if isinstance(default, str) else str(int(default))

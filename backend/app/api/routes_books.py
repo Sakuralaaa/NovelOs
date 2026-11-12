@@ -10,6 +10,8 @@ from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.api.schemas import (
+    AiAsk, BibleApplyIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
+    ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
     AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
     IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
@@ -19,9 +21,11 @@ from app.db import get_session
 from app.jobs.manager import submit
 from app.lint.humanlint import count_words
 from app.models.tables import (
-    Book, Card, Chapter, Fact, Foreshadow, Idea, Job, OutlineNode, Package, Style, utcnow,
+    BibleSnapshot, Book, Card, Chapter, Fact, Foreshadow, Idea, Job, OutlineNode, Package, Style, utcnow,
 )
-from app.services import common, outline, packaging, planning, style as style_svc, writing
+from app.services import (
+    bible_ops, book_edit, common, foreshadows as fs_svc, outline, packaging, planning, style as style_svc, tropes, writing,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -59,9 +63,15 @@ def get_book(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
 @router.patch("/books/{book_id}")
 def patch_book(book_id: int, body: BookPatch, s: Session = Depends(get_session)) -> dict[str, Any]:
     b = _book(s, book_id)
-    for k, v in body.model_dump(exclude_unset=True).items():
-        if v is not None:
-            setattr(b, k, v)
+    data = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if "title" in data:
+        data["title"] = str(data["title"]).strip().strip("《》")[:40] or b.title
+    if "banned_tropes" in data:
+        data["banned_tropes"] = tropes.clean(data["banned_tropes"])
+    if any(k in data and data[k] != getattr(b, k) for k in book_edit.INFO_FIELDS):
+        book_edit.push_version(b, "手动修改")  # 书名/简介/核心设定的旧版本，可撤回
+    for k, v in data.items():
+        setattr(b, k, v)
     b.updated_at = utcnow()
     s.add(b)
     s.commit()
@@ -72,7 +82,7 @@ def patch_book(book_id: int, body: BookPatch, s: Session = Depends(get_session))
 @router.delete("/books/{book_id}")
 def delete_book(book_id: int, s: Session = Depends(get_session)) -> dict[str, bool]:
     b = _book(s, book_id)
-    for model in (Card, Fact, OutlineNode, Chapter, Foreshadow):
+    for model in (Card, Fact, OutlineNode, Chapter, Foreshadow, BibleSnapshot):
         for row in s.exec(select(model).where(model.book_id == book_id)):  # type: ignore[attr-defined]
             s.delete(row)
     for model in (Package, Style):
@@ -91,6 +101,47 @@ def delete_book(book_id: int, s: Session = Depends(get_session)) -> dict[str, bo
     return {"ok": True}
 
 
+@router.post("/books/{book_id}/revise")
+async def book_revise(book_id: int, body: AiAsk, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """写要求让 AI 改书名 / 一句话简介 / 核心设定。结果是建议（含下游影响），预览后用 /info 采纳。"""
+    _book(s, book_id)
+    return job_out(submit("book_revise", lambda ctx: book_edit.revise_info(book_id, body.instruction, body.route, ctx), book_id=book_id))
+
+
+@router.post("/books/{book_id}/info")
+def book_info_apply(book_id: int, body: BookInfoApply, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    b = book_edit.apply_info(book_id, body.model_dump(exclude={"instruction"}), body.instruction or "手动修改")
+    s.expire_all()
+    return book_out(s, s.get(Book, b.id) or b)
+
+
+@router.post("/books/{book_id}/undo")
+def book_undo(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    try:
+        b = book_edit.undo_info(book_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    s.expire_all()
+    return book_out(s, s.get(Book, b.id) or b)
+
+
+@router.post("/books/{book_id}/impact")
+def book_impact(book_id: int, body: ImpactIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """列出设定卡、大纲、章节里包含这些词的条目。"""
+    _book(s, book_id)
+    return book_edit.impact(s, book_id, body.terms)
+
+
+@router.post("/books/{book_id}/sync")
+async def book_sync(book_id: int, body: SyncIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """按同一要求生成设定库（冲突审阅）与大纲（逐条勾选）的修改建议，不落库。"""
+    _book(s, book_id)
+    return job_out(submit("book_sync", lambda ctx: book_edit.sync_downstream(
+        book_id, body.instruction, body.terms, body.replacements, list(body.targets), body.route, ctx), book_id=book_id))
+
+
 # ------------------------------------------------------------------ ideas
 
 @router.post("/ideas/generate")
@@ -101,7 +152,8 @@ async def ideas_generate(body: IdeasGenerate) -> dict[str, Any]:
 
 @router.get("/ideas")
 def list_ideas(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return [idea_out(i) for i in s.exec(select(Idea).order_by(Idea.id.desc()).limit(200))]  # type: ignore[union-attr]
+    tl = tropes.global_tropes(s)
+    return [idea_out(i, tl) for i in s.exec(select(Idea).order_by(Idea.id.desc()).limit(200))]  # type: ignore[union-attr]
 
 
 @router.delete("/ideas/{idea_id}")
@@ -178,6 +230,19 @@ def undo_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]
         raise HTTPException(409, str(e)) from e
 
 
+@router.post("/ideas/{idea_id}/detrope")
+async def detrope_idea(idea_id: int, body: DetropeIn | None = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
+    """一键让 AI 换掉命中的禁用套路（走整体修改，可撤回）。"""
+    idea = _editable(s, idea_id)
+    hits = tropes.detect(" ".join([idea.title, idea.logline, idea.hook, idea.endgame, *idea.selling_points, *idea.expectations, *idea.arc]),
+                         tropes.global_tropes(s))
+    if not hits:
+        raise HTTPException(409, "这个选题没有命中禁用套路")
+    instruction = tropes.replace_instruction(hits)
+    route = body.route if body else None
+    return job_out(submit("idea_revise", lambda ctx: planning.revise_idea(idea_id, instruction, route, ctx)))
+
+
 @router.post("/ideas/rescore")
 async def rescore_all_ideas() -> dict[str, Any]:
     return job_out(submit("idea_rescore", lambda ctx: planning.rescore_all(ctx)))
@@ -197,10 +262,37 @@ async def bible_generate(book_id: int, s: Session = Depends(get_session)) -> dic
     return job_out(submit("bible_generate", lambda ctx: planning.generate_bible(book_id, ctx), book_id=book_id, lock_book=True))
 
 
+@router.post("/books/{book_id}/bible/propose")
+async def bible_propose(book_id: int, body: BibleProposeIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """三种模式（rewrite 完全重写 / add 纯增加 / optimize 优化）生成设定建议，不落库；结果里带冲突审阅列表。"""
+    _book(s, book_id)
+    return job_out(submit("bible_propose", lambda ctx: bible_ops.propose(book_id, body.mode, body.instruction, body.route, ctx), book_id=book_id))
+
+
+@router.post("/books/{book_id}/bible/apply")
+def bible_apply(book_id: int, body: BibleApplyIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """按作者在冲突审阅里的选择执行 create / update / delete。执行前自动存快照。"""
+    _book(s, book_id)
+    return bible_ops.apply(book_id, body.mode, body.instruction, [o.model_dump() for o in body.ops], body.facts)
+
+
+@router.get("/books/{book_id}/bible/snapshots")
+def bible_snapshots(book_id: int, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    _book(s, book_id)
+    return bible_ops.list_snapshots(s, book_id)
+
+
+@router.post("/books/{book_id}/bible/snapshots/{snapshot_id}/restore")
+def bible_restore(book_id: int, snapshot_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    return bible_ops.restore(book_id, snapshot_id)
+
+
 @router.get("/books/{book_id}/cards")
 def list_cards(book_id: int, type: str | None = None, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    _book(s, book_id)
-    return [card_out(c) for c in common.cards(s, book_id, type or None)]
+    b = _book(s, book_id)
+    tl = tropes.tropes_for(s, b)
+    return [card_out(c, tl) for c in common.cards(s, book_id, type or None)]
 
 
 @router.post("/books/{book_id}/cards")
@@ -289,7 +381,10 @@ def update_outline(node_id: int, body: OutlineUpdate, s: Session = Depends(get_s
     if "beats" in data and data["beats"] is not None and n.level == "chapter":
         book = _book(s, n.book_id)
         data["beats"] = {**outline.normalize_beats({**(n.beats or {}), **data["beats"]}, n.order, book.chapter_words),
-                         **({"scenes": data["beats"]["scenes"]} if "scenes" in data["beats"] else {})}
+                         **({"scenes": outline._maybe_json(data["beats"]["scenes"])} if "scenes" in data["beats"] else {})}
+    instruction = data.pop("instruction", None) or "手动修改"
+    if any(k in data and data[k] is not None and data[k] != getattr(n, k) for k in ("title", "summary", "beats")):
+        outline.push_node_version(n, instruction)  # 旧版本可撤回
     for k, v in data.items():
         if v is not None:
             setattr(n, k, v)
@@ -297,6 +392,27 @@ def update_outline(node_id: int, body: OutlineUpdate, s: Session = Depends(get_s
     s.commit()
     s.refresh(n)
     return node_out(n)
+
+
+@router.post("/outline/{node_id}/suggest")
+async def outline_suggest(node_id: int, body: AiAsk, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """写要求让 AI 重写该节点的标题和概要（不落库，预览后用 PUT 采纳）。"""
+    node = s.get(OutlineNode, node_id)
+    if node is None:
+        raise HTTPException(404, "大纲节点不存在")
+    return job_out(submit("outline_node", lambda ctx: outline.suggest_node(node_id, body.instruction, body.route, ctx), book_id=node.book_id))
+
+
+@router.post("/outline/{node_id}/undo")
+def outline_undo(node_id: int) -> dict[str, Any]:
+    return node_out(outline.undo_node(node_id))
+
+
+@router.post("/books/{book_id}/outline/apply")
+def outline_apply(book_id: int, body: OutlineApplyIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """批量采纳大纲修改（同步作品信息时勾选的节点）。"""
+    _book(s, book_id)
+    return outline.apply_nodes(book_id, [it.model_dump(exclude_none=True) for it in body.items], body.instruction)
 
 
 @router.delete("/outline/{node_id}")
@@ -409,6 +525,24 @@ async def thicken_chapter(chapter_id: int, s: Session = Depends(get_session)) ->
     return job_out(submit("chapter_thicken", lambda ctx: writing.thicken_chapter_job(chapter_id, ctx), book_id=bid, lock_book=True))
 
 
+@router.post("/chapters/{chapter_id}/rewrite")
+async def rewrite_chapter(chapter_id: int, body: ChapterRewriteIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """按要求改写全章或选中的文字，只返回改写稿，作者对比后用 apply-rewrite 采纳。"""
+    bid = _chapter_book(s, chapter_id)
+    return job_out(submit("chapter_rewrite", lambda ctx: writing.rewrite_chapter_job(
+        chapter_id, body.instruction, body.route, body.scope, body.start, body.end, ctx), book_id=bid))
+
+
+@router.post("/chapters/{chapter_id}/apply-rewrite")
+def apply_rewrite(chapter_id: int, body: ChapterApplyIn) -> dict[str, Any]:
+    return chapter_out(writing.apply_rewrite(chapter_id, body.content, body.label))
+
+
+@router.post("/chapters/{chapter_id}/undo")
+def undo_chapter(chapter_id: int) -> dict[str, Any]:
+    return chapter_out(writing.undo_chapter(chapter_id))
+
+
 @router.post("/chapters/{chapter_id}/adopt-variant")
 def adopt_variant(chapter_id: int, body: AdoptVariantIn) -> dict[str, Any]:
     return chapter_out(writing.adopt_variant(chapter_id, body.variant_id))
@@ -423,6 +557,46 @@ def commit_chapter(chapter_id: int) -> dict[str, Any]:
 def list_foreshadows(book_id: int, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     _book(s, book_id)
     return [foreshadow_out(f) for f in s.exec(select(Foreshadow).where(Foreshadow.book_id == book_id).order_by(Foreshadow.id))]
+
+
+@router.get("/books/{book_id}/foreshadows/overview")
+def foreshadow_overview(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """伏笔页空状态用：细纲里已安排但还没入账的伏笔、已提交章节数、草稿数。"""
+    _book(s, book_id)
+    chs = list(s.exec(select(Chapter).where(Chapter.book_id == book_id)))
+    return {"outline_planned": fs_svc.outline_planned(s, book_id), "committed": sum(1 for c in chs if c.status == "committed"),
+            "drafts": sum(1 for c in chs if c.status != "committed"), "outline_nodes": len(common.outline_nodes(s, book_id)),
+            "last_committed": fs_svc.last_committed(s, book_id)}
+
+
+@router.post("/books/{book_id}/foreshadows")
+def create_foreshadow(book_id: int, body: ForeshadowIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    return foreshadow_out(fs_svc.create(book_id, {**body.model_dump(exclude_unset=True), "source": "manual"}))
+
+
+@router.put("/foreshadows/{fid}")
+def update_foreshadow(fid: int, body: ForeshadowPatch) -> dict[str, Any]:
+    return foreshadow_out(fs_svc.update(fid, body.model_dump(exclude_unset=True)))
+
+
+@router.delete("/foreshadows/{fid}")
+def delete_foreshadow(fid: int) -> dict[str, bool]:
+    fs_svc.delete(fid)
+    return {"ok": True}
+
+
+@router.post("/books/{book_id}/foreshadows/plan")
+async def plan_foreshadows(book_id: int, body: ForeshadowPlanIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """从大纲 / 设定让 AI 规划伏笔（不落库，预览勾选后用 batch 加入）。"""
+    _book(s, book_id)
+    return job_out(submit("foreshadow_plan", lambda ctx: fs_svc.plan(book_id, body.instruction, body.route, body.count, ctx), book_id=book_id))
+
+
+@router.post("/books/{book_id}/foreshadows/batch")
+def add_foreshadows(book_id: int, body: ForeshadowBatchIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    return fs_svc.add_batch(book_id, body.items, body.attach)
 
 
 # ------------------------------------------------------------------ style

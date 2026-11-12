@@ -53,6 +53,12 @@ TASK_ROLE: dict[str, str] = {
     "thicken": "writer",
     "summary": "reviewer",
     "review": "reviewer",
+    "book_revise": "planner",
+    "bible_propose": "planner",
+    "outline_node": "planner",
+    "outline_sync": "planner",
+    "chapter_rewrite": "writer",
+    "foreshadow_plan": "planner",
 }
 
 

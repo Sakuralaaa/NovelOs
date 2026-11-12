@@ -13,7 +13,7 @@ from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway
 from app.models.tables import Book, Card, Fact, Idea, utcnow
 from app.radar import service as radar
-from app.services import common
+from app.services import common, tropes
 from app.services.changes import CARD_TYPES
 from app.services.common import NotFound
 from app.skills.loader import render, system_prompt
@@ -139,10 +139,14 @@ def suggest_field(idea_id: int, field: str, instruction: str, route: str | None,
     user = render("idea_field", gender_label=common.GENDER_LABEL.get(tmp.gender, tmp.gender), field_label=label,
                   idea=_idea_text(tmp), instruction=instruction.strip() or "写得更好、更抓人。",
                   field_rule=f"「{label}」要求：{rule}", value_shape='["…","…"]' if is_list else '"…"')
+    with session_scope() as s:
+        tl = tropes.global_tropes(s)
+    user += tropes.prompt_block(tl, instruction)
     ctx.progress(30, f"改{label}")
     cur = getattr(tmp, field)
     data = get_gateway().chat_json("idea_field", system_prompt("idea_field"), user,
-                                   meta={"field": field, "current": cur, "instruction": instruction}, route=route)
+                                   meta={"field": field, "current": cur, "instruction": instruction,
+                                         "banned_keywords": tropes.keywords(tl, instruction)}, route=route)
     v = data.get("value") if isinstance(data, dict) else data
     if is_list:
         v = [str(x).strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()][:6]
@@ -238,8 +242,11 @@ def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobConte
         history = "\n".join(f"- {v.get('instruction')}" for v in (idea.versions or []) if v.get("instruction")) or "（无）"
         user = render("idea_revise", gender_label=common.GENDER_LABEL.get(gender, gender), idea=_idea_text(idea),
                       history=history, instruction=instruction.strip())
+        tl = tropes.global_tropes(s)
+        user += tropes.prompt_block(tl, instruction)
         cur = {k: getattr(idea, k) for k in _IDEA_FIELDS}
-        meta = {**{k: v for k, v in cur.items() if k != "scores"}, "instruction": instruction, "gender": gender}
+        meta = {**{k: v for k, v in cur.items() if k != "scores"}, "instruction": instruction, "gender": gender,
+                "banned_keywords": tropes.keywords(tl, instruction)}
     ctx.progress(20, "按意见修改")
     it = get_gateway().chat_json("idea_revise", system_prompt("idea_revise"), user, meta=meta, route=route)
     if not isinstance(it, dict) or not it.get("title"):
@@ -300,11 +307,12 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
     with session_scope() as s:
         recent = s.exec(select(Idea).where(Idea.gender == gender).order_by(Idea.id.desc()).limit(30)).all()  # type: ignore[union-attr]
         existing = "\n".join(f"- 《{i.title}》{i.logline[:50]}" for i in recent) or "（无）"
+        tl = tropes.global_tropes(s)
     ctx.progress(20, "构思选题")
     data = get_gateway().chat_json(
         "ideation", system_prompt("ideation"),
         render("ideation", count=count, gender_label=common.GENDER_LABEL.get(gender, gender),
-               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text, existing=existing),
+               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text, existing=existing) + tropes.prompt_block(tl),
         meta={"count": count, "gender": gender, "genre": genre, "trends": trends[:6] if params.get("from_trends") else []},
     )
     items = data.get("ideas") if isinstance(data, dict) else data
@@ -371,6 +379,9 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
         meta = common.kit_meta(s, book)
         user = render("bible", title=book.title, genre=book.genre,
                       gender_label=common.GENDER_LABEL.get(book.gender, book.gender), premise=book.premise or book.tagline)
+        tl = tropes.tropes_for(s, book)
+        meta["banned_keywords"] = tropes.keywords(tl)
+    user += tropes.prompt_block(tl)
     user += research_notes("bible", user, book_id, ctx, 10)
     ctx.progress(15, "生成设定库")
     data = get_gateway().chat_json("bible", system_prompt("bible"), user, meta=meta)
@@ -380,6 +391,10 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
     with session_scope() as s:
         book = common.get_book(s, book_id)
         existing = {c.name: c for c in common.cards(s, book_id)}
+        if existing:  # 已有设定时先存快照，可回滚
+            from app.services.bible_ops import snapshot
+
+            snapshot(s, book_id, "重新生成设定前")
         n_cards = 0
         for it in data["cards"]:
             if not isinstance(it, dict) or not it.get("name"):
@@ -442,6 +457,7 @@ def suggest_card(book_id: int, card_id: int | None, field: str | None, instructi
         cur.setdefault("data", {})
         others = "\n".join(f"[{c.type}] {c.name}：{c.summary}" for c in all_cards if c.id != card_id) or "（无）"
         ctx_text = common.book_context(s, book, with_cards=False)
+        tl = tropes.tropes_for(s, book)
     data_obj = cur.get("data") if isinstance(cur.get("data"), dict) else {}
     if field:
         if field.startswith("data."):
@@ -466,9 +482,11 @@ def suggest_card(book_id: int, card_id: int | None, field: str | None, instructi
         shape = '{"card":{"type":"world|power|faction|character|item|location","name":"","summary":"","data":{},"known_by":[]}}'
     user = render("card_suggest", book_context=ctx_text, others=others, card=_json.dumps(cur, ensure_ascii=False),
                   instruction=instruction.strip() or "写得更具体、更有画面感，和其它设定咬合。", scope=scope, shape=shape)
+    user += tropes.prompt_block(tl, instruction)
     ctx.progress(30, "AI 改设定")
     out = get_gateway().chat_json("card_suggest", system_prompt("card_suggest"), user,
-                                  meta={**meta, "field": field, "current": value, "instruction": instruction}, route=route)
+                                  meta={**meta, "field": field, "current": value, "instruction": instruction,
+                                        "banned_keywords": tropes.keywords(tl, instruction)}, route=route)
     if not isinstance(out, dict):
         raise ValueError("模型没有给出修改")
     if field:
