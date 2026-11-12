@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useMatch } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CheckCircle2, ChevronDown, Loader2, X, XCircle } from '@/components/icons'
 import { Progress } from '@/components/ui/misc'
@@ -8,10 +9,13 @@ import { cn } from '@/lib/utils'
 export function JobTray() {
   const jobs = useTrackedJobs()
   const [open, setOpen] = useState(true)
+  // 书内页面右下角有 Agent 按钮，任务托盘让到它上面
+  const inBook = useMatch('/books/:bookId/*')
+  const agentFab = !!inBook && /^\d+$/.test(inBook.params.bookId ?? '') && !(inBook.params['*'] ?? '').startsWith('agent')
   if (!jobs.length) return null
   const running = jobs.filter((j) => !j.doneAt)
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-40 w-[340px] max-w-[calc(100vw-2rem)]">
+    <div className={cn('pointer-events-none fixed right-4 z-40', agentFab ? 'bottom-[76px] md:bottom-[92px] md:right-7' : 'bottom-4')} style={{ width: 340, maxWidth: 'calc(100vw - 2rem)' }}>
       <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="pointer-events-auto overflow-hidden rounded-xl bg-popover shadow-pop hairline">
         <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left">
           <span className="flex items-center gap-2 text-[13px] font-semibold">

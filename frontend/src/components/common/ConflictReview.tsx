@@ -21,8 +21,10 @@ const isReview = (x: BibleItem) => x.conflicts.length > 0 || x.action === 'updat
 const primaryId = (x: BibleItem) => x.target_id ?? x.conflicts[0]?.card_id ?? null
 
 /** 设定库「冲突审阅」：新增卡可勾选；冲突/改写逐条选择处理方式，支持批量；采纳前自动存快照，可回滚 */
-export function ConflictReview({ bookId, proposal, onDone, onCancel, applyMode }: {
+export function ConflictReview({ bookId, proposal, onDone, onCancel, applyMode, onApplyOps }: {
   bookId: number; proposal: BibleProposal; onDone: () => void; onCancel?: () => void; applyMode?: string
+  /** v0.5：Agent 提案走自己的采纳接口（同样先存快照） */
+  onApplyOps?: (ops: BibleOp[]) => Promise<unknown>
 }) {
   const qc = useQueryClient()
   const clean = proposal.items.filter((x) => !isReview(x))
@@ -57,6 +59,12 @@ export function ConflictReview({ bookId, proposal, onDone, onCancel, applyMode }
   const apply = async () => {
     setBusy(true)
     try {
+      if (onApplyOps) {
+        await onApplyOps(ops)
+        qc.invalidateQueries({ queryKey: qk.cards(bookId) })
+        onDone()
+        return
+      }
       const r = await api.applyBible(bookId, { mode: applyMode ?? proposal.mode, instruction: proposal.instruction, ops, facts: proposal.facts })
       qc.invalidateQueries({ queryKey: qk.cards(bookId) })
       qc.invalidateQueries({ queryKey: qk.facts(bookId) })

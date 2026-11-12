@@ -1,7 +1,7 @@
 import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  BookOpen, Feather, FileText, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
+  Bot, BookOpen, Feather, FileText, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
   PanelLeftClose, PanelLeftOpen, Radar, Search, Settings, Sun, Waypoints,
 } from '@/components/icons'
 import { Logo } from '@/components/common/States'
@@ -29,6 +29,7 @@ export const BOOK_NAV = [
   { to: 'chapters', label: '章节', icon: FileText },
   { to: 'foreshadows', label: '伏笔', icon: Waypoints },
   { to: 'package', label: '包装发布', icon: Package },
+  { to: 'agent', label: 'Agent', icon: Bot },
 ]
 
 export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collapsed: boolean; onToggle: () => void; onSearch: () => void; onNavigate?: () => void }) {

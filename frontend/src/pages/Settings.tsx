@@ -46,6 +46,7 @@ const ROUTES: { key: RouteKey; label: string; desc: string }[] = [
   { key: 'search', label: '联网搜索', desc: '拿不准的现实细节先联网查证' },
   { key: 'embedding', label: '向量检索', desc: '长篇记忆回读，需要 embedding 模型' },
   { key: 'image', label: '生图', desc: '封面生成，需要支持 images 接口的模型' },
+  { key: 'agent', label: '本书 Agent', desc: '书内专属助手，需要支持工具调用（function calling）；不设置时用规划模型' },
 ]
 
 export default function SettingsPage() {

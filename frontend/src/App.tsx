@@ -21,6 +21,7 @@ const Outline = lazy(() => import('@/pages/book/Outline'))
 const Chapters = lazy(() => import('@/pages/book/Chapters'))
 const Foreshadows = lazy(() => import('@/pages/book/Foreshadows'))
 const PackagePage = lazy(() => import('@/pages/book/Package'))
+const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
@@ -64,6 +65,7 @@ export function App() {
                 <Route path="books/:bookId/chapters/:chapterId" element={<S><Chapters /></S>} />
                 <Route path="books/:bookId/foreshadows" element={<S><Foreshadows /></S>} />
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
+                <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />
               </Route>

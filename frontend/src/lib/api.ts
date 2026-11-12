@@ -1,4 +1,5 @@
 import type {
+  AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Style, TrendTopic, WritingSettings,
@@ -171,6 +172,22 @@ export const api = {
   package: (bookId: number) => get<Package>(`/books/${bookId}/package`),
   savePackage: (bookId: number, b: Partial<Package>) => put<Package>(`/books/${bookId}/package`, b),
 
+  // v0.5：每本书的专属 Agent
+  agentTools: () => get<{ tools: AgentToolInfo[]; max_steps: number; examples: string[] }>('/agent/tools'),
+  agentSettings: (bookId: number) => get<{ auto_apply: boolean }>(`/books/${bookId}/agent/settings`),
+  saveAgentSettings: (bookId: number, auto_apply: boolean) => put<{ auto_apply: boolean; book: Book }>(`/books/${bookId}/agent/settings`, { auto_apply }),
+  agentSessions: (bookId: number) => get<AgentSession[]>(`/books/${bookId}/agent/sessions`),
+  createAgentSession: (bookId: number, title?: string) => post<AgentSession>(`/books/${bookId}/agent/sessions`, { title }),
+  agentSession: (sid: number) => get<AgentSessionDetail>(`/agent/sessions/${sid}`),
+  renameAgentSession: (sid: number, title: string) => patch<AgentSession>(`/agent/sessions/${sid}`, { title }),
+  clearAgentSession: (sid: number) => post<AgentSession>(`/agent/sessions/${sid}/clear`),
+  deleteAgentSession: (sid: number) => del<{ ok: boolean }>(`/agent/sessions/${sid}`),
+  sendAgent: (sid: number, b: { content: string; route?: string | null }) => post<{ message: AgentMessage; job: Job }>(`/agent/sessions/${sid}/messages`, b),
+  stopAgent: (sid: number) => post<AgentSession>(`/agent/sessions/${sid}/stop`),
+  applyProposal: (pid: number, b?: { edited?: Record<string, any>; ops?: BibleOp[] }) => post<{ proposal: AgentProposal; job: Job | null }>(`/agent/proposals/${pid}/apply`, b ?? {}),
+  rejectProposal: (pid: number) => post<AgentProposal>(`/agent/proposals/${pid}/reject`),
+  revertProposal: (pid: number) => post<AgentProposal>(`/agent/proposals/${pid}/revert`),
+
   /** 以 Blob 方式下载发布包（兼容 mock 与真实后端） */
   async exportBook(bookId: number, filename: string) {
     let res: Response
@@ -226,4 +243,7 @@ export const qk = {
   foreshadowOverview: (bookId: number) => ['foreshadows', bookId, 'overview'] as const,
   bibleSnapshots: (bookId: number) => ['cards', bookId, 'snapshots'] as const,
   tropes: ['tropes'] as const,
+  agentTools: ['agent', 'tools'] as const,
+  agentSessions: (bookId: number) => ['agent', 'sessions', bookId] as const,
+  agentSession: (sid: number) => ['agent', 'session', sid] as const,
 }

@@ -62,6 +62,7 @@ export const CARD_TYPES: { key: CardType; label: string; hint: string }[] = [
 export const cardTypeLabel = (t: CardType) => CARD_TYPES.find((x) => x.key === t)?.label ?? t
 
 export const JOB_KIND_LABEL: Record<string, string> = {
+  agent_run: 'Agent 处理中',
   radar_refresh: '刷新热点榜单',
   'radar.refresh': '刷新热点榜单',
   ideas_generate: '生成选题',

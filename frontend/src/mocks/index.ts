@@ -1,8 +1,10 @@
 /**
  * 前端自测用 fetch mock —— 仅当 VITE_USE_MOCK=1 时由 main.tsx 动态加载。
- * 覆盖 API_CONTRACT.md（含 v0.1 增补）的全部端点，数据为确定性的虚构示例。
+ * 覆盖 API_CONTRACT.md（含 v0.1 增补、v0.4 按要求让 AI 改、v0.5 每本书的专属 Agent）的全部端点，数据为确定性的虚构示例。
  */
 import type {
+  AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo, BibleItem, BibleOp, BibleProposal, BookInfo,
+  ForeshadowPlanItem, Impact, OutlineSyncItem, Trope, TropeHit,
   Book, Card, Channel, Chapter, ChapterVariant, Foreshadow, Idea, Job, Lint, OutlineNode, Package,
   RadarConfig, RadarSnapshot, Review, Routing, Style,
 } from '@/lib/types'
@@ -18,7 +20,7 @@ const nid = () => ++seq
 // ---------------- DB ----------------
 const db = {
   channels: [] as (Omit<Channel, 'api_key_masked'> & { api_key: string })[],
-  routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, image_mode: 'images' } as Routing,
+  routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, agent: null, image_mode: 'images' } as Routing,
   radarConfig: { enabled: true, daily_hour: 8 } as RadarConfig,
   writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1 },
   snapshots: [{ id: 1, taken_at: ago(60 * 5), source: 'mock', items_count: 60 }] as RadarSnapshot[],
@@ -501,6 +503,373 @@ on('POST', '/books/:id/style/extract', (m) => { const b = bookOf(m[1]); return c
 }) })
 
 on('GET', '/books/:id/export', () => new Response(new Blob(['NovelOS 演示模式导出的发布包占位文件。\n真实后端会返回 zip：建书资料.md、chapters/*.txt、cover.png、AI申报提示.md。\n'], { type: 'text/plain' }), { status: 200, headers: { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('发布包-演示.txt')}` } }))
+
+// ================================================================ v0.4：按要求让 AI 改（补齐前端 mock）
+const DEFAULT_TROPES: Trope[] = [
+  { name: '父母失踪/神秘消失', keywords: ['父亲失踪', '母亲失踪', '父母失踪', '父母神秘消失'] },
+  { name: '隐藏身世/大人物之子', keywords: ['隐藏身世', '真实身世', '大人物之子', '私生子'] },
+  { name: '神秘血脉', keywords: ['神秘血脉', '上古血脉', '血脉觉醒'] },
+  { name: '退婚流', keywords: ['退婚', '悔婚', '解除婚约'] },
+  { name: '被废天才/天才陨落', keywords: ['修为被废', '天才陨落', '丹田被废'] },
+]
+let tropeList: Trope[] = DEFAULT_TROPES.map((t) => ({ ...t, keywords: [...t.keywords] }))
+const detectTropes = (text: string): TropeHit[] => tropeList.map((t) => ({ name: t.name, hits: t.keywords.filter((k) => text.includes(k)) })).filter((h) => h.hits.length)
+const bookHist: Record<number, (BookInfo & { instruction: string })[]> = {}
+const nodeHist: Record<number, { title: string; summary: string; beats: any }[]> = {}
+const chHist: Record<number, { content: string; title: string; label: string }[]> = {}
+const bibleSnaps: { id: number; book_id: number; note: string; cards: Card[]; created_at: string }[] = []
+const QUOTE_RX = /[『「“"]([^』」”"]{2,20})[』」”"]/g
+const termsOf = (ins: string) => {
+  const out = [...ins.matchAll(QUOTE_RX)].map((x) => x[1])
+  const neg = ins.match(/(?:不要|别|去掉|弱化)(?:再)?(?:强调|提|用)?([\u4e00-\u9fa5]{2,4}?)(?=[，,。、\s]|$)/)
+  if (neg && !out.includes(neg[1])) out.push(neg[1])
+  return out
+}
+const infoOf = (b: Book): BookInfo => ({ title: b.title, tagline: b.tagline, premise: b.premise ?? '' })
+const strip2 = (s: string, terms: string[], reps: Record<string, string> = {}) => terms.reduce((x, t) => x.split(t).join(reps[t] ?? ''), s).replace(/[，,]{2,}/g, '，')
+function impactOf(bookId: number, terms: string[]): Impact {
+  const cards = db.cards.filter((c) => c.book_id === bookId).filter((c) => terms.some((t) => JSON.stringify(c).includes(t)))
+    .map((c) => ({ id: c.id, name: c.name, type: c.type, terms: terms.filter((t) => JSON.stringify(c).includes(t)), snippet: c.summary.slice(0, 40) }))
+  const outline = db.outline.filter((n) => n.book_id === bookId).filter((n) => terms.some((t) => `${n.title}${n.summary}`.includes(t)))
+    .map((n) => ({ id: n.id, level: n.level, order: n.order, title: n.title, status: n.status, terms: terms.filter((t) => `${n.title}${n.summary}`.includes(t)), snippet: n.summary.slice(0, 40) }))
+  const chapters = db.chapters.filter((c) => c.book_id === bookId && terms.some((t) => (c.content ?? '').includes(t)))
+    .map((c) => ({ id: c.id, number: c.number, title: c.title, status: c.status, terms: terms.filter((t) => (c.content ?? '').includes(t)), count: 1, snippet: '' }))
+  return { terms, cards, outline, chapters, total: cards.length + outline.length + chapters.length }
+}
+function reviseResult(b: Book, ins: string) {
+  const terms = termsOf(ins)
+  const reps = Object.fromEntries(terms.map((t) => [t, ins.includes(`『${t}』`) || ins.includes(`“${t}”`) ? `无名${t.slice(-2)}` : '']))
+  const cur = infoOf(b)
+  const proposal = { title: cur.title, tagline: strip2(cur.tagline, terms, reps) + '（已按要求调整）', premise: strip2(cur.premise, terms, reps) }
+  return { book_id: b.id, instruction: ins, current: cur, proposal, change: `按“${ins.slice(0, 12)}”改了简介`, terms, replacements: reps, impact: impactOf(b.id, terms), trope_hits: detectTropes(JSON.stringify(proposal)) }
+}
+function snapBible(bookId: number, note: string) {
+  const s = { id: nid(), book_id: bookId, note, cards: db.cards.filter((c) => c.book_id === bookId).map((c) => ({ ...c, data: { ...c.data } })), created_at: now() }
+  bibleSnaps.unshift(s)
+  return s
+}
+function applyBibleOps(bookId: number, ops: BibleOp[], note: string) {
+  const snap = snapBible(bookId, note)
+  const n = { created: 0, updated: 0, deleted: 0 }
+  for (const op of ops) {
+    if (op.op === 'delete') { db.cards = db.cards.filter((c) => !(c.id === op.card_id && c.book_id === bookId)); n.deleted++ }
+    else if (op.op === 'update') { const c = db.cards.find((x) => x.id === op.card_id); if (c && op.card) { Object.assign(c, op.card, { updated_at: now() }); n.updated++ } }
+    else if (op.card) { db.cards.push({ ...op.card, id: nid(), book_id: bookId, updated_at: now() }); n.created++ }
+  }
+  return { ...n, snapshot_id: snap.id }
+}
+function bibleProposalOf(bookId: number, mode: 'rewrite' | 'add' | 'optimize', ins: string, terms: string[] = [], reps: Record<string, string> = {}): BibleProposal {
+  const cards = db.cards.filter((c) => c.book_id === bookId)
+  const items: BibleItem[] = []
+  if (mode === 'optimize') {
+    const hit = terms.length ? cards.filter((c) => terms.some((t) => JSON.stringify(c).includes(t))) : cards.slice(0, 2)
+    hit.forEach((c, i) => items.push({ key: `n${i + 1}`, action: 'update', target_id: c.id, old: { ...c }, conflicts: [], trope_hits: [], default: 'replace',
+      card: { type: c.type, name: strip2(c.name, terms, reps) || c.name, summary: terms.length ? strip2(c.summary, terms, reps) : `${c.summary}（${ins.slice(0, 8)}）`, data: c.data, known_by: c.known_by } }))
+  } else {
+    items.push({ key: 'n1', action: 'add', target_id: null, old: null, conflicts: [], trope_hits: [], default: 'add', card: { type: 'character', name: '茶馆掌柜', summary: '消息灵通，两头下注。', data: { role: 'supporting' }, known_by: [] } })
+    const first = cards[0]
+    if (first) items.push({ key: 'n2', action: 'add', target_id: null, old: { ...first }, trope_hits: [], default: 'keep_old', card: { type: first.type, name: first.name, summary: `另一版本：${ins.slice(0, 10)}`, data: {}, known_by: [] },
+      conflicts: [{ card_id: first.id, name: first.name, type: first.type, reason: '同名设定，简介与旧卡矛盾', source: 'program' }] })
+  }
+  return { book_id: bookId, mode, instruction: ins, change: `按“${ins.slice(0, 12)}”${mode === 'optimize' ? '优化' : '新增'}设定`, items, removals: [], facts: [],
+    counts: { add: items.filter((x) => !x.conflicts.length && x.action === 'add').length, review: items.filter((x) => x.conflicts.length || x.action === 'update').length, removals: 0 } }
+}
+function rewriteText(text: string, ins: string) {
+  const paras = text.split('\n').filter((p) => p.trim())
+  return paras.map((p, i) => (i % 3 === 1 ? (ins.includes('对话') ? `${p}“就这样？”有人低声问了一句。` : p.replace(/，[^，。]{0,12}。$/, '。')) : p)).join('\n')
+}
+
+on('POST', '/books/:id/revise', (m, b) => { const book = bookOf(m[1]); return createJob('book_revise', book.id, 1600, ['按要求改作品信息…', '检查下游影响…'], () => reviseResult(book, String(b.instruction ?? ''))) })
+on('POST', '/books/:id/info', (m, b) => {
+  const book = bookOf(m[1])
+  ;(bookHist[book.id] ??= []).push({ ...infoOf(book), instruction: b.instruction || '手动修改' })
+  for (const k of ['title', 'tagline', 'premise'] as const) if (b[k] != null) (book as any)[k] = b[k]
+  return Object.assign(book, { versions: bookHist[book.id].length, last_instruction: b.instruction, updated_at: now() })
+})
+on('POST', '/books/:id/undo', (m) => {
+  const book = bookOf(m[1])
+  const prev = bookHist[book.id]?.pop()
+  if (!prev) throw new HttpErr(409, '没有可以撤回的版本')
+  return Object.assign(book, { title: prev.title, tagline: prev.tagline, premise: prev.premise, versions: bookHist[book.id].length })
+})
+on('POST', '/books/:id/impact', (m, b) => impactOf(+m[1], b.terms ?? []))
+on('POST', '/books/:id/sync', (m, b) => createJob('book_sync', +m[1], 2000, ['同步设定库…', '同步大纲…'], () => {
+  const imp = impactOf(+m[1], b.terms ?? [])
+  const items: OutlineSyncItem[] = imp.outline.map((x) => { const n = db.outline.find((o) => o.id === x.id)!; return { node_id: n.id, level: n.level, old: { title: n.title, summary: n.summary }, new: { title: strip2(n.title, b.terms, b.replacements), summary: strip2(n.summary, b.terms, b.replacements) }, reason: '拿掉旧说法' } })
+  return { terms: imp.terms, replacements: b.replacements, bible: imp.cards.length ? bibleProposalOf(+m[1], 'optimize', b.instruction, b.terms, b.replacements) : null, outline: { items }, chapters: imp.chapters }
+}))
+on('POST', '/books/:id/bible/propose', (m, b) => createJob('bible_propose', +m[1], 2200, ['AI 生成设定…', '检测冲突…'], () => bibleProposalOf(+m[1], b.mode, String(b.instruction ?? ''))))
+on('POST', '/books/:id/bible/apply', (m, b) => applyBibleOps(+m[1], b.ops ?? [], `${b.mode}前`))
+on('GET', '/books/:id/bible/snapshots', (m) => bibleSnaps.filter((s) => s.book_id === +m[1]).map((s) => ({ id: s.id, note: s.note, count: s.cards.length, created_at: s.created_at, names: s.cards.slice(0, 12).map((c) => c.name) })))
+on('POST', '/books/:id/bible/snapshots/:sid/restore', (m) => {
+  const snap = must(bibleSnaps.find((s) => s.id === +m[2] && s.book_id === +m[1]), '快照')
+  const before = snapBible(+m[1], `回滚到「${snap.note}」之前`)
+  db.cards = [...db.cards.filter((c) => c.book_id !== +m[1]), ...snap.cards.map((c) => ({ ...c }))]
+  return { restored: snap.cards.length, snapshot_id: before.id }
+})
+on('POST', '/outline/:id/suggest', (m, b) => { const n = must(db.outline.find((o) => o.id === +m[1]), '节点'); return createJob('outline_node', n.book_id, 1400, ['AI 重写节点…'], () => ({ node_id: n.id, current: { title: n.title, summary: n.summary }, proposal: { title: n.title, summary: `${n.summary}（按“${String(b.instruction).slice(0, 10)}”重写）` }, change: '重写了概要', instruction: b.instruction })) })
+on('POST', '/outline/:id/undo', (m) => {
+  const n = must(db.outline.find((o) => o.id === +m[1]), '节点')
+  const prev = nodeHist[n.id]?.pop()
+  if (!prev) throw new HttpErr(409, '没有可以撤回的版本')
+  return Object.assign(n, prev, { versions: nodeHist[n.id].length })
+})
+on('POST', '/books/:id/outline/apply', (_m, b) => {
+  let updated = 0
+  for (const it of b.items ?? []) {
+    const n = db.outline.find((o) => o.id === it.node_id)
+    if (!n) continue
+    ;(nodeHist[n.id] ??= []).push({ title: n.title, summary: n.summary, beats: n.beats })
+    Object.assign(n, { title: it.title ?? n.title, summary: it.summary ?? n.summary, versions: nodeHist[n.id].length, last_instruction: b.instruction })
+    updated++
+  }
+  return { updated }
+})
+on('POST', '/chapters/:id/rewrite', (m, b) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); return createJob('chapter_rewrite', c.book_id, 2400, ['按要求改写…', '人味检查…'], () => {
+  const before = c.content ?? ''
+  const after = rewriteText(before, String(b.instruction ?? ''))
+  return { chapter_id: c.id, scope: 'all', before, after, changed: before !== after, words_before: countWords(before), words_after: countWords(after), ai_score_after: mkLint(after).ai_score }
+}) })
+on('POST', '/chapters/:id/apply-rewrite', (m, b) => {
+  const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
+  ;(chHist[c.id] ??= []).push({ content: c.content ?? '', title: c.title, label: b.label || '按要求改写前' })
+  Object.assign(c, { content: b.content, words: countWords(b.content), lint: mkLint(b.content), history: chHist[c.id].length, last_history_label: b.label, updated_at: now() })
+  return c
+})
+on('POST', '/chapters/:id/undo', (m) => {
+  const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
+  const prev = chHist[c.id]?.pop()
+  if (!prev) throw new HttpErr(409, '没有可以撤回的版本')
+  return Object.assign(c, { content: prev.content, title: prev.title, words: countWords(prev.content), lint: mkLint(prev.content), history: chHist[c.id].length })
+})
+on('POST', '/ideas/:id/detrope', (m) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
+  const hits = detectTropes(JSON.stringify(idea))
+  if (!hits.length) throw new HttpErr(409, '这个选题没有命中禁用套路')
+  return createJob('idea_revise', null, 1600, ['换掉俗套…'], () => { idea.logline = strip2(idea.logline, hits.flatMap((h) => h.hits)); return { idea_id: idea.id } })
+})
+on('GET', '/settings/tropes', () => ({ banned: tropeList, defaults: DEFAULT_TROPES }))
+on('PUT', '/settings/tropes', (_m, b) => { tropeList = b.banned ?? []; return { banned: tropeList, defaults: DEFAULT_TROPES } })
+on('GET', '/books/:id/foreshadows/overview', (m) => {
+  const chs = db.chapters.filter((c) => c.book_id === +m[1])
+  return { outline_planned: [], committed: chs.filter((c) => c.status === 'committed').length, drafts: chs.filter((c) => c.status !== 'committed').length,
+    outline_nodes: db.outline.filter((n) => n.book_id === +m[1]).length, last_committed: Math.max(0, ...chs.filter((c) => c.status === 'committed').map((c) => c.number)) }
+})
+on('POST', '/books/:id/foreshadows/plan', (m, b) => createJob('foreshadow_plan', +m[1], 1800, ['读大纲和设定…', '规划长短线伏笔…'], () => ({ book_id: +m[1], current: 0, outline_max: 8,
+  items: Array.from({ length: Math.min(8, b.count || 3) }, (_, i): ForeshadowPlanItem => ({ desc: ['摩托帮账本上被撕掉的一页', '苏晚袖口的旧针眼', '超市地下室那扇锁死的门', '金牙脖子上的旧伤'][i % 4], tier: (['short', 'mid', 'long'] as const)[i % 3], plant_ch: 2 + i, resolve_ch: 8 + i * 10, note: '先当环境细节写，后面揭开', related: ['林野'] })) })))
+on('POST', '/books/:id/foreshadows/batch', (m, b) => {
+  let created = 0
+  for (const it of b.items ?? []) { db.foreshadows.push({ id: nid(), book_id: +m[1], desc: it.desc, status: 'planned', planted_ch: 0, last_ch: 0, resolved_ch: null, tier: it.tier, plan_plant_ch: it.plant_ch, plan_resolve_ch: it.resolve_ch, note: it.note, source: it.source ?? 'ai' }); created++ }
+  return { created, attached: b.attach ? created : 0 }
+})
+on('POST', '/books/:id/foreshadows', (m, b) => { const f: Foreshadow = { id: nid(), book_id: +m[1], desc: b.desc, status: b.status ?? 'planned', planted_ch: b.planted_ch ?? 0, last_ch: b.planted_ch ?? 0, resolved_ch: b.resolved_ch ?? null, tier: b.tier ?? '', plan_plant_ch: b.plan_plant_ch ?? null, plan_resolve_ch: b.plan_resolve_ch ?? null, note: b.note ?? '', source: 'manual' }; db.foreshadows.push(f); recalc(+m[1]); return f })
+on('PUT', '/foreshadows/:id', (m, b) => { const f = must(db.foreshadows.find((x) => x.id === +m[1]), '伏笔'); Object.assign(f, b); recalc(f.book_id); return f })
+on('DELETE', '/foreshadows/:id', (m) => { const f = must(db.foreshadows.find((x) => x.id === +m[1]), '伏笔'); db.foreshadows = db.foreshadows.filter((x) => x.id !== f.id); recalc(f.book_id); return { ok: true } })
+
+// ================================================================ v0.5：每本书的专属 Agent（规则脚本，逐步出现）
+type MProposal = AgentProposal & { _undo?: () => void }
+interface MSession { id: number; book_id: number; title: string; created_at: string; updated_at: string; messages: AgentMessage[]; queue: { at: number; fn: () => void }[]; job: (typeof db.jobs)[number] | null; stop?: boolean }
+const agentSessions: MSession[] = []
+const agentProposals: MProposal[] = []
+const autoApply = new Map<number, boolean>()
+const TOOL_INFO: AgentToolInfo[] = [
+  ['get_book_info', '读作品信息', 'read'], ['search_bible', '检索设定库', 'read'], ['get_card', '读设定卡', 'read'], ['get_outline', '读大纲树', 'read'],
+  ['get_outline_node', '读大纲节点', 'read'], ['list_chapters', '列章节', 'read'], ['get_chapter', '读章节', 'read'], ['list_foreshadows', '读伏笔', 'read'],
+  ['get_style', '读文风', 'read'], ['get_package', '读包装', 'read'], ['get_banned_tropes', '读禁用套路', 'read'], ['find_mentions', '查影响范围', 'read'],
+  ['web_search', '联网搜索', 'read'], ['revise_book_info', '改作品信息', 'write'], ['sync_downstream', '同步设定和大纲', 'write'], ['propose_bible', '改设定库', 'write'],
+  ['delete_card', '删设定卡', 'write'], ['suggest_outline_node', '改大纲节点', 'write'], ['rewrite_chapter', '改写章节', 'write'], ['plan_foreshadows', '规划伏笔', 'write'],
+  ['add_foreshadow', '加伏笔', 'write'], ['update_foreshadow', '改伏笔', 'write'], ['delete_foreshadow', '删伏笔', 'write'], ['propose_package', '改简介/包装', 'write'],
+  ['revise_cover_prompt', '改封面提示词', 'write'], ['generate_covers', '生成封面', 'write'], ['write_next_chapter', '写下一章', 'write'],
+].map(([name, label, kind]) => ({ name, label, kind: kind as 'read' | 'write', description: label }))
+const toolLabel = (n: string) => TOOL_INFO.find((t) => t.name === n) ?? { label: n, kind: 'read' as const }
+const KIND_LABEL: Record<string, string> = { book_info: '作品信息', bible: '设定库', outline_nodes: '大纲', chapter_rewrite: '章节改写', foreshadow_add: '新增伏笔', package: '包装', covers: '生成封面', write_chapter: '写下一章' }
+const agentSessOut = (s: MSession): AgentSession => ({ id: s.id, book_id: s.book_id, title: s.title, messages: s.messages.length, running: s.queue.length > 0, running_job_id: s.queue.length ? s.job?.id ?? null : null, last_user: s.messages.filter((x) => x.role === 'user').at(-1)?.content.slice(0, 60) ?? '', created_at: s.created_at, updated_at: s.updated_at })
+const pumpAgent = (s: MSession) => { const t = Date.now(); while (s.queue.length && s.queue[0].at <= t) { if (s.stop) { s.queue = []; addMsg(s, { role: 'notice', content: '已按你的要求停下。' }); break } s.queue.shift()!.fn() } }
+function addMsg(s: MSession, m: Partial<AgentMessage>): AgentMessage {
+  const msg: AgentMessage = { id: nid(), role: 'assistant', content: '', tool_calls: [], tool_call_id: '', name: '', summary: '', status: 'ok', proposal_ids: [], job_ids: [], created_at: now(), ...m }
+  s.messages.push(msg); s.updated_at = now(); return msg
+}
+function mkProposal(s: MSession, kind: MProposal['kind'], title: string, summary: string, payload: Record<string, any>, extra: Partial<MProposal> = {}): MProposal {
+  const p: MProposal = { id: nid(), book_id: s.book_id, session_id: s.id, message_id: null, kind, kind_label: KIND_LABEL[kind] ?? kind, title, summary, payload, status: 'pending', destructive: false, needs_review: false, auto_applied: false, result: null, error: '', job_id: null, revertible: false, created_at: now(), updated_at: now(), ...extra }
+  if (kind === 'bible') p.needs_review = (payload.items ?? []).some((x: any) => x.conflicts?.length)
+  agentProposals.push(p)
+  if (autoApply.get(s.book_id) && !p.destructive && !p.needs_review) { try { applyMock(p); p.auto_applied = true } catch (e: any) { p.error = `自动采纳失败：${e?.detail ?? e?.message}` } }
+  return p
+}
+function applyMock(p: MProposal, edited?: Record<string, any>, ops?: BibleOp[]) {
+  const book = bookOf(String(p.book_id))
+  const pl = p.payload
+  if (p.kind === 'book_info') {
+    const before = infoOf(book)
+    ;(bookHist[book.id] ??= []).push({ ...before, instruction: 'Agent' })
+    Object.assign(book, { ...pl.proposal, ...(edited ?? {}), versions: bookHist[book.id].length, updated_at: now() })
+    p._undo = () => { Object.assign(book, before); bookHist[book.id].pop() }
+  } else if (p.kind === 'bible') {
+    const use = ops ?? (pl.items as BibleItem[]).filter((x) => !x.conflicts.length).map((x): BibleOp => (x.action === 'update' && x.target_id ? { op: 'update', card_id: x.target_id, card: x.card } : { op: 'create', card: x.card }))
+    const r = applyBibleOps(book.id, use, 'Agent 改设定前')
+    p.result = r
+    p._undo = () => { const snap = bibleSnaps.find((x) => x.id === r.snapshot_id)!; db.cards = [...db.cards.filter((c) => c.book_id !== book.id), ...snap.cards] }
+  } else if (p.kind === 'outline_nodes') {
+    const olds = (pl.items as OutlineSyncItem[]).map((it) => { const n = db.outline.find((o) => o.id === it.node_id)!; const old = { title: n.title, summary: n.summary }; const e = edited?.items?.find((x: any) => x.node_id === it.node_id) ?? {}; Object.assign(n, it.new, e); return [n, old] as const })
+    p._undo = () => olds.forEach(([n, old]) => Object.assign(n, old))
+  } else if (p.kind === 'chapter_rewrite') {
+    const c = must(db.chapters.find((x) => x.id === pl.chapter_id), '章节')
+    if (c.content !== pl.before) throw new HttpErr(409, '这一章在提案之后又改过，请让 Agent 按现在的正文重新改')
+    const content = edited?.content ?? pl.after
+    Object.assign(c, { content, words: countWords(content), lint: mkLint(content) })
+    p._undo = () => Object.assign(c, { content: pl.before, words: countWords(pl.before), lint: mkLint(pl.before) })
+  } else if (p.kind === 'foreshadow_add') {
+    const items = edited?.items ?? pl.items
+    const ids = items.map((it: any) => { const f: Foreshadow = { id: nid(), book_id: book.id, desc: it.desc, status: 'planned', planted_ch: 0, last_ch: 0, resolved_ch: null, tier: it.tier, plan_plant_ch: it.plant_ch, plan_resolve_ch: it.resolve_ch, note: it.note, source: 'ai' }; db.foreshadows.push(f); return f.id })
+    p.result = { ids }
+    p._undo = () => { db.foreshadows = db.foreshadows.filter((f) => !ids.includes(f.id)) }
+  } else if (p.kind === 'package') {
+    const pkg = pkgOf(book.id)
+    const before = { ...pkg }
+    db.packages.set(book.id, { ...pkg, ...pl.after, ...(edited ?? {}) })
+    p._undo = () => db.packages.set(book.id, before)
+  } else if (p.kind === 'covers' || p.kind === 'write_chapter') {
+    const isCover = p.kind === 'covers'
+    const j = createJob(isCover ? 'covers_generate' : 'chapter_write_next', book.id, isCover ? 3200 : 5200, isCover ? ['组装封面提示词…', '调用生图模型…', '叠加书名排版…'] : ['取下一章细纲…', '写作正文…', '证据式审稿…', '人味 lint…'], () => {
+      if (isCover) {
+        const urls = [coverDataUrl(book.title, nid() % 6), coverDataUrl(book.title, nid() % 6)]
+        const pkg = pkgOf(book.id)
+        db.packages.set(book.id, { ...pkg, covers: [...pkg.covers, ...urls], chosen_cover: pkg.chosen_cover ?? urls[0] })
+        Object.assign(p, { status: 'applied', revertible: true, result: { covers: urls } })
+        p._undo = () => { const k = pkgOf(book.id); db.packages.set(book.id, { ...k, covers: k.covers.filter((u: string) => !urls.includes(u)) }) }
+        return { covers: urls }
+      }
+      const ch = writeOne(book.id, pl.variants ?? 1)
+      Object.assign(p, { status: 'applied', revertible: true, result: { chapter_id: ch.id } })
+      p._undo = () => { db.chapters = db.chapters.filter((c) => c.id !== ch.id); recalc(book.id) }
+      return { chapter_id: ch.id }
+    })
+    Object.assign(p, { status: 'running', job_id: j.id, updated_at: now() })
+    return j
+  }
+  Object.assign(p, { status: 'applied', revertible: true, updated_at: now() })
+  return null
+}
+function scriptFor(s: MSession, text: string) {
+  const book = bookOf(String(s.book_id))
+  const t0 = Date.now()
+  let at = t0
+  const step = (ms: number, fn: () => void) => { at += ms; s.queue.push({ at, fn }) }
+  const pids: number[] = []
+  const call = (calls: [string, Record<string, any>][], say = '') => {
+    const ids = calls.map(([name], i) => `mock_${nid()}_${i}_${name}`)
+    step(650, () => addMsg(s, { role: 'assistant', content: say, tool_calls: calls.map(([name, args], i) => ({ id: ids[i], name, arguments: args, ...toolLabel(name) })) }))
+    return ids
+  }
+  const result = (id: string, name: string, summary: string, data: Record<string, any> = {}, mk?: () => MProposal[]) => step(800, () => {
+    const ps = mk?.() ?? []
+    ps.forEach((p) => pids.push(p.id))
+    const m = addMsg(s, { role: 'tool', tool_call_id: id, name, ...toolLabel(name), summary, content: JSON.stringify({ ok: true, summary, ...data, proposal_ids: ps.map((p) => p.id) }), proposal_ids: ps.map((p) => p.id) })
+    ps.forEach((p) => { p.message_id = m.id })
+  })
+  const finish = (head: string) => step(600, () => {
+    const lines = s.messages.filter((m) => m.role === 'tool' && m.created_at >= new Date(t0).toISOString() && m.name !== 'get_book_info').map((m) => `- ${m.summary}`)
+    const auto = autoApply.get(s.book_id)
+    addMsg(s, { role: 'assistant', content: `${head}\n${lines.join('\n')}${pids.length ? `\n提案 ${pids.map((x) => `#${x}`).join('、')} ${auto ? '已自动采纳，随时可以撤回。' : '在上面，点「采纳」才会写入；不满意可以拒绝，或改完再采纳。'}` : ''}\n（演示模式：以上由规则脚本生成）` })
+  })
+  const terms = termsOf(text)
+  if (/写下一章|写一章|续写/.test(text)) {
+    const [id] = call([['write_next_chapter', { variants: 1 }]], '好，按章细纲写下一章。')
+    const n = db.chapters.filter((c) => c.book_id === book.id).length + 1
+    result(id, 'write_next_chapter', '提案「写下一章」— 等作者采纳', {}, () => [mkProposal(s, 'write_chapter', `写第 ${n} 章`, '按章细纲写作 → 审稿 → 人味检查 → 定点修改，写完是草稿', { variants: 1, number: n })])
+    finish('下一章的写作任务准备好了：')
+  } else if (text.includes('封面')) {
+    const [a, b] = call([['get_package', {}], ['revise_cover_prompt', { instruction: text }]], '先看看现在的包装，再改封面提示词。')
+    result(a, 'get_package', '读取包装（书名候选、简介、标签、封面）')
+    const prompt = `${pkgOf(book.id).cover_prompt || '冰封城市里唯一亮灯的超市，主角立于门口'}，${text.slice(0, 16)}`
+    result(b, 'revise_cover_prompt', '提案「改封面提示词」— 等作者采纳', {}, () => [mkProposal(s, 'package', '改封面提示词', text.slice(0, 40), { before: { cover_prompt: pkgOf(book.id).cover_prompt }, after: { cover_prompt: prompt } })])
+    const [c] = call([['generate_covers', { prompt, n: 2 }]])
+    result(c, 'generate_covers', '提案「生成 2 张封面」— 等作者采纳', {}, () => [mkProposal(s, 'covers', '生成 2 张封面', prompt.slice(0, 80), { prompt, n: 2 })])
+    finish('封面这边：')
+  } else if (text.includes('伏笔')) {
+    const [a, b] = call([['list_foreshadows', {}], ['plan_foreshadows', { instruction: text, count: 3, attach: true }]])
+    result(a, 'list_foreshadows', `伏笔 ${db.foreshadows.filter((f) => f.book_id === book.id).length} 条`)
+    const items = [{ desc: '摩托帮账本上被撕掉的一页', tier: 'long', plant_ch: 7, resolve_ch: 60, note: '开篇只写缺页，中途有人高价收购' }, { desc: '苏晚袖口的旧针眼', tier: 'mid', plant_ch: 8, resolve_ch: 25, note: '先当细节写' }, { desc: '超市地下室那扇锁死的门', tier: 'short', plant_ch: 9, resolve_ch: 15, note: '门后有人敲' }]
+    result(b, 'plan_foreshadows', '提案「规划 3 条伏笔」— 等作者采纳', {}, () => [mkProposal(s, 'foreshadow_add', '规划 3 条伏笔', items.map((x) => x.desc).join('；'), { items, attach: true })])
+    finish('伏笔规划好了：')
+  } else if (/第\s*\d+\s*章/.test(text) && /改写|节奏|对话|删/.test(text)) {
+    const num = Number(text.match(/第\s*(\d+)\s*章/)![1])
+    const c = db.chapters.find((x) => x.book_id === book.id && x.number === num)
+    const [a, b] = call([['get_chapter', { number: num, part: 'summary' }], ['rewrite_chapter', { number: num, instruction: text }]])
+    result(a, 'get_chapter', c ? `读取第 ${num} 章《${c.title}》（摘要）` : `没有找到第 ${num} 章`)
+    if (c) {
+      const after = rewriteText(c.content ?? '', text)
+      result(b, 'rewrite_chapter', `提案「改写第 ${num} 章」— 等作者采纳`, {}, () => [mkProposal(s, 'chapter_rewrite', `改写第 ${num} 章《${c.title}》`, `${c.words} → ${countWords(after)} 字`, { chapter_id: c.id, number: num, title: c.title, instruction: text, before: c.content, after, words_before: c.words, words_after: countWords(after), ai_score_after: mkLint(after).ai_score })])
+    } else result(b, 'rewrite_chapter', `改写章节失败：没有找到第 ${num} 章`)
+    finish(`第 ${num} 章：`)
+  } else if (/别|不要|改|换|同步|去掉|弱化|名/.test(text)) {
+    const [a, b] = call([['get_book_info', {}], ['search_bible', { query: terms.join(' ') }]], '我先看看作品信息和设定库里相关的卡。')
+    result(a, 'get_book_info', `《${book.title}》：${book.stats.chapters} 章，${db.cards.filter((c) => c.book_id === book.id).length} 张设定卡`)
+    result(b, 'search_bible', `设定库里含「${terms.join(' ')}」的共 ${impactOf(book.id, terms).cards.length} 张卡`)
+    const [c] = call([['revise_book_info', { instruction: text }]])
+    const rev = reviseResult(book, text)
+    result(c, 'revise_book_info', '提案「改一句话简介」— 等作者采纳', {}, () => [mkProposal(s, 'book_info', '改一句话简介', rev.change, rev)])
+    const [d] = call([['sync_downstream', { instruction: text, terms, replacements: rev.replacements, targets: ['bible', 'outline'] }]])
+    result(d, 'sync_downstream', '同步：设定库提案、大纲提案', {}, () => {
+      const out: MProposal[] = []
+      const bp = bibleProposalOf(book.id, 'optimize', text, terms, rev.replacements)
+      if (bp.items.length) out.push(mkProposal(s, 'bible', `同步设定库：${terms.join('、')}`, bp.change, bp))
+      const imp = impactOf(book.id, terms)
+      const items = imp.outline.map((x) => { const n = db.outline.find((o) => o.id === x.id)!; return { node_id: n.id, level: n.level, old: { title: n.title, summary: n.summary }, new: { title: strip2(n.title, terms, rev.replacements), summary: strip2(n.summary, terms, rev.replacements) }, reason: '拿掉旧说法' } })
+      if (items.length) out.push(mkProposal(s, 'outline_nodes', `同步大纲 ${items.length} 个节点`, '拿掉旧说法', { instruction: text, items }))
+      return out
+    })
+    finish('按你的要求，我做了这些：')
+  } else {
+    const [a] = call([['get_book_info', {}]])
+    result(a, 'get_book_info', `《${book.title}》：${book.stats.chapters} 章`)
+    step(600, () => addMsg(s, { content: `《${book.title}》现在 ${book.stats.chapters} 章、${db.cards.filter((c) => c.book_id === book.id).length} 张设定卡。告诉我要改哪里，比如「别强调拳法，把碎星神通改个名，同步设定和大纲」，我会先出提案给你看。\n（演示模式：以上由规则脚本生成）` }))
+  }
+  const job = createJob('agent_run', book.id, at - t0 + 50, ['思考中…', '调用工具…', '整理提案…'], () => ({ proposals: pids }))
+  s.job = db.jobs.find((j) => j.id === job.id) ?? null
+}
+const sessOf = (id: string) => { const s = must(agentSessions.find((x) => x.id === +id), '会话'); pumpAgent(s); return s }
+const agentDetail = (s: MSession): AgentSessionDetail => {
+  if (s.job) tick(s.job)
+  const ps = agentProposals.filter((p) => p.session_id === s.id)
+  ps.forEach((p) => { if (p.job_id) { const j = db.jobs.find((x) => x.id === p.job_id); if (j) tick(j) } })
+  return {
+    session: agentSessOut(s), messages: s.messages, proposals: ps.map(({ _undo, ...p }) => { void _undo; return p }),
+    proposal_jobs: Object.fromEntries(ps.filter((p) => p.job_id).map((p) => { const j = db.jobs.find((x) => x.id === p.job_id)!; return [String(p.id), { id: j.id, status: j.status, progress: j.progress, message: j.message, error: j.error }] })),
+    job: s.queue.length && s.job ? pub(s.job) : null,
+  }
+}
+on('GET', '/agent/tools', () => ({ tools: TOOL_INFO, max_steps: 12, examples: ['别强调拳法，把『碎星神通』改个名，同步设定和大纲', '第 2 章节奏快一点，对话多一点', '规划 3 条伏笔，前十章至少一条长线', '按现在的设定改封面提示词，生成 2 张封面', '写下一章'] }))
+on('GET', '/books/:id/agent/settings', (m) => ({ auto_apply: !!autoApply.get(+m[1]) }))
+on('PUT', '/books/:id/agent/settings', (m, b) => { autoApply.set(+m[1], !!b.auto_apply); const book = bookOf(m[1]); book.agent_auto_apply = !!b.auto_apply; return { auto_apply: !!b.auto_apply, book } })
+on('GET', '/books/:id/agent/sessions', (m) => agentSessions.filter((s) => s.book_id === +m[1]).map((s) => { pumpAgent(s); return agentSessOut(s) }).sort((a, b) => b.updated_at.localeCompare(a.updated_at)))
+on('POST', '/books/:id/agent/sessions', (m, b) => { bookOf(m[1]); const s: MSession = { id: nid(), book_id: +m[1], title: b.title || '新对话', created_at: now(), updated_at: now(), messages: [], queue: [], job: null }; agentSessions.push(s); return agentSessOut(s) })
+on('GET', '/agent/sessions/:id', (m) => agentDetail(sessOf(m[1])))
+on('PATCH', '/agent/sessions/:id', (m, b) => { const s = sessOf(m[1]); s.title = b.title; return agentSessOut(s) })
+on('POST', '/agent/sessions/:id/clear', (m) => { const s = sessOf(m[1]); if (s.queue.length) throw new HttpErr(409, 'Agent 正在工作，先停止再清空'); s.messages = []; s.title = '新对话'; for (let i = agentProposals.length - 1; i >= 0; i--) if (agentProposals[i].session_id === s.id) agentProposals.splice(i, 1); return agentSessOut(s) })
+on('DELETE', '/agent/sessions/:id', (m) => { const s = sessOf(m[1]); agentSessions.splice(agentSessions.indexOf(s), 1); return { ok: true } })
+on('POST', '/agent/sessions/:id/messages', (m, b) => {
+  const s = sessOf(m[1])
+  if (s.queue.length) throw new HttpErr(409, 'Agent 还在处理上一条，稍等或先停止')
+  const msg = addMsg(s, { role: 'user', content: String(b.content ?? '') })
+  if (s.title === '新对话') s.title = msg.content.slice(0, 24)
+  s.stop = false
+  scriptFor(s, msg.content)
+  return { message: msg, job: pub(s.job!) }
+})
+on('POST', '/agent/sessions/:id/stop', (m) => { const s = sessOf(m[1]); s.stop = true; return agentSessOut(s) })
+const propOf = (id: string) => must(agentProposals.find((p) => p.id === +id), '提案')
+const propOut = ({ _undo, ...p }: MProposal) => { void _undo; return p }
+on('GET', '/agent/proposals/:id', (m) => propOut(propOf(m[1])))
+on('POST', '/agent/proposals/:id/apply', (m, b) => {
+  const p = propOf(m[1])
+  if (p.status !== 'pending' && p.status !== 'failed') throw new HttpErr(409, '这个提案已经处理过了')
+  if (p.kind === 'bible' && p.needs_review && !b.ops) throw new HttpErr(409, '这个设定提案和已有设定有冲突，请先逐条审阅')
+  const job = applyMock(p, b.edited, b.ops)
+  return { proposal: propOut(p), job }
+})
+on('POST', '/agent/proposals/:id/reject', (m) => { const p = propOf(m[1]); if (p.status !== 'pending') throw new HttpErr(409, '这个提案已经处理过了'); p.status = 'rejected'; return propOut(p) })
+on('POST', '/agent/proposals/:id/revert', (m) => { const p = propOf(m[1]); if (p.status !== 'applied' || !p._undo) throw new HttpErr(409, '只有已采纳的提案可以撤回'); p._undo(); Object.assign(p, { status: 'reverted', revertible: false }); return propOut(p) })
 
 // ---------------- 安装 ----------------
 export function installMock() {

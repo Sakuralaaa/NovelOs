@@ -31,7 +31,7 @@ export interface ChannelInput {
   enabled?: boolean
   api_format?: ApiFormat
 }
-export type RouteKey = 'planner' | 'writer' | 'reviewer' | 'search' | 'embedding' | 'image'
+export type RouteKey = 'planner' | 'writer' | 'reviewer' | 'search' | 'embedding' | 'image' | 'agent'
 export type ImageMode = 'images' | 'chat'
 export type Routing = Record<RouteKey, string | null> & { image_mode?: ImageMode }
 
@@ -87,6 +87,8 @@ export interface Book {
   versions?: number
   last_instruction?: string
   banned_tropes?: Trope[]
+  /** v0.5：本书 Agent 的改动直接写入（仍可撤回；删除类永远要确认） */
+  agent_auto_apply?: boolean
 }
 
 export interface Trope { name: string; keywords: string[] }
@@ -291,3 +293,30 @@ export interface WritingSettings {
   auto_commit: boolean
   default_variants: 1 | 2 | 3
 }
+
+// ---------- v0.5：每本书的专属 Agent ----------
+export interface AgentSession {
+  id: number; book_id: number; title: string; messages: number; running: boolean; running_job_id: number | null
+  last_user: string; created_at: string; updated_at: string
+}
+export interface AgentToolCall { id: string; name: string; arguments: Record<string, any>; label: string; kind: 'read' | 'write' }
+export interface AgentMessage {
+  id: number; role: 'user' | 'assistant' | 'tool' | 'notice'; content: string; tool_calls: AgentToolCall[]; tool_call_id: string
+  name: string; summary: string; status: 'ok' | 'error'; proposal_ids: number[]; job_ids: number[]; created_at: string
+  label?: string; kind?: 'read' | 'write'
+}
+export type AgentProposalKind = 'book_info' | 'bible' | 'card_delete' | 'outline_nodes' | 'chapter_rewrite' | 'foreshadow_add'
+  | 'foreshadow_update' | 'foreshadow_delete' | 'package' | 'covers' | 'write_chapter'
+export type AgentProposalStatus = 'pending' | 'applied' | 'rejected' | 'reverted' | 'running' | 'failed'
+export interface AgentProposal {
+  id: number; book_id: number; session_id: number; message_id: number | null; kind: AgentProposalKind; kind_label: string
+  title: string; summary: string; payload: Record<string, any>; status: AgentProposalStatus; destructive: boolean
+  needs_review: boolean; auto_applied: boolean; result: Record<string, any> | null; error: string; job_id: number | null
+  revertible: boolean; created_at: string; updated_at: string
+}
+export interface AgentJobState { id: number; status: Job['status']; progress: number; message: string; error: string | null }
+export interface AgentSessionDetail {
+  session: AgentSession; messages: AgentMessage[]; proposals: AgentProposal[]
+  proposal_jobs: Record<string, AgentJobState | null>; job: Job | null
+}
+export interface AgentToolInfo { name: string; label: string; kind: 'read' | 'write'; description: string }
