@@ -101,6 +101,8 @@ class Book(SQLModel, table=True):
     versions: list[dict[str, Any]] = _json_list()
     # 本书追加的禁用套路 [{name, keywords:[]}]，与全局列表合并使用
     banned_tropes: list[dict[str, Any]] = _json_list()
+    # v0.5：本书 Agent 的改动直接写入（仍留快照/旧版本可撤回）；删除类操作不受此开关影响，永远要确认
+    agent_auto_apply: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -221,3 +223,55 @@ class Style(SQLModel, table=True):
     pov: str = "third"
     tone: str = ""
     extracted: Optional[dict[str, Any]] = _json_dict_nullable()
+
+
+# ------------------------------------------------------------------ v0.5：每本书专属 Agent
+
+class AgentSession(SQLModel, table=True):
+    """一本书的一条 Agent 会话（一本书可以有多条，可清空）。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    title: str = "新对话"
+    running_job_id: Optional[int] = None  # 正在跑的 agent_run 任务
+    stop_requested: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AgentMessage(SQLModel, table=True):
+    """会话里的一条消息：user / assistant（可带 tool_calls）/ tool（工具结果）/ notice（系统提示，如步数上限）。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(index=True)
+    book_id: int = Field(index=True)
+    role: str
+    content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    tool_calls: list[dict[str, Any]] = _json_list()  # [{id, name, arguments(dict)}]
+    tool_call_id: str = ""
+    name: str = ""  # tool 消息：工具名
+    summary: str = ""  # tool 消息：给作者看的一句话结果
+    status: str = "ok"  # ok / error
+    proposal_ids: list[int] = _json_list()
+    job_ids: list[int] = _json_list()
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class AgentProposal(SQLModel, table=True):
+    """Agent 改动类工具产出的提案：作者采纳才写入（或书级「自动采纳」时直接写入），写入后可撤回。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    session_id: int = Field(index=True)
+    message_id: Optional[int] = None
+    kind: str
+    title: str = ""
+    summary: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    payload: Optional[dict[str, Any]] = _json_dict_nullable()
+    # pending / applied / rejected / reverted / running（长任务进行中）/ failed
+    status: str = "pending"
+    destructive: bool = False  # 删除类：永远要作者确认
+    needs_review: bool = False  # 有设定冲突等，需要逐条审阅
+    auto_applied: bool = False
+    result: Optional[dict[str, Any]] = _json_dict_nullable()
+    error: str = ""
+    job_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

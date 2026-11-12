@@ -169,3 +169,112 @@ def models_request(fmt: str) -> tuple[str, dict[str, str]]:
     if fmt == "anthropic":
         return "/models", {"limit": "1000"}
     return "/models", {}
+
+
+# ---------------------------------------------------------------- v0.5：Agent 工具调用
+
+def openai_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """内部消息 → OpenAI chat 消息：assistant.tool_calls 的 arguments 序列化为字符串。"""
+    import json
+
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            out.append({"role": "assistant", "content": m.get("content") or None, "tool_calls": [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"], "arguments": json.dumps(c.get("arguments") or {}, ensure_ascii=False)}}
+                for c in m["tool_calls"]]})
+        elif m.get("role") == "tool":
+            out.append({"role": "tool", "tool_call_id": m.get("tool_call_id") or "", "content": m.get("content") or ""})
+        else:
+            out.append({"role": m["role"], "content": m.get("content") or ""})
+    return out
+
+
+def _parse_args(raw: Any) -> dict[str, Any]:
+    import json
+
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        v = json.loads(raw)
+    except (TypeError, ValueError):
+        a, b = str(raw).find("{"), str(raw).rfind("}")
+        try:
+            v = json.loads(str(raw)[a : b + 1]) if a != -1 and b > a else {}
+        except ValueError:
+            v = {}
+    return v if isinstance(v, dict) else {}
+
+
+def parse_tool_response(data: dict[str, Any]) -> dict[str, Any]:
+    msg = ((data.get("choices") or [{}])[0].get("message")) or {}
+    content = msg.get("content")
+    if isinstance(content, list):
+        content = "".join(c.get("text", "") for c in content if isinstance(c, dict))
+    calls = []
+    for i, c in enumerate(msg.get("tool_calls") or []):
+        fn = c.get("function") or {}
+        if not fn.get("name"):
+            continue
+        calls.append({"id": str(c.get("id") or f"call_{i}"), "name": str(fn["name"]), "arguments": _parse_args(fn.get("arguments"))})
+    u = data.get("usage") or {}
+    return {"content": str(content or ""), "tool_calls": calls,
+            "usage": {"prompt_tokens": int(u.get("prompt_tokens") or 0), "completion_tokens": int(u.get("completion_tokens") or 0)}}
+
+
+TEXT_TOOL_RULE = (
+    "\n\n【工具调用协议】你不能直接调用函数。需要用工具时，在回复里输出一个或多个代码块，每块一次调用：\n"
+    "```tool\n{\"name\": \"工具名\", \"arguments\": {...}}\n```\n"
+    "输出工具代码块后就停下，等待「工具结果」。不需要工具时直接用中文回答作者。可用工具：\n"
+)
+
+
+def text_tool_messages(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """不支持 function calling 的接口：工具说明进系统提示，工具结果作为 user 消息回填。"""
+    import json
+
+    spec = "\n".join(f"- {f['function']['name']}：{f['function'].get('description', '')} 参数："
+                      f"{json.dumps(f['function'].get('parameters', {}).get('properties', {}), ensure_ascii=False)}" for f in tools)
+    out: list[dict[str, str]] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            out.append({"role": "system", "content": (m.get("content") or "") + TEXT_TOOL_RULE + spec})
+        elif role == "assistant":
+            text = m.get("content") or ""
+            for c in m.get("tool_calls") or []:
+                text += "\n```tool\n" + json.dumps({"name": c["name"], "arguments": c.get("arguments") or {}}, ensure_ascii=False) + "\n```"
+            out.append({"role": "assistant", "content": text.strip() or "（调用工具）"})
+        elif role == "tool":
+            out.append({"role": "user", "content": f"工具结果（{m.get('name') or ''}）：\n{m.get('content') or ''}"})
+        else:
+            out.append({"role": "user", "content": m.get("content") or ""})
+    # 连续同角色合并（anthropic / gemini 要求交替）
+    merged: list[dict[str, str]] = []
+    for m in out:
+        if merged and merged[-1]["role"] == m["role"] and m["role"] != "system":
+            merged[-1] = {"role": m["role"], "content": merged[-1]["content"] + "\n\n" + m["content"]}
+        else:
+            merged.append(m)
+    return merged
+
+
+_TOOL_BLOCK = re.compile(r"```tool\s*(\{.*?\})\s*```", re.S)
+
+
+def parse_text_tool_calls(text: str, names: set[str]) -> dict[str, Any]:
+    import json
+
+    calls = []
+    for i, m in enumerate(_TOOL_BLOCK.finditer(text or "")):
+        try:
+            obj = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("name") in names:
+            calls.append({"id": f"call_t{i}", "name": obj["name"], "arguments": _parse_args(obj.get("arguments"))})
+    content = _TOOL_BLOCK.sub("", text or "").strip()
+    return {"content": content, "tool_calls": calls}

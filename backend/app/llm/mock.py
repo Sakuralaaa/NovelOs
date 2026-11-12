@@ -834,3 +834,91 @@ def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) ->
     if fn is None:
         return _j({"ok": True, "note": "mock"})
     return fn(meta)
+
+
+# ---------------------------------------------------------------- v0.5：Agent 规则脚本
+
+def _tool_json(m: dict[str, Any]) -> dict[str, Any]:
+    try:
+        v = json.loads(m.get("content") or "{}")
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def agent_step(messages: list[dict[str, Any]], tools: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any]:
+    """mock 模式的 Agent：按作者这句话的意图走一段固定的多工具脚本，演示「读 → 提案 → 同步」。
+
+    改东西类（别/不要/改/换/同步…）：并行读作品信息和设定库 → 改作品信息（提案）→ 同步设定库和大纲（提案）→ 总结。
+    其它意图：写下一章 / 封面 / 伏笔 / 联网搜索 / 改写第 N 章，各走一两步；都不像就读一下作品信息再回答。
+    """
+    names = {t["function"]["name"] for t in tools}
+    idx = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+    user = str(messages[idx].get("content") or "") if idx >= 0 else ""
+    after = messages[idx + 1:] if idx >= 0 else []
+    done = [m for m in after if m.get("role") == "tool"]
+    called = [m.get("name") for m in done]
+    res = {m.get("name"): _tool_json(m) for m in done}
+    n = len([m for m in after if m.get("role") == "assistant"])
+
+    def call(*cs: tuple[str, dict[str, Any]], say: str = "") -> dict[str, Any]:
+        return {"content": say, "tool_calls": [{"id": f"mock_{n}_{i}_{c[0]}", "name": c[0], "arguments": c[1]} for i, c in enumerate(cs) if c[0] in names]}
+
+    def finish(head: str) -> dict[str, Any]:
+        lines = [f"- {_tool_json(m).get('summary') or m.get('name')}" for m in done if m.get("name") not in ("get_book_info",)]
+        ids: list[int] = []
+        for m in done:
+            j = _tool_json(m)
+            ids += [int(j["proposal_id"])] if j.get("proposal_id") else []
+            ids += [int(x) for x in j.get("proposal_ids") or []]
+        tail = (f"\n提案 {'、'.join('#' + str(i) for i in ids)} 在下面，点「采纳」才会写入；不满意可以拒绝，或改完再采纳。" if ids else "")
+        return {"content": head + ("\n" + "\n".join(lines) if lines else "") + tail + "\n（演示模式：以上由规则脚本生成）", "tool_calls": []}
+
+    m_ch = re.search(r"第\s*(\d+)\s*章", user)
+    if re.search(r"写下一章|写一章|续写|接着写", user):
+        if "write_next_chapter" not in called:
+            v = 2 if re.search(r"两个版本|2\s*个版本|多版本", user) else 1
+            return call(("write_next_chapter", {"variants": v}), say="好，按章细纲写下一章。")
+        return finish("下一章的写作任务已经准备好：")
+    if "封面" in user:
+        if "revise_cover_prompt" not in called:
+            return call(("get_package", {}), ("revise_cover_prompt", {"instruction": user}), say="先看看现在的包装，再改封面提示词。")
+        if "generate_covers" not in called:
+            prompt = str((res.get("revise_cover_prompt") or {}).get("prompt") or "")
+            return call(("generate_covers", {"prompt": prompt, "n": 2}))
+        return finish("封面这边：")
+    if "伏笔" in user:
+        if "plan_foreshadows" not in called:
+            return call(("list_foreshadows", {}), ("plan_foreshadows", {"instruction": user, "count": 3, "attach": True}))
+        return finish("伏笔规划好了：")
+    if re.search(r"搜索|查一下|查查|资料|考据", user):
+        if "web_search" not in called:
+            return call(("web_search", {"query": user[:60]}))
+        return finish("查到的资料：")
+    if m_ch and re.search(r"改写|改一下|节奏|对话|删", user) and not re.search(r"改个名|改名|同步", user):
+        if "rewrite_chapter" not in called:
+            return call(("get_chapter", {"number": int(m_ch.group(1)), "part": "summary"}),
+                        ("rewrite_chapter", {"number": int(m_ch.group(1)), "instruction": user}))
+        return finish(f"第 {m_ch.group(1)} 章改写稿出来了：")
+    if re.search(r"别|不要|改|换|同步|去掉|拿掉|弱化|名", user):
+        from app.services.book_edit import extract_terms
+
+        terms = extract_terms(user)
+        if "search_bible" not in called:
+            return call(("get_book_info", {}), ("search_bible", {"query": " ".join(terms)}),
+                        say="我先看看作品信息和设定库里相关的卡。")
+        if "revise_book_info" not in called:
+            return call(("revise_book_info", {"instruction": user}))
+        if "sync_downstream" not in called:
+            r = res.get("revise_book_info") or {}
+            t = [str(x) for x in r.get("terms") or terms]
+            if t:
+                return call(("sync_downstream", {"instruction": user, "terms": t, "replacements": r.get("replacements") or {},
+                                                 "targets": ["bible", "outline"]}))
+        return finish("按你的要求，我做了这些：")
+    if "get_book_info" not in called:
+        return call(("get_book_info", {}))
+    info = res.get("get_book_info") or {}
+    return {"content": f"《{info.get('title', '')}》现在 {((info.get('stats') or {}).get('chapters') or 0)} 章已提交、{info.get('cards', 0)} 张设定卡。"
+                       "告诉我要改哪里，比如「别强调拳法，把碎星神通改个名，同步设定和大纲」，我会先出提案给你看。\n（演示模式：以上由规则脚本生成）",
+            "tool_calls": []}

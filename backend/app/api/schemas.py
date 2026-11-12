@@ -64,6 +64,7 @@ class RoutingIn(BaseModel):
     image_mode: Literal["images", "chat"] | None = None
     embedding: str | None = None
     image: str | None = None
+    agent: str | None = None
 
 
 class WritingSettingsIn(BaseModel):
@@ -94,6 +95,7 @@ class BookPatch(BaseModel):
     chapter_words: int | None = Field(default=None, ge=500, le=10000)
     premise: str | None = None
     banned_tropes: list[dict[str, Any]] | None = None
+    agent_auto_apply: bool | None = None
 
 
 class IdeasGenerate(BaseModel):
@@ -367,7 +369,7 @@ def book_out(s: Session, b: Book) -> dict[str, Any]:
         "target_words": b.target_words, "chapter_words": b.chapter_words, "cover_url": b.cover_url,
         "created_at": iso(b.created_at), "updated_at": iso(b.updated_at), "stats": common.book_stats(s, b.id or 0),
         "premise": b.premise, "versions": len(vs), "last_instruction": str(vs[-1].get("instruction") or "") if vs else "",
-        "banned_tropes": list(b.banned_tropes or []),
+        "banned_tropes": list(b.banned_tropes or []), "agent_auto_apply": bool(b.agent_auto_apply),
     }
 
 

@@ -96,6 +96,9 @@ def delete_book(book_id: int, s: Session = Depends(get_session)) -> dict[str, bo
     for job in s.exec(select(Job).where(Job.book_id == book_id)):
         job.book_id = None
         s.add(job)
+    from app.services import agent as agent_svc
+
+    agent_svc.delete_book_data(s, book_id)
     s.delete(b)
     s.commit()
     return {"ok": True}

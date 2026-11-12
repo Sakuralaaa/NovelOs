@@ -1,6 +1,6 @@
 """LLM 网关：OpenAI 兼容 chat completions + images，多渠道按角色路由、重试与切换、token 记录。
 
-- 角色：planner / writer / reviewer / search / embedding / image
+- 角色：planner / writer / reviewer / search / embedding / image / agent（每本书的专属 Agent，未配置时用 planner 的路由）
 - 路由值："channel_id:model" 或 null
 - 没有任何启用的渠道 → mock 模式（确定性假数据，见 app.llm.mock）
 """
@@ -28,7 +28,7 @@ from app.models.tables import Channel, TokenUsage
 
 log = logging.getLogger("novelos.llm")
 
-ROLES = ("planner", "writer", "reviewer", "search", "embedding", "image")
+ROLES = ("planner", "writer", "reviewer", "search", "embedding", "image", "agent")
 # 只走路由指定模型、不向其它渠道切换的角色（普通文本模型做不了这些事）
 STRICT_ROLES = ("search", "embedding", "image")
 ROUTING_KEY = "routing"
@@ -59,6 +59,7 @@ TASK_ROLE: dict[str, str] = {
     "outline_sync": "planner",
     "chapter_rewrite": "writer",
     "foreshadow_plan": "planner",
+    "agent": "agent",
 }
 
 
@@ -337,6 +338,70 @@ class LLMGateway:
             ]
             out = self.chat(task, messages, meta=meta, role=role, temperature=0.3, route=route)
             return extract_json(out)
+
+    # ---------- agent：function calling ----------
+    def chat_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        meta: dict[str, Any] | None = None,
+        route: str | None = None,
+        temperature: float = 0.4,
+    ) -> dict[str, Any]:
+        """一步 Agent 推理：返回 {content, tool_calls:[{id, name, arguments(dict)}]}。
+
+        OpenAI 兼容格式走原生 function calling；其它格式（anthropic / gemini / responses）退化为文本协议：
+        把工具说明写进系统提示，让模型输出 ```tool {...}``` 代码块，再由程序解析。没有任何渠道时走 mock 规则脚本。
+        """
+        with session_scope() as s:
+            if route:
+                targets = [route_target(s, route)]
+            else:
+                routing = get_routing(s)
+                targets = resolve_targets(s, "agent" if _parse_route(routing.get("agent")) else "planner")
+        if not targets:
+            return mock.agent_step(messages, tools, meta or {})
+        errors: list[str] = []
+        for t in targets:
+            for attempt in range(self.settings.llm_retries + 1):
+                try:
+                    if t.api_format == "openai":
+                        return self._tools_once(t, messages, tools, temperature)
+                    return self._tools_text(t, messages, tools, temperature)
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
+                    log.warning("Agent 调用失败 %s", errors[-1])
+                    if _not_retryable(e):
+                        break
+                    time.sleep(min(2.0, 0.5 * (attempt + 1)))
+        raise LLMError("所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:])))
+
+    def _tools_once(self, t: Target, messages: list[dict[str, Any]], tools: list[dict[str, Any]], temperature: float) -> dict[str, Any]:
+        body: dict[str, Any] = {"model": t.model, "messages": proto.openai_tool_messages(messages), "tools": tools,
+                                "tool_choice": "auto", "temperature": temperature}
+        with httpx.Client(timeout=self.settings.llm_timeout, transport=_keepalive_transport()) as c:
+            r = c.post(proto.url(t.base_url, "/chat/completions"), headers=proto.headers("openai", t.api_key), json=body)
+        if r.status_code >= 400:
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise LLMError("返回的不是 JSON，检查 Base URL 和接口格式是否匹配") from e
+        out = proto.parse_tool_response(data)
+        _record_usage(t, "agent", "agent", out.pop("usage", None))
+        if not out["content"].strip() and not out["tool_calls"]:
+            raise LLMError("模型返回空内容")
+        return out
+
+    def _tools_text(self, t: Target, messages: list[dict[str, Any]], tools: list[dict[str, Any]], temperature: float) -> dict[str, Any]:
+        msgs = proto.text_tool_messages(messages, tools)
+        data = self._post_chat(t, msgs, temperature, None)
+        content, usage, _ = proto.parse_chat(t.api_format, data)
+        _record_usage(t, "agent", "agent", usage)
+        out = proto.parse_text_tool_calls(content, {f["function"]["name"] for f in tools})
+        if not out["content"].strip() and not out["tool_calls"]:
+            raise LLMError("模型返回空内容")
+        return out
 
     # ---------- search ----------
     def has_search(self) -> bool:

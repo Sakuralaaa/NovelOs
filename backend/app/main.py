@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import routes_auth, routes_books, routes_core
+from app.api import routes_agent, routes_auth, routes_books, routes_core
 from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
 from app.db import init_engine
@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_auth.router)
     app.include_router(routes_core.router)
     app.include_router(routes_books.router)
+    app.include_router(routes_agent.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 
     _mount_spa(app, settings.static_dir)
