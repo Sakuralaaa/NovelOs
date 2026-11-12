@@ -124,7 +124,7 @@ class IdeaUpdate(BaseModel):
     endgame: str | None = None
 
 
-CardType = Literal["world", "power", "faction", "character", "item", "location"]
+CardType = Literal["world", "cheat", "power", "faction", "character", "item", "location"]
 
 
 class CardIn(BaseModel):
@@ -133,6 +133,14 @@ class CardIn(BaseModel):
     summary: str = ""
     data: dict[str, Any] = {}
     known_by: list[str] = []
+
+
+class CardSuggest(BaseModel):
+    instruction: str = Field(default="", max_length=1000)
+    route: str | None = None
+    card_id: int | None = None
+    field: str | None = None  # summary / voice / catchphrases / habits / demeanor / name / data.<键>；不填改整张
+    draft: dict[str, Any] = {}
 
 
 class CardUpdate(BaseModel):

@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.api.schemas import (
-    AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
+    AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
     IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
@@ -211,6 +211,16 @@ def create_card(book_id: int, body: CardIn, s: Session = Depends(get_session)) -
     s.commit()
     s.refresh(c)
     return card_out(c)
+
+
+@router.post("/books/{book_id}/cards/suggest")
+async def suggest_card(book_id: int, body: CardSuggest, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    if body.card_id is not None:
+        c = s.get(Card, body.card_id)
+        if c is None or c.book_id != book_id:
+            raise HTTPException(404, "卡片不存在")
+    return job_out(submit("card_suggest", lambda ctx: planning.suggest_card(book_id, body.card_id, body.field, body.instruction, body.route, body.draft, ctx), book_id=book_id))
 
 
 @router.put("/cards/{card_id}")

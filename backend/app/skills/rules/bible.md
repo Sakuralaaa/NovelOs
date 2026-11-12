@@ -11,8 +11,9 @@ sources:
 ---
 # 设定库规则
 
-1. 设定先结构后文字：world / power / faction / character / item / location 六类卡片，每张卡有 name、summary、data。
-2. 金手指（power）必须写清三项：怎么用（触发方式）、现阶段能做到哪一步（边界）、怎么升级解锁（成长线）。边界用等级、次数、冷却、触发条件、需要的资源来写，不写自残式代价（永久失去感官、记忆、寿命、亲人，伤害转移到自己身上）。完全没有边界的金手指会让爽点贬值，代价过重的金手指会让读者读不爽。
+1. 设定先结构后文字：world / cheat / power / faction / character / item / location 七类卡片，每张卡有 name、summary、data。cheat 是主角独有的金手指（系统、外挂、特殊天赋）；power 是这个世界人人都在用的力量体系（境界、功法、职业等级），两者分开写，金手指不要塞进 power。
+2. 金手指（cheat）必须写清三项：怎么用（data.input，触发方式）、现阶段能做到哪一步（data.limit，边界）、怎么升级解锁（data.growth，成长线）。边界用等级、次数、冷却、触发条件、需要的资源来写，不写自残式代价（永久失去感官、记忆、寿命、亲人，伤害转移到自己身上）。完全没有边界的金手指会让爽点贬值，代价过重的金手指会让读者读不爽。
+2.5 data 的键：上面约定的英文键（input、limit、growth、levels、role、voice、catchphrases、habits、demeanor、knows、unknown、misbelief、sensory）照用，其它自定义的键一律用中文（如「年龄」「境界」「弱点」）。
 3. 人物卡入场门禁：写明此刻知道什么、不知道什么、误解什么（data.knows / data.unknown / data.misbelief），以及 known_by（哪些角色知道这张卡上的秘密）。
 4. 人物卡说话方式（data 约定键）：voice（说话方式，句长、语气词、称呼习惯）、catchphrases[]（口头禅，1–3 个，克制使用）、habits[]（小动作，具体到身体部位）、demeanor（神态习惯）。不同角色隐去名字后要能分辨谁在说话。
 5. 事实分“作者真相”和“读者已知”两条线（visibility = author / reader）。事实只追加，变化时关闭旧事实、写新事实，不改写历史。

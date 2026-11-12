@@ -417,3 +417,74 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
         s.add(book)
         s.commit()
     return {"cards": n_cards, "facts": n_facts}
+
+
+CARD_FIELDS = {"name": ("名称", False), "summary": ("简介", False), "voice": ("说话方式", False),
+               "catchphrases": ("口头禅", True), "habits": ("小动作", True), "demeanor": ("神态习惯", False)}
+
+
+def suggest_card(book_id: int, card_id: int | None, field: str | None, instruction: str, route: str | None,
+                 draft: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
+    """改一张设定卡（或卡上的一项），结果回填编辑器，作者保存后才落库。"""
+    import json as _json
+    with session_scope() as s:
+        book = common.get_book(s, book_id)
+        meta = common.kit_meta(s, book)
+        all_cards = common.cards(s, book_id)
+        base: dict[str, Any] = {}
+        if card_id is not None:
+            c = s.get(Card, card_id)
+            if c is None or c.book_id != book_id:
+                raise NotFound("卡片不存在")
+            base = {"type": c.type, "name": c.name, "summary": c.summary, "data": dict(c.data or {}), "known_by": list(c.known_by or [])}
+        cur = {**base, **{k: v for k, v in (draft or {}).items() if k in ("type", "name", "summary", "data", "known_by")}}
+        cur.setdefault("type", "character")
+        cur.setdefault("data", {})
+        others = "\n".join(f"[{c.type}] {c.name}：{c.summary}" for c in all_cards if c.id != card_id) or "（无）"
+        ctx_text = common.book_context(s, book, with_cards=False)
+    data_obj = cur.get("data") if isinstance(cur.get("data"), dict) else {}
+    if field:
+        if field.startswith("data."):
+            key = field[5:]
+            label, is_list = key, isinstance(data_obj.get(key), list)
+            value = data_obj.get(key, "")
+        elif field in CARD_FIELDS:
+            label, is_list = CARD_FIELDS[field]
+            value = cur.get(field) if field in ("name", "summary") else data_obj.get(field, [] if is_list else "")
+        else:
+            raise ValueError("不支持的字段")
+        scope = f"只改「{label}」这一项，其它不动。"
+        if not isinstance(value, (str, list)):
+            shape, value_shape = '{"value": <与原值同样结构的 JSON>}', None
+        else:
+            value_shape = '["…","…"]' if is_list else '"…"'
+            shape = f'{{"value": {value_shape}}}'
+    else:
+        value = cur
+        scope = ("按要求改整张卡：只动要求涉及的部分，没提到的内容原样保留；空白新卡就按名称、类型和要求写完整。"
+                 "人物卡 data 里保留 role、voice、catchphrases、habits、demeanor 等键；力量体系 data 含 input、cost、limit。")
+        shape = '{"card":{"type":"world|power|faction|character|item|location","name":"","summary":"","data":{},"known_by":[]}}'
+    user = render("card_suggest", book_context=ctx_text, others=others, card=_json.dumps(cur, ensure_ascii=False),
+                  instruction=instruction.strip() or "写得更具体、更有画面感，和其它设定咬合。", scope=scope, shape=shape)
+    ctx.progress(30, "AI 改设定")
+    out = get_gateway().chat_json("card_suggest", system_prompt("card_suggest"), user,
+                                  meta={**meta, "field": field, "current": value, "instruction": instruction}, route=route)
+    if not isinstance(out, dict):
+        raise ValueError("模型没有给出修改")
+    if field:
+        v = out.get("value")
+        if isinstance(value, list):
+            v = [str(x).strip() for x in (v if isinstance(v, list) else [v]) if str(x).strip()]
+        elif isinstance(value, str):
+            v = str(v or "").strip()
+        if v in (None, "", []):
+            raise ValueError("模型没有给出修改")
+        return {"field": field, "value": v}
+    card = out.get("card") if isinstance(out.get("card"), dict) else out
+    t = card.get("type") if card.get("type") in CARD_TYPES else cur["type"]
+    res = {"type": t, "name": str(card.get("name") or cur.get("name") or "")[:40], "summary": str(card.get("summary") or ""),
+           "data": card.get("data") if isinstance(card.get("data"), dict) else data_obj,
+           "known_by": [str(x) for x in (card.get("known_by") if isinstance(card.get("known_by"), list) else cur.get("known_by") or [])]}
+    if not res["name"]:
+        raise ValueError("模型没有给出修改")
+    return {"card": res}

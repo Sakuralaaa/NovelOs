@@ -59,7 +59,7 @@ sources:
 
 ## 六、变更声明
 正文写完后另起一行写 `---CHANGES---`，后面跟一个 JSON：
-{"new_entities":[{"type":"character|item|location|faction|power|world","name":"","summary":""}],
+{"new_entities":[{"type":"character|item|location|faction|cheat|power|world","name":"","summary":""}],
  "state_changes":[{"entity":"名字","key":"状态项","value":"新值","visibility":"reader|author"}],
  "foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":""}]}
 没有就写空数组。生成结果是草稿，确认提交前不会进入事实底账。

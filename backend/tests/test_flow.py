@@ -79,7 +79,7 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     cards = client.get(f"/api/books/{bid}/cards").json()
     chars = [c for c in cards if c["type"] == "character"]
     assert len(chars) >= 3 and all(c["data"].get("voice") for c in chars)
-    assert client.get(f"/api/books/{bid}/cards", params={"type": "power"}).json()[0]["data"]["cost"]
+    assert client.get(f"/api/books/{bid}/cards", params={"type": "cheat"}).json()[0]["data"]["input"]
     assert len(client.get(f"/api/books/{bid}/facts").json()) >= 3
 
     # 大纲
@@ -267,3 +267,18 @@ def test_errors_are_detail_json(client: TestClient) -> None:
     assert r.status_code == 404
     r = client.post("/api/books", json={"gender": "x"})
     assert r.status_code == 422 and "detail" in r.json()
+
+
+def test_card_suggest(client):
+    bid = client.post("/api/books", json={"title": "测试设定", "genre": "玄幻", "gender": "male"}).json()["id"]
+    c = client.post(f"/api/books/{bid}/cards", json={"type": "character", "name": "林川", "summary": "少年",
+                                                     "data": {"catchphrases": ["行。"], "境界": "炼气"}}).json()
+    j = wait_job(client, client.post(f"/api/books/{bid}/cards/suggest", json={"card_id": c["id"], "field": "summary", "instruction": "更狠"}).json())
+    assert j["result"] == {"field": "summary", "value": "少年（更狠）"}
+    j = wait_job(client, client.post(f"/api/books/{bid}/cards/suggest", json={"card_id": c["id"], "field": "catchphrases", "instruction": "加一句"}).json())
+    assert j["result"]["value"] == ["行。", "加一句"]
+    j = wait_job(client, client.post(f"/api/books/{bid}/cards/suggest", json={"card_id": c["id"], "field": "data.境界", "draft": {"data": {"境界": "筑基"}}}).json())
+    assert j["result"]["value"].startswith("筑基")
+    j = wait_job(client, client.post(f"/api/books/{bid}/cards/suggest", json={"instruction": "反派长老", "draft": {"type": "character", "name": ""}}).json())
+    assert j["result"]["card"]["name"] and "反派长老" in j["result"]["card"]["summary"]
+    assert client.get(f"/api/books/{bid}/cards").json()[0]["summary"] == "少年"  # 不自动落库

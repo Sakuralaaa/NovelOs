@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/dialog'
 import { Field, Input, Textarea } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
+import { Select, type Opt } from '@/components/ui/select'
+import { useChannels } from '@/hooks/queries'
 import { TagInput } from '@/components/ui/tag-input'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
@@ -19,9 +20,10 @@ import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { Card as CardT, CardType } from '@/lib/types'
 import { CARD_TYPES, cn, fmtTime } from '@/lib/utils'
 
-const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
+const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, cheat: Sparkles, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
 const TYPE_COLOR: Record<CardType, string> = {
-  world: 'from-sky-500/15 text-sky-600 dark:text-sky-400', power: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
+  world: 'from-sky-500/15 text-sky-600 dark:text-sky-400', cheat: 'from-primary/15 text-primary',
+  power: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
   faction: 'from-rose-500/15 text-rose-600 dark:text-rose-400', character: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
   item: 'from-emerald-500/15 text-emerald-600 dark:text-emerald-400', location: 'from-teal-500/15 text-teal-600 dark:text-teal-400',
 }
@@ -114,7 +116,7 @@ function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
       {entries.length > 0 && (
         <dl className="mt-2.5 space-y-1 text-[12px]">
           {entries.map(([k, v]) => (
-            <div key={k} className="flex gap-2"><dt className="shrink-0 text-muted-foreground">{k}</dt><dd className="truncate">{typeof v === 'string' ? v : JSON.stringify(v)}</dd></div>
+            <div key={k} className="flex gap-2"><dt className="shrink-0 text-muted-foreground">{keyLabel(k)}</dt><dd className="truncate">{k === 'role' && typeof v === 'string' ? (ROLE_LABEL[v] ?? v) : typeof v === 'string' ? v : Array.isArray(v) ? v.join('；') : JSON.stringify(v)}</dd></div>
           ))}
         </dl>
       )}
@@ -128,25 +130,47 @@ function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
   )
 }
 
+/** data 约定键用英文存（写作上下文按键取值），界面上一律显示中文 */
+const KEY_LABEL: Record<string, string> = {
+  input: '用法', trigger: '触发方式', cost: '代价', limit: '边界', growth: '成长线', levels: '境界划分',
+  role: '定位', knows: '已知', unknown: '未知', misbelief: '误解', sensory: '感官', era: '时代', rules: '规则',
+  leader: '首领', stance: '立场', voice: '说话方式', catchphrases: '口头禅', habits: '小动作', demeanor: '神态习惯',
+}
+const LABEL_KEY = Object.fromEntries(Object.entries(KEY_LABEL).map(([k, v]) => [v, k]))
+const keyLabel = (k: string) => KEY_LABEL[k] ?? k
+const ROLE_LABEL: Record<string, string> = { protagonist: '主角', antagonist: '反派', ally: '盟友', supporting: '配角', mentor: '师父', rival: '对手', love: '感情线' }
+const ROLE_KEY = Object.fromEntries(Object.entries(ROLE_LABEL).map(([k, v]) => [v, k]))
+
 type Row = { k: string; v: string; json?: boolean }
 const toRows = (d: Record<string, any>, skip: readonly string[]): Row[] =>
-  Object.entries(d ?? {}).filter(([k]) => !skip.includes(k)).map(([k, v]) => (typeof v === 'string' || typeof v === 'number' ? { k, v: String(v) } : { k, v: JSON.stringify(v), json: true }))
+  Object.entries(d ?? {}).filter(([k]) => !skip.includes(k)).map(([k, v]) => (k === 'role' && typeof v === 'string' ? { k: keyLabel(k), v: ROLE_LABEL[v] ?? v } : Array.isArray(v) && v.every((x) => typeof x === 'string') ? { k: keyLabel(k), v: v.join('；') } : typeof v === 'string' || typeof v === 'number' ? { k: keyLabel(k), v: String(v) } : { k: keyLabel(k), v: JSON.stringify(v), json: true }))
 
 function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card: Partial<CardT> | null; onClose: () => void; charNames: string[] }) {
   const open = !!card
   const isNew = !card?.id
   const [form, setForm] = useState<{ type: CardType; name: string; summary: string; known_by: string[]; rows: Row[]; voice: string; catchphrases: string[]; habits: string[]; demeanor: string }>()
   const [lastId, setLastId] = useState<unknown>(undefined)
-  if (card && lastId !== card) {
-    setLastId(card)
-    const d = card.data ?? {}
-    setForm({
-      type: card.type ?? 'character', name: card.name ?? '', summary: card.summary ?? '', known_by: card.known_by ?? [],
-      rows: toRows(d, card.type === 'character' ? CHAR_KEYS : []),
+  const toForm = (c: Partial<CardT>) => {
+    const d = c.data ?? {}
+    return {
+      type: c.type ?? 'character', name: c.name ?? '', summary: c.summary ?? '', known_by: c.known_by ?? [],
+      rows: toRows(d, c.type === 'character' ? CHAR_KEYS : []),
       voice: typeof d.voice === 'string' ? d.voice : '', catchphrases: Array.isArray(d.catchphrases) ? d.catchphrases : [],
       habits: Array.isArray(d.habits) ? d.habits : [], demeanor: typeof d.demeanor === 'string' ? d.demeanor : '',
-    })
+    }
   }
+  if (card && lastId !== card) {
+    setLastId(card)
+    setForm(toForm(card))
+  }
+  const { start } = useJobs()
+  const [ask, setAsk] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const channels = useChannels()
+  const opts: Opt[] = (channels.data ?? []).filter((c) => c.enabled).flatMap((c) => c.models.map((m) => ({ value: `${c.id}:${m}`, label: <span className="font-mono text-[12.5px]">{m}</span>, group: c.name })))
+  const [route, setRouteState] = useState<string | null>(() => localStorage.getItem('novelos.card-route') || null)
+  const model = route && opts.some((o) => o.value === route) ? route : null
+  const setRoute = (v: string | null) => { setRouteState(v); if (v) localStorage.setItem('novelos.card-route', v); else localStorage.removeItem('novelos.card-route') }
   const qc = useQueryClient()
   const build = () => {
     const f = form!
@@ -154,7 +178,10 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
     f.rows.filter((r) => r.k.trim()).forEach((r) => {
       let v: any = r.v
       if (r.json) { try { v = JSON.parse(r.v) } catch { /* 保留字符串 */ } }
-      data[r.k.trim()] = v
+      const key = LABEL_KEY[r.k.trim()] ?? r.k.trim()
+      if (key === 'role' && typeof v === 'string') v = ROLE_KEY[v] ?? v
+      if (Array.isArray(card?.data?.[key]) && typeof v === 'string') v = v.split(/[；;]/).map((x: string) => x.trim()).filter(Boolean)
+      data[key] = v
     })
     if (f.type === 'character') {
       if (f.voice.trim()) data.voice = f.voice.trim()
@@ -177,6 +204,37 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
   const [confirmDel, setConfirmDel] = useState(false)
   if (!form) return null
   const set = (p: Partial<typeof form>) => setForm({ ...form, ...p })
+  const suggest = (field: string | null, instruction: string) => {
+    const tag = field ?? '__card'
+    setBusy(tag)
+    start(api.suggestCard(bookId, { card_id: card?.id ?? null, field, instruction, route: model, draft: build() }), {
+      key: `card-ai:${bookId}:${card?.id ?? 'new'}:${tag}`, label: 'AI 改设定', silent: true,
+      onSuccess: (j) => {
+        setBusy(null)
+        const r = j.result as any
+        if (!r) return
+        if (r.card) { setForm(toForm(r.card)); setAsk(''); toast.success('改好了，确认后保存'); return }
+        const v = r.value
+        setForm((f) => {
+          if (!f) return f
+          if (field === 'name' || field === 'summary' || field === 'voice' || field === 'demeanor') return { ...f, [field]: String(v) }
+          if (field === 'catchphrases' || field === 'habits') return { ...f, [field]: Array.isArray(v) ? v.map(String) : [String(v)] }
+          if (field?.startsWith('data.')) {
+            const k = field.slice(5)
+            return { ...f, rows: f.rows.map((x) => ((LABEL_KEY[x.k.trim()] ?? x.k.trim()) === k ? (typeof v === 'string' ? { k: x.k, v } : Array.isArray(v) && v.every((y: unknown) => typeof y === 'string') ? { k: x.k, v: v.join('；') } : { k: x.k, v: JSON.stringify(v), json: true }) : x)) }
+          }
+          return f
+        })
+      },
+      onError: (j) => { setBusy(null); toast.error('AI 改写失败', { description: j.error ?? undefined }) },
+    })
+  }
+  const ai = (field: string, label: string) => (
+    <button type="button" disabled={!!busy} onClick={() => suggest(field, ask.trim())} title={ask.trim() ? `按上面的要求改${label}` : `AI 改${label}`}
+        className="focus-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px] font-normal text-muted-foreground transition hover:bg-primary-soft hover:text-primary disabled:opacity-50">
+        <Wand2 className={cn('h-3 w-3', busy === field && 'animate-pulse')} />{busy === field ? '改写中' : 'AI 改'}
+    </button>
+  )
   const isChar = form.type === 'character'
 
   return (
@@ -189,21 +247,33 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
         <Button variant="primary" disabled={!form.name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存</Button>
       </>}>
       <div className="space-y-5">
+        <div className="space-y-2 rounded-xl bg-primary-soft/40 p-3 hairline">
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold"><Wand2 className="h-4 w-4 text-primary" />{isNew ? '让 AI 写这张' : '让 AI 改这张'}</span>
+            <div className="w-[200px]"><Select value={model} onChange={setRoute} options={opts} allowEmpty emptyLabel="默认（策划模型）" placeholder="默认（策划模型）" /></div>
+          </div>
+          <div className="flex gap-2">
+            <Input value={ask} onChange={(e) => setAsk(e.target.value)} className="bg-surface text-[13px]"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && ask.trim()) suggest(null, ask.trim()) }}
+              placeholder={isNew ? '例如：反派宗门的大长老，笑面虎' : '例如：口头禅换一句更狠的，境界压到炼气三层'} />
+            <Button size="sm" className="h-9 shrink-0" loading={busy === '__card'} disabled={!!busy || (!ask.trim() && isNew && !form.name.trim())} onClick={() => suggest(null, ask.trim())}>{isNew ? 'AI 写' : '整张改'}</Button>
+          </div>
+        </div>
         <div className="grid grid-cols-[140px_1fr] gap-3">
           <Field label="类型"><Select value={form.type} onChange={(v) => v && set({ type: v as CardType })} options={CARD_TYPES.map((t) => ({ value: t.key, label: t.label }))} /></Field>
           <Field label="名称"><Input autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={isChar ? '人物名' : '设定名称'} /></Field>
         </div>
-        <Field label="简介"><Textarea value={form.summary} onChange={(e) => set({ summary: e.target.value })} placeholder="一两句话说清楚它是什么" /></Field>
+        <Field label="简介" hint={ai('summary', '简介')}><Textarea value={form.summary} onChange={(e) => set({ summary: e.target.value })} placeholder="一两句话说清楚它是什么" /></Field>
 
         {isChar && (
           <div className="space-y-4 rounded-xl bg-amber-500/[0.06] p-4 hairline">
             <div>
               <div className="flex items-center gap-1.5 text-[13px] font-semibold"><MessageSquareQuote className="h-4 w-4 text-amber-500" />人物声音</div>
             </div>
-            <Field label="说话方式"><Textarea value={form.voice} onChange={(e) => set({ voice: e.target.value })} className="min-h-[64px] bg-surface" placeholder="例如：话少，短句，爱用反问；生气时反而更客气" /></Field>
-            <Field label="口头禅"><TagInput value={form.catchphrases} onChange={(v) => set({ catchphrases: v })} placeholder="例如：行。（回车添加）" /></Field>
-            <Field label="小动作"><TagInput value={form.habits} onChange={(v) => set({ habits: v })} placeholder="例如：想事情时摩挲袖口" /></Field>
-            <Field label="神态习惯"><Input value={form.demeanor} onChange={(e) => set({ demeanor: e.target.value })} className="bg-surface" placeholder="例如：眼皮半耷拉着，看人先看手" /></Field>
+            <Field label="说话方式" hint={ai('voice', '说话方式')}><Textarea value={form.voice} onChange={(e) => set({ voice: e.target.value })} className="min-h-[64px] bg-surface" placeholder="例如：话少，短句，爱用反问；生气时反而更客气" /></Field>
+            <Field label="口头禅" hint={ai('catchphrases', '口头禅')}><TagInput value={form.catchphrases} onChange={(v) => set({ catchphrases: v })} placeholder="例如：行。（回车添加）" /></Field>
+            <Field label="小动作" hint={ai('habits', '小动作')}><TagInput value={form.habits} onChange={(v) => set({ habits: v })} placeholder="例如：想事情时摩挲袖口" /></Field>
+            <Field label="神态习惯" hint={ai('demeanor', '神态习惯')}><Input value={form.demeanor} onChange={(e) => set({ demeanor: e.target.value })} className="bg-surface" placeholder="例如：眼皮半耷拉着，看人先看手" /></Field>
           </div>
         )}
 
@@ -218,6 +288,7 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
               <div key={i} className="flex gap-1.5">
                 <Input value={r.k} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} placeholder="属性" className="w-[120px] shrink-0" />
                 <Input value={r.v} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} placeholder="内容" className={cn(r.json && 'font-mono text-xs')} />
+                <Button size="icon" variant="ghost" disabled={!!busy || !r.k.trim()} onClick={() => suggest(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, ask.trim())} aria-label="AI 改这一项" title="AI 改这一项"><Wand2 className={cn('h-4 w-4', busy === `data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}` && 'animate-pulse text-primary')} /></Button>
                 <Button size="icon" variant="ghost" onClick={() => set({ rows: form.rows.filter((_, j) => j !== i) })} aria-label="删除"><X className="h-4 w-4" /></Button>
               </div>
             ))}

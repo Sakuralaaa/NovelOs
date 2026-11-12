@@ -105,7 +105,7 @@ export interface Idea {
 
 export type IdeaField = 'title' | 'genre' | 'logline' | 'selling_points' | 'hook' | 'expectations' | 'arc' | 'endgame'
 
-export type CardType = 'world' | 'power' | 'faction' | 'character' | 'item' | 'location'
+export type CardType = 'world' | 'cheat' | 'power' | 'faction' | 'character' | 'item' | 'location'
 export interface Card {
   id: number
   book_id: number

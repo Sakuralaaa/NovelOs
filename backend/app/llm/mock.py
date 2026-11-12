@@ -183,6 +183,19 @@ def mock_cover_prompt(meta: dict[str, Any]) -> str:
     return _j({"prompt": f"{meta.get('current') or '主角立于高处'}。{meta.get('instruction') or ''}".strip()})
 
 
+def mock_card_suggest(meta: dict[str, Any]) -> str:
+    note = str(meta.get("instruction") or "改写")[:12]
+    cur = meta.get("current")
+    if meta.get("field"):
+        if isinstance(cur, list):
+            return _j({"value": [*cur, note]})
+        return _j({"value": f"{cur or ''}（{note}）"})
+    card = dict(cur or {})
+    card["summary"] = f"{card.get('summary') or ''}（{note}）"
+    card["name"] = card.get("name") or "新人物"
+    return _j({"card": card})
+
+
 # ---------------------------------------------------------------- 设定
 
 def mock_bible(meta: dict[str, Any]) -> str:
@@ -193,7 +206,8 @@ def mock_bible(meta: dict[str, Any]) -> str:
     pro = "她" if gender == "female" else "他"
     cards = [
         {"type": "world", "name": kit["world"][0], "summary": kit["world"][1], "data": {"era": "架空", "rules": ["强者守规矩，弱者交保护费", "账可以赖，但不能当众赖"]}, "known_by": []},
-        {"type": "power", "name": kit["power"][0], "summary": kit["power"][1], "data": dict(kit["power"][2]), "known_by": [p]},
+        {"type": "cheat", "name": kit["power"][0], "summary": kit["power"][1], "data": {**kit["power"][2], "growth": "每升一级解锁一种新用法"}, "known_by": [p]},
+        {"type": "power", "name": "境界", "summary": "这个世界通行的修炼等级。", "data": {"levels": "淬体、通脉、凝元、化神"}, "known_by": []},
         {"type": "faction", "name": kit["faction"][0], "summary": kit["faction"][1], "data": {"leader": kit["villain"], "stance": "敌对"}, "known_by": []},
         {"type": "character", "name": p, "summary": f"主角。表面隐忍，{pro}记仇，也记恩。", "data": {
             "role": "protagonist", "voice": "话少，句子短而硬，不解释，只给结论", "catchphrases": ["账得算清楚。"],
@@ -660,6 +674,7 @@ HANDLERS = {
     "thicken": mock_thicken,
     "summary": mock_summary,
     "package": mock_package,
+    "card_suggest": mock_card_suggest,
     "cover_prompt": mock_cover_prompt,
     "style_extract": mock_style_extract,
 }

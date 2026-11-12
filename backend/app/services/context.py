@@ -116,11 +116,15 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
     # ---------- 固定前缀：规则 + 书设定 + 风格 ----------
     fixed = [f"【本书】\n{common.book_context(s, book, with_cards=False)}"]
     for c in all_cards:
-        if c.type in ("world", "power"):
+        if c.type in ("world", "cheat", "power"):
             extra = ""
-            if c.type == "power" and c.data:
-                d = c.data
-                extra = f"（用法：{d.get('input', '')}；代价：{d.get('cost', '')}；限制：{d.get('limit', '')}）"
+            d = c.data or {}
+            if c.type == "cheat" and d:
+                parts = [f"{lab}：{d[k]}" for k, lab in (("input", "用法"), ("limit", "现阶段边界"), ("growth", "成长线"), ("cost", "代价")) if d.get(k)]
+                extra = f"（{'；'.join(parts)}）" if parts else ""
+            elif c.type == "power" and d:
+                parts = [f"{lab}：{d[k]}" for k, lab in (("levels", "境界"), ("input", "用法"), ("cost", "代价"), ("limit", "限制")) if d.get(k)]
+                extra = f"（{'；'.join(parts)}）" if parts else ""
             fixed.append(f"[{c.type}] {c.name}：{c.summary}{extra}")
     fixed.append(style_block(s, bid))
     prefix = system_prompt("writing_scene", "\n".join(fixed))

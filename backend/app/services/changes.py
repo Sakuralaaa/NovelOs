@@ -9,7 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 CHANGES_MARKER = "---CHANGES---"
-CARD_TYPES = ("world", "power", "faction", "character", "item", "location")
+CARD_TYPES = ("world", "cheat", "power", "faction", "character", "item", "location")
 
 
 class NewEntity(BaseModel):

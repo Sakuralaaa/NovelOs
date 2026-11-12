@@ -14,6 +14,7 @@ STAGES = ("ideation", "bible", "outline", "chapter_plan", "writing", "review", "
 TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "ideation": ("ideation",),
     "bible": ("bible",),
+    "card_suggest": ("bible",),
     "outline": ("outline", "chapter_plan"),
     "expand": ("outline", "chapter_plan"),
     "scene_plan": ("chapter_plan",),

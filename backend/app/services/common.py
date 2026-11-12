@@ -105,7 +105,7 @@ def book_context(s: Session, book: Book, with_cards: bool = True) -> str:
         lines.append(f"核心设定：{book.premise}")
     if with_cards:
         for c in cards(s, book.id or 0):
-            if c.type in ("world", "power", "faction", "character"):
+            if c.type in ("world", "cheat", "power", "faction", "character"):
                 lines.append(f"[{c.type}] {c.name}：{c.summary}")
     return "\n".join(lines)
 

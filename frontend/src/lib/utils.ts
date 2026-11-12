@@ -52,10 +52,11 @@ export const stageIndex = (s: BookStatus) => Math.max(0, STAGES.findIndex((x) =>
 
 export const CARD_TYPES: { key: CardType; label: string; hint: string }[] = [
   { key: 'world', label: '世界观', hint: '时代背景、地理、规则' },
-  { key: 'power', label: '力量体系', hint: '境界、能力、代价' },
+  { key: 'cheat', label: '金手指', hint: '系统、外挂、独门天赋' },
+  { key: 'power', label: '力量体系', hint: '境界、功法、等级' },
   { key: 'faction', label: '势力', hint: '宗门、家族、组织' },
   { key: 'character', label: '人物', hint: '主角、配角、反派' },
-  { key: 'item', label: '物品', hint: '金手指、法宝、道具' },
+  { key: 'item', label: '物品', hint: '法宝、道具、信物' },
   { key: 'location', label: '地点', hint: '城市、秘境、场景' },
 ]
 export const cardTypeLabel = (t: CardType) => CARD_TYPES.find((x) => x.key === t)?.label ?? t

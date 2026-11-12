@@ -90,7 +90,7 @@ function seedDemo() {
   })
   const cards: Omit<Card, 'id' | 'book_id' | 'updated_at'>[] = [
     { type: 'world', name: '冰封纪元', summary: '全球气温骤降第三年，城市被冰雪掩埋，幸存者以物易物。', data: { 时间: '冰封第 3 年', 气温: '白天 -30℃，夜间 -50℃', 货币: '以物易物，子弹与药品最硬通' }, known_by: ['林野', '苏晚'] },
-    { type: 'power', name: '超市系统', summary: '每日零点补货，交易可获得“信用点”升级货架。', data: { 补货: '每天 0:00', 升级: '信用点', 限制: '不能主动攻击' }, known_by: ['林野'] },
+    { type: 'cheat', name: '超市系统', summary: '每日零点补货，交易可获得“信用点”升级货架。', data: { 补货: '每天 0:00', 升级: '信用点', 限制: '不能主动攻击' }, known_by: ['林野'] },
     { type: 'faction', name: '东区摩托帮', summary: '东区最大的掠夺团伙，首领绰号“金牙”。', data: { 人数: '约 40 人', 据点: '旧加油站' }, known_by: ['林野', '苏晚', '金牙'] },
     { type: 'character', name: '林野', summary: '主角，前便利店店员，谨慎、嘴硬心软。', data: { 年龄: '24', 身份: '超市老板', voice: '话少，短句，爱用反问；生气时反而更客气', catchphrases: ['行。', '先说好，只换不卖。'], habits: ['想事情时用拇指摩挲撬棍', '进门先看货架有没有被动过'], demeanor: '眼皮总是半耷拉着，看人时先看手' }, known_by: [] },
     { type: 'character', name: '苏晚', summary: '带着弟弟逃难的前护士，冷静果断。', data: { 年龄: '27', 身份: '前护士', voice: '语速快，用词精确，带医学术语', catchphrases: ['别动。'], habits: ['下意识整理袖口'], demeanor: '抿嘴，眉心常有一道竖纹' }, known_by: ['林野'] },
@@ -355,7 +355,7 @@ on('POST', '/books/:id/bible/generate', (m) => { const b = bookOf(m[1]); return 
   if (!db.cards.some((c) => c.book_id === b.id)) {
     add('world', '故事世界', `${b.genre}背景下的主舞台。`, { 时代: '架空现代' })
     add('character', '主角', '性格坚韧，有一个不能说的秘密。', { 年龄: '22', voice: '说话直，爱抬杠', catchphrases: ['那又怎样'], habits: ['摸鼻子'], demeanor: '笑起来只有一边嘴角' })
-    add('power', '金手指', '主角的核心外挂。', { 代价: '每次使用会失去一段记忆' })
+    add('cheat', '金手指', '主角的核心外挂。', { input: '触碰货架', limit: '每日一次', growth: '信用点升级' })
   }
   if (b.status === 'bible' || b.status === 'idea') b.status = 'outline'
   return { cards: 3 }
@@ -459,6 +459,11 @@ on('POST', '/books/:id/covers/generate', (m, body) => { const b = bookOf(m[1]); 
   const shift = (p.covers.length / 4) | 0
   db.packages.set(b.id, { ...p, covers: [...p.covers, ...Array.from({ length: body.n || 4 }, (_, i) => coverDataUrl(b.title, i + shift + 1 + p.covers.length))] })
   return {}
+}) })
+on('POST', '/books/:id/cards/suggest', (m, body) => { const b = bookOf(m[1]); const d = body.draft ?? {}; return createJob('card_suggest', b.id, 1200, ['按要求改设定…'], () => {
+  if (!body.field) return { card: { ...d, summary: `${d.summary ?? ''}${body.instruction ? `（${body.instruction}）` : ''}` } }
+  if (body.field === 'catchphrases' || body.field === 'habits') return { value: ['这事我接了', '先看看再说'] }
+  return { value: `改写后的内容${body.instruction ? `：${body.instruction}` : ''}` }
 }) })
 on('POST', '/books/:id/covers/prompt', (m, body) => { const b = bookOf(m[1]); return createJob('cover_prompt', b.id, 1500, ['按要求改提示词…'], () => ({ prompt: `${body.current || '主角立于高处'}\n${body.instruction}` })) })
 on('POST', '/books/:id/covers/delete', (m, body) => { const id = +m[1]; const p = pkgOf(id); const covers = p.covers.filter((u: string) => u !== body.url); const chosen = p.chosen_cover === body.url ? covers[covers.length - 1] ?? null : p.chosen_cover; const n = { ...p, covers, chosen_cover: chosen }; db.packages.set(id, n); bookOf(m[1]).cover_url = chosen; return n })

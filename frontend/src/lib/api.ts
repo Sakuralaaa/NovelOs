@@ -139,6 +139,7 @@ export const api = {
   generatePackage: (bookId: number) => post<Job>(`/books/${bookId}/package/generate`),
   reviseCoverPrompt: (bookId: number, b: { instruction: string; current?: string; route?: string | null }) => post<Job>(`/books/${bookId}/covers/prompt`, b),
   deleteCover: (bookId: number, url: string) => post<Package>(`/books/${bookId}/covers/delete`, { url }),
+  suggestCard: (bookId: number, b: { card_id: number | null; field: string | null; instruction: string; route?: string | null; draft: Record<string, any> }) => post<Job>(`/books/${bookId}/cards/suggest`, b),
   generateCovers: (bookId: number, b: { prompt?: string; n?: number; title_mode?: 'model' | 'overlay' }) => post<Job>(`/books/${bookId}/covers/generate`, b),
   package: (bookId: number) => get<Package>(`/books/${bookId}/package`),
   savePackage: (bookId: number, b: Partial<Package>) => put<Package>(`/books/${bookId}/package`, b),
