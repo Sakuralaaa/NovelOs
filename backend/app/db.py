@@ -51,7 +51,10 @@ def _add_missing_columns(engine: Engine) -> None:
                     continue
                 ddl_type = col.type.compile(engine.dialect)
                 if "JSON" in ddl_type.upper():  # JSON 列补成空列表，不能用 0
-                    null = "" if col.nullable else " NOT NULL DEFAULT '[]'"
+                    models = {m.class_.__tablename__: m.class_ for m in SQLModel._sa_registry.mappers}  # type: ignore[attr-defined]
+                    f = getattr(models.get(table.name), "model_fields", {}).get(col.name)
+                    empty = "{}" if f is not None and f.default_factory is dict else "[]"
+                    null = "" if col.nullable else f" NOT NULL DEFAULT '{empty}'"
                     conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}{null}'))
                     continue
                 default = col.default.arg if col.default is not None and not callable(col.default.arg) else None
@@ -60,12 +63,16 @@ def _add_missing_columns(engine: Engine) -> None:
                 lit = f"'{default}'" if isinstance(default, str) else str(int(default))
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type} NOT NULL DEFAULT {lit}'))
         # 修复旧版本迁移留下的坏数据：JSON 列被补成了 0
+        models = {m.class_.__tablename__: m.class_ for m in SQLModel._sa_registry.mappers}  # type: ignore[attr-defined]
         for table in SQLModel.metadata.sorted_tables:
             if not insp.has_table(table.name):
                 continue
             for col in table.columns:
-                if "JSON" in col.type.compile(engine.dialect).upper() and not col.nullable:
-                    conn.execute(text(f'UPDATE "{table.name}" SET "{col.name}" = \'[]\' WHERE typeof("{col.name}") != \'text\' OR "{col.name}" IN (\'0\', \'\')'))
+                if "JSON" not in col.type.compile(engine.dialect).upper() or col.nullable:
+                    continue
+                f = getattr(models.get(table.name), "model_fields", {}).get(col.name)
+                empty = "{}" if f is not None and f.default_factory is dict else "[]"
+                conn.execute(text(f'UPDATE "{table.name}" SET "{col.name}" = :e WHERE typeof("{col.name}") != \'text\' OR "{col.name}" IN (\'0\', \'\')'), {"e": empty})
 
 
 def get_engine() -> Engine:

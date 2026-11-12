@@ -172,7 +172,7 @@ def update_idea(idea_id: int, fields: dict[str, Any]) -> Idea:
                 setattr(idea, k, v)
                 changed = True
         if changed:
-            idea.versions = [*idea.versions, {**cur, "instruction": "手动修改"}][-10:]
+            idea.versions = [*(idea.versions or []), {**cur, "instruction": "手动修改"}][-10:]
             s.add(idea)
             s.commit()
             s.refresh(idea)
@@ -235,7 +235,7 @@ def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobConte
         if idea is None:
             raise NotFound("选题不存在")
         gender = idea.gender
-        history = "\n".join(f"- {v.get('instruction')}" for v in idea.versions if v.get("instruction")) or "（无）"
+        history = "\n".join(f"- {v.get('instruction')}" for v in (idea.versions or []) if v.get("instruction")) or "（无）"
         user = render("idea_revise", gender_label=common.GENDER_LABEL.get(gender, gender), idea=_idea_text(idea),
                       history=history, instruction=instruction.strip())
         cur = {k: getattr(idea, k) for k in _IDEA_FIELDS}
@@ -254,7 +254,7 @@ def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobConte
         idea = s.get(Idea, idea_id)
         if idea is None:
             raise NotFound("选题不存在")
-        idea.versions = [*idea.versions, {**cur, "instruction": instruction.strip()}][-10:]
+        idea.versions = [*(idea.versions or []), {**cur, "instruction": instruction.strip()}][-10:]
         idea.title = _clean_title(it["title"], g)
         idea.logline = str(it.get("logline") or idea.logline)
         idea.selling_points = [str(x) for x in (it.get("selling_points") or idea.selling_points)][:4]
