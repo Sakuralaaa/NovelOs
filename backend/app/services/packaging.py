@@ -79,7 +79,7 @@ def generate_package(book_id: int, ctx: JobContext) -> dict[str, Any]:
 
 def cover_design_prompt(title: str, genre: str, scene: str) -> str:
     """模型写字模式：把书名交给生图模型做成封面主视觉，画面描述由用户写。"""
-    scene = re.sub(r"[，,。；;]?\s*(不要|不展示|不出现)[^，,。；;]*(文字|字样|标识|书名)[^，,。；;]*", "", scene).strip()
+    scene = re.sub(r"[^，,。；;（）()\n]*(不要|不展示|不出现|不带)[^，,。；;\n]*(文字|字样|标识|书名)[^，,。；;\n]*[，,。；;]?", "", scene).strip()
     return "\n".join([
         "你是专业的网文封面设计师，请设计一张适合番茄小说书架的封面，竖版 3:4。",
         f"书名：「{title}」。书名是封面的视觉主体：大号粗体艺术字，字体有冲击力，可按语义断成 2–3 行错落排布，"
