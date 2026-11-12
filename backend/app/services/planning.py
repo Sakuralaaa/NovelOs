@@ -82,11 +82,14 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
         f"- {t['category']}：热度 {t['heat']}，上榜 {t['books']} 本，上升 {t['rising']} 本，例：{'、'.join(t['sample_titles'][:3])}"
         for t in trends[:8]
     ) if params.get("from_trends") else "（未使用榜单）"
+    with session_scope() as s:
+        recent = s.exec(select(Idea).where(Idea.gender == gender).order_by(Idea.id.desc()).limit(30)).all()  # type: ignore[union-attr]
+        existing = "\n".join(f"- 《{i.title}》{i.logline[:50]}" for i in recent) or "（无）"
     ctx.progress(20, "构思选题")
     data = get_gateway().chat_json(
         "ideation", system_prompt("ideation"),
         render("ideation", count=count, gender_label=common.GENDER_LABEL.get(gender, gender),
-               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text),
+               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text, existing=existing),
         meta={"count": count, "gender": gender, "genre": genre, "trends": trends[:6] if params.get("from_trends") else []},
     )
     items = data.get("ideas") if isinstance(data, dict) else data
