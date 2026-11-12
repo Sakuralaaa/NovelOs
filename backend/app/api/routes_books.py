@@ -457,7 +457,8 @@ async def covers_generate(book_id: int, body: CoversIn | None = Body(default=Non
     _book(s, book_id)
     prompt = body.prompt if body else None
     n = body.n if body else 4
-    return job_out(submit("covers_generate", lambda ctx: packaging.generate_covers(book_id, prompt, n, ctx), book_id=book_id))
+    mode = body.title_mode if body else "model"
+    return job_out(submit("covers_generate", lambda ctx: packaging.generate_covers(book_id, prompt, n, ctx, mode), book_id=book_id))
 
 
 @router.get("/books/{book_id}/package")

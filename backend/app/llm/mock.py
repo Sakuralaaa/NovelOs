@@ -618,7 +618,7 @@ def mock_package(meta: dict[str, Any]) -> str:
     )
     tags = [meta.get("genre") or "都市", "逆袭", "系统", "打脸", "复仇"]
     cover = (f"{meta.get('genre') or '都市'}网文封面，竖版 3:4，雨夜老码头，一个年轻人背影站在霓虹与积水之间，"
-             f"手里握着一本铜扣旧账本，冷蓝与橙色对比光，厚涂插画风，上方留出书名空间，不要文字，不要水印")
+             f"手里握着一本铜扣旧账本，冷蓝与橙色对比光，厚涂插画风，上半部给书名大字留位置，书名用金属浮雕质感")
     return _j({"titles": titles, "blurb": blurb, "tags": tags[:5], "cover_prompt": cover})
 
 

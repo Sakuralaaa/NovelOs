@@ -180,6 +180,7 @@ class PackageUpdate(BaseModel):
 class CoversIn(BaseModel):
     prompt: str | None = None
     n: int = Field(default=4, ge=1, le=4)
+    title_mode: Literal["model", "overlay"] = "model"
 
 
 class StyleIn(BaseModel):

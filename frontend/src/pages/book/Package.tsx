@@ -9,6 +9,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/misc'
 import { TagInput } from '@/components/ui/tag-input'
+import { Segmented } from '@/components/ui/tabs'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { BookCrumb } from './_shared'
@@ -18,6 +19,14 @@ import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { Package } from '@/lib/types'
 import { cn, countWords } from '@/lib/utils'
+
+type TitleMode = 'model' | 'overlay'
+const COVER_CHIPS: { group: string; items: string[] }[] = [
+  { group: '风格', items: ['厚涂插画', 'CG 写实', '国风水墨', '暗黑史诗', '日系动漫'] },
+  { group: '构图', items: ['主角半身居中，书名压在头顶', '主角背影仰望巨物', '对峙构图，两股势力左右相冲', '俯视大场面，人物渺小'] },
+  { group: '色调', items: ['红黑高对比', '金色神光', '冷蓝夜色配暖光', '紫电雷光'] },
+  { group: '书名字体', items: ['金属浮雕', '燃烧火焰', '碎裂岩石', '毛笔狂草', '霓虹发光'] },
+]
 
 export default function PackagePage() {
   const id = useBookId()
@@ -32,6 +41,8 @@ export default function PackagePage() {
   const { start } = useJobs()
   const pkgJob = useActiveJob(`package:${id}`)
   const coverJob = useActiveJob(`covers:${id}`)
+  const [titleMode, setTitleModeState] = useState<TitleMode>(() => (localStorage.getItem('novelos.cover-title-mode') as TitleMode) || 'model')
+  const setTitleMode = (m: TitleMode) => { setTitleModeState(m); localStorage.setItem('novelos.cover-title-mode', m) }
 
   useEffect(() => { if (q.data && !dirty) setF(q.data) }, [q.data, dirty])
 
@@ -54,7 +65,13 @@ export default function PackagePage() {
   const genPkg = () => start(api.generatePackage(id), { key: `package:${id}`, label: '生成包装', successMsg: '书名、简介和标签已生成' })
   const genCovers = async () => {
     if (dirty) await save.mutateAsync({ cover_prompt: f.cover_prompt })
-    start(api.generateCovers(id, { prompt: f.cover_prompt || undefined, n: 4 }), { key: `covers:${id}`, label: '生成封面', successMsg: '4 张封面已生成，挑一张吧' })
+    start(api.generateCovers(id, { prompt: f.cover_prompt || undefined, n: 4, title_mode: titleMode }), { key: `covers:${id}`, label: '生成封面', successMsg: '4 张封面已生成，挑一张吧' })
+  }
+  const addChip = (group: string, text: string) => {
+    const line = `${group}：${text}。`
+    const cur = f.cover_prompt.trimEnd()
+    if (cur.includes(line)) return
+    set({ cover_prompt: cur ? `${cur}\n${line}` : line })
   }
   const doExport = async () => {
     setExporting(true)
@@ -114,8 +131,23 @@ export default function PackagePage() {
             <CardBody className="space-y-4">
               <div>
                 <div className="mb-1.5 text-[13px] font-medium">封面提示词</div>
-                <Textarea value={f.cover_prompt} onChange={(e) => set({ cover_prompt: e.target.value })} className="min-h-[96px] text-[13px]" placeholder="画面主体、氛围、色调、构图，例如：暴雪中亮着暖光的小超市……" />
-                <div className="mt-2 flex items-center justify-between gap-2">
+                <Textarea value={f.cover_prompt} onChange={(e) => set({ cover_prompt: e.target.value })} className="min-h-[96px] text-[13px]" placeholder="只写画面：主角外观、场景、光线、色调、构图……" />
+                <div className="mt-2 space-y-1.5">
+                  {COVER_CHIPS.map((g) => (
+                    <div key={g.group} className="flex items-start gap-2">
+                      <span className="mt-[3px] w-14 shrink-0 text-[12px] text-muted-foreground">{g.group}</span>
+                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                        {g.items.map((t) => (
+                          <button key={t} type="button" onClick={() => addChip(g.group, t)}
+                            className={cn('focus-ring rounded-full border px-2.5 py-0.5 text-[12px] transition-colors hover:border-primary hover:text-primary',
+                              f.cover_prompt.includes(`${g.group}：${t}。`) ? 'border-primary text-primary' : 'border-border text-muted-foreground')}>{t}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <Segmented size="sm" value={titleMode} onChange={setTitleMode} options={[{ value: 'model', label: '模型写书名' }, { value: 'overlay', label: '程序叠书名' }]} />
                   <Button variant="primary" size="sm" loading={!!coverJob} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={genCovers}>生成 4 张</Button>
                 </div>
               </div>

@@ -467,7 +467,7 @@ class LLMGateway:
     def _images_via_chat(self, t: Target, prompt: str, n: int) -> list[bytes]:
         """对话接口出图：一次请求一张，从返回里取 base64 / data URL / 图片链接。"""
         w, _, h = self.settings.image_size.partition("x")
-        ask = f"{prompt}\n\n直接生成图片，竖版，尺寸约 {w}×{h}，不要文字说明。"
+        ask = f"{prompt}\n\n直接生成图片，竖版，尺寸约 {w}×{h}，只返回图片，不要附带说明文字。"
         out: list[bytes] = []
         with httpx.Client(timeout=60, follow_redirects=True) as dl:
             for _ in range(max(1, n)):

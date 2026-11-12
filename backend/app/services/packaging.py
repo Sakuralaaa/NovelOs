@@ -8,6 +8,8 @@ import time
 import zipfile
 from typing import Any
 
+from PIL import Image
+
 from app.config import get_settings
 from app.db import session_scope
 from app.jobs.manager import JobContext
@@ -75,23 +77,49 @@ def generate_package(book_id: int, ctx: JobContext) -> dict[str, Any]:
     return {"titles": len(titles)}
 
 
-def generate_covers(book_id: int, prompt: str | None, n: int, ctx: JobContext) -> dict[str, Any]:
+def cover_design_prompt(title: str, genre: str, scene: str) -> str:
+    """模型写字模式：把书名交给生图模型做成封面主视觉，画面描述由用户写。"""
+    scene = re.sub(r"[，,。；;]?\s*(不要|不展示|不出现)[^，,。；;]*(文字|字样|标识|书名)[^，,。；;]*", "", scene).strip()
+    return "\n".join([
+        "你是专业的网文封面设计师，请设计一张适合番茄小说书架的封面，竖版 3:4。",
+        f"书名：「{title}」。书名是封面的视觉主体：大号粗体艺术字，字体有冲击力，可按语义断成 2–3 行错落排布，"
+        "可加描边、金属或火焰等质感，和画面融为一体；每个字必须准确，不能错字、漏字、多字。",
+        f"题材：{genre}。",
+        f"画面：{scene or genre + '题材的主角与标志性场景'}",
+        "书名以外不要出现其他文字、水印、平台标志；四周留安全边距，字不要贴边。",
+    ])
+
+
+def to_png(raw: bytes) -> bytes:
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def generate_covers(book_id: int, prompt: str | None, n: int, ctx: JobContext, title_mode: str = "model") -> dict[str, Any]:
     n = max(1, min(4, n))
     with session_scope() as s:
         book = common.get_book(s, book_id)
         pkg = get_or_create_package(s, book_id)
         s.commit()
         title, genre = book.title, book.genre
-        prompt = prompt or pkg.cover_prompt or f"{genre}网文封面，竖版 3:4，上方留出书名空间，不要文字，不要水印"
+        scene = (prompt or pkg.cover_prompt or "").strip()
+    if title_mode == "model":
+        final = cover_design_prompt(title, genre, scene)
+    else:
+        final = scene or f"{genre}网文封面，竖版 3:4，上方留出书名空间，不要文字，不要水印"
     ctx.progress(10, "生成封面")
-    raws = get_gateway().images(prompt, n)
+    raws = get_gateway().images(final, n)
     out_dir = get_settings().media_dir / "books" / str(book_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = int(time.time() * 1000)
     urls: list[str] = []
     for i in range(n):
-        ctx.progress(20 + 70 * i // n, f"排版第 {i + 1}/{n} 张")
-        if raws:
+        ctx.progress(20 + 70 * i // n, f"处理第 {i + 1}/{n} 张")
+        if raws and title_mode == "model":
+            data = to_png(raws[i % len(raws)])
+        elif raws:
             data = compose_from_image(raws[i % len(raws)], title, genre)
         else:
             data = placeholder_cover(title, genre, stamp + i)
@@ -101,11 +129,11 @@ def generate_covers(book_id: int, prompt: str | None, n: int, ctx: JobContext) -
     with session_scope() as s:
         book = common.get_book(s, book_id)
         pkg = get_or_create_package(s, book_id)
-        pkg.covers = [*pkg.covers, *urls]
+        pkg.covers = [*(pkg.covers or []), *urls]
         if not pkg.chosen_cover:
             pkg.chosen_cover = urls[0]
             book.cover_url = urls[0]
-        pkg.cover_prompt = pkg.cover_prompt or prompt
+        pkg.cover_prompt = pkg.cover_prompt or scene
         s.add(pkg)
         s.add(book)
         s.commit()

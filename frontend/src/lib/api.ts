@@ -137,7 +137,7 @@ export const api = {
   foreshadows: (bookId: number) => get<Foreshadow[]>(`/books/${bookId}/foreshadows`),
 
   generatePackage: (bookId: number) => post<Job>(`/books/${bookId}/package/generate`),
-  generateCovers: (bookId: number, b: { prompt?: string; n?: number }) => post<Job>(`/books/${bookId}/covers/generate`, b),
+  generateCovers: (bookId: number, b: { prompt?: string; n?: number; title_mode?: 'model' | 'overlay' }) => post<Job>(`/books/${bookId}/covers/generate`, b),
   package: (bookId: number) => get<Package>(`/books/${bookId}/package`),
   savePackage: (bookId: number, b: Partial<Package>) => put<Package>(`/books/${bookId}/package`, b),
 
