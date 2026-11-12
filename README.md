@@ -143,3 +143,15 @@ cd frontend && npm install && npm run dev
 ## 协议
 
 Apache License 2.0。第三方署名见 `THIRD_PARTY_NOTICES.md`。
+
+## 预构建镜像
+
+每次推送 `v*` tag，GitHub Actions 会构建 `linux/amd64` 和 `linux/arm64` 双架构镜像并发布到 GHCR：
+
+```bash
+docker pull ghcr.io/sakuralaaa/novelos:latest
+docker run -d --name novelos -p 8000:8000 -v novelos-data:/data \
+  -e NOVELOS_PASSWORD=你的密码 ghcr.io/sakuralaaa/novelos:latest
+```
+
+在 `docker-compose.yml` 里把 `build: .` 换成 `image: ghcr.io/sakuralaaa/novelos:latest` 即可直接拉取。

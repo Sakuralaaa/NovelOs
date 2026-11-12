@@ -1,6 +1,6 @@
 # NovelOS 一体化镜像：stage1 构建前端，stage2 运行后端并托管前端静态文件
 # ---------- stage 1: 前端 ----------
-FROM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
