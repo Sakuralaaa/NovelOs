@@ -33,6 +33,8 @@ class Channel(SQLModel, table=True):
     api_key_enc: str = ""
     models: list[str] = _json_list()
     enabled: bool = True
+    # 接口格式：openai（Chat Completions）/ responses（OpenAI Responses）/ anthropic（Messages）/ gemini（generateContent）
+    api_format: str = "openai"
     created_at: datetime = Field(default_factory=utcnow)
 
 

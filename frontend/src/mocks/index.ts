@@ -18,7 +18,7 @@ const nid = () => ++seq
 // ---------------- DB ----------------
 const db = {
   channels: [] as (Omit<Channel, 'api_key_masked'> & { api_key: string })[],
-  routing: { planner: null, writer: null, reviewer: null, embedding: null, image: null } as Routing,
+  routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, image_mode: 'images' } as Routing,
   radarConfig: { enabled: true, daily_hour: 8 } as RadarConfig,
   writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1 },
   snapshots: [{ id: 1, taken_at: ago(60 * 5), source: 'mock', items_count: 60 }] as RadarSnapshot[],
@@ -245,14 +245,22 @@ on('POST', '/auth/login', (_m: any, body: any) => { if (body?.password !== 'nove
 on('POST', '/auth/logout', () => { sessionStorage.setItem('mock-auth', '0'); return { ok: true } })
 on('POST', '/auth/password', () => ({ ok: true }))
 on('GET', '/settings/status', () => ({ mock_mode: db.channels.filter((c) => c.enabled).length === 0 }))
-const maskCh = (c: (typeof db.channels)[number]): Channel => ({ id: c.id, name: c.name, base_url: c.base_url, models: c.models, enabled: c.enabled, api_key_masked: c.api_key ? `${c.api_key.slice(0, 3)}••••${c.api_key.slice(-4)}` : '' })
+const maskCh = (c: (typeof db.channels)[number]): Channel => ({ id: c.id, name: c.name, base_url: c.base_url, models: c.models, enabled: c.enabled, api_format: c.api_format ?? 'openai', api_key_masked: c.api_key ? `${c.api_key.slice(0, 3)}••••${c.api_key.slice(-4)}` : '' })
 on('GET', '/settings/channels', () => db.channels.map(maskCh))
-on('POST', '/settings/channels', (_m, b) => { const c = { id: nid(), name: b.name, base_url: b.base_url, api_key: b.api_key ?? '', models: b.models ?? [], enabled: b.enabled ?? true }; db.channels.push(c); return maskCh(c) })
+on('POST', '/settings/channels', (_m, b) => { const c = { id: nid(), name: b.name, base_url: b.base_url, api_key: b.api_key ?? '', models: b.models ?? [], enabled: b.enabled ?? true, api_format: b.api_format ?? 'openai' }; db.channels.push(c); return maskCh(c) })
 on('PUT', '/settings/channels/:id', (m, b) => { const c = must(db.channels.find((x) => x.id === +m[1])); Object.assign(c, { ...b, api_key: b.api_key ? b.api_key : c.api_key }); return maskCh(c) })
 on('DELETE', '/settings/channels/:id', (m) => { db.channels = db.channels.filter((x) => x.id !== +m[1]); return null })
 on('POST', '/settings/channels/:id/test', (m) => { const c = must(db.channels.find((x) => x.id === +m[1])); return c.base_url.startsWith('http') ? { ok: true, latency_ms: 230 + (c.id % 7) * 41 } : { ok: false, latency_ms: 0, error: 'Base URL 格式不正确' } })
 on('GET', '/settings/writing', () => db.writing)
 on('PUT', '/settings/writing', (_m, b) => (db.writing = { ...db.writing, ...b }))
+on('POST', '/settings/models/fetch', (_m, b) => {
+  if (!/^https?:\/\//.test(b.base_url ?? '')) throw new HttpErr(400, '拉取失败：Base URL 格式不正确')
+  const base = String(b.base_url)
+  const pool = base.includes('deepseek') ? ['deepseek-chat', 'deepseek-reasoner']
+    : base.includes('dashscope') ? ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen3-235b-a22b', 'text-embedding-v3', 'wanx2.1-t2i-turbo']
+    : ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4o-search-preview', 'o3-mini', 'text-embedding-3-small', 'text-embedding-3-large', 'gpt-image-1', 'grok-4.20-multi-agent-0309', 'sonar-pro']
+  return { models: pool }
+})
 on('GET', '/settings/routing', () => db.routing)
 on('PUT', '/settings/routing', (_m, b) => (db.routing = { ...db.routing, ...b }))
 
@@ -298,6 +306,8 @@ on('POST', '/ideas/generate', (_m, b) => createJob('ideas_generate', null, 3800,
   return { idea_ids: ids }
 }))
 on('GET', '/ideas', () => db.ideas)
+on('POST', '/ideas/clear', () => { const n = db.ideas.filter((x) => !x.chosen).length; db.ideas = db.ideas.filter((x) => x.chosen); return { deleted: n } })
+on('DELETE', '/ideas/:id', (m) => { must(db.ideas.find((x) => x.id === +m[1]), '选题'); db.ideas = db.ideas.filter((x) => x.id !== +m[1]); return { ok: true } })
 on('POST', '/ideas/:id/adopt', (m) => {
   const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
   const book: Book = { id: nid(), title: idea.title, genre: idea.genre, gender: 'male', tagline: idea.logline, status: 'bible', target_words: 1_000_000, chapter_words: 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 } }
@@ -341,6 +351,22 @@ on('POST', '/outline/:id/expand', (m) => { const n = must(db.outline.find((o) =>
   return {}
 }) })
 on('GET', '/books/:id/outline', (m) => db.outline.filter((o) => o.book_id === +m[1]))
+on('DELETE', '/outline/:id', (m) => {
+  const n = must(db.outline.find((o) => o.id === +m[1]), '节点')
+  if (n.level === 'book') throw new HttpErr(400, '总纲不能删除，可以重新生成大纲')
+  const ids = new Set<number>([n.id]); let grew = true
+  while (grew) { grew = false; for (const o of db.outline) if (o.parent_id != null && ids.has(o.parent_id) && !ids.has(o.id)) { ids.add(o.id); grew = true } }
+  const linked = db.chapters.filter((c) => db.outline.some((o) => ids.has(o.id) && o.chapter_id === c.id))
+  if (linked.some((c) => c.status === 'committed')) throw new HttpErr(409, '这部分大纲下已有提交入账的章节，不能删除')
+  db.chapters = db.chapters.filter((c) => !linked.includes(c)); db.outline = db.outline.filter((o) => !ids.has(o.id))
+  return { deleted: ids.size }
+})
+on('DELETE', '/chapters/:id', (m) => {
+  const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
+  if (c.status === 'committed') throw new HttpErr(409, '已提交入账的章节不能删除')
+  db.outline.forEach((o) => { if (o.chapter_id === c.id) { o.chapter_id = null; if (o.status === 'written') o.status = 'planned' } })
+  db.chapters = db.chapters.filter((x) => x.id !== c.id); return { ok: true }
+})
 on('PUT', '/outline/:id', (m, b) => Object.assign(must(db.outline.find((o) => o.id === +m[1]), '节点'), b))
 
 const strip = (c: Chapter) => { const { content, variants, ...rest } = c; void content; return { ...rest, variants: variants?.map((v) => ({ ...v, content: '' })) } }

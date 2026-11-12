@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
     # LLM 网关
     llm_timeout: float = 120.0
+    search_timeout: float = 600.0  # 联网搜索整体上限（多 agent 搜索可能几分钟不出字）
     llm_retries: int = 2  # 同一渠道失败重试次数，之后切到同角色其他渠道
     image_size: str = "1024x1536"
 

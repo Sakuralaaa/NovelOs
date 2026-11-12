@@ -20,11 +20,11 @@ export function TabsTrigger({ className, ...p }: React.ComponentProps<typeof T.T
 }
 
 /** 轻量分段控件 */
-export function Segmented<T extends string>({ value, onChange, options, className, size = 'md' }: {
-  value: T; onChange: (v: T) => void; options: { value: T; label: React.ReactNode }[]; className?: string; size?: 'sm' | 'md'
+export function Segmented<T extends string>({ value, onChange, options, className, size = 'md', block }: {
+  value: T; onChange: (v: T) => void; options: { value: T; label: React.ReactNode }[]; className?: string; size?: 'sm' | 'md'; block?: boolean
 }) {
   return (
-    <div className={cn('inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]', size === 'sm' ? 'h-8' : 'h-9', className)} role="tablist">
+    <div className={cn(block ? 'flex' : 'inline-flex', 'items-center gap-0.5 rounded-lg bg-muted p-[3px]', size === 'sm' ? 'h-8' : 'h-9', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
@@ -33,6 +33,7 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
           onClick={() => onChange(o.value)}
           className={cn(
             'focus-ring inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-all',
+            block && 'flex-1 justify-center',
             value === o.value ? 'bg-surface text-foreground shadow-card' : 'text-muted-foreground hover:text-foreground',
           )}
         >

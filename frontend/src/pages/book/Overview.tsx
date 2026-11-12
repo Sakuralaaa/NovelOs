@@ -47,11 +47,11 @@ export default function BookOverview() {
         <BookCover book={book} className="w-[112px] shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[26px] font-semibold tracking-tight">{book.title}</h1>
+            <h1 className="break-words text-[26px] font-semibold tracking-tight">{book.title}</h1>
             <StageBadge status={book.status} />
           </div>
           <div className="mt-1 text-[13px] text-muted-foreground">{book.genre} · {book.gender === 'male' ? '男频' : '女频'} · 创建于 {fmtTime(book.created_at)}</div>
-          {book.tagline && <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-foreground/85">{book.tagline}</p>}
+          {book.tagline && <p className="mt-3 max-w-2xl break-words text-[14px] leading-relaxed text-foreground/85">{book.tagline}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(true)}>编辑信息</Button>
             <Link to={`/books/${id}/chapters`}><Button size="sm" icon={<FileText className="h-3.5 w-3.5" />}>打开章节</Button></Link>
@@ -188,7 +188,7 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
     <motion.div key={stage} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 border-t bg-subtle/50 px-5 py-4 md:px-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="max-w-xl">
-          <div className="text-[15px] font-semibold">{c.title}</div>
+          <div className="break-words text-[15px] font-semibold">{c.title}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">{c.main}{c.secondary}{advanceBtn}</div>
       </div>

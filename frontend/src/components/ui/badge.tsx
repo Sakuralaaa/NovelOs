@@ -10,14 +10,15 @@ const tones: Record<Tone, string> = {
   danger: 'bg-danger-soft text-danger',
   outline: 'hairline text-muted-foreground',
 }
-export function Badge({ tone = 'neutral', className, dot, ...p }: React.HTMLAttributes<HTMLSpanElement> & { tone?: Tone; dot?: boolean }) {
+export function Badge({ tone = 'neutral', className, dot, children, title, ...p }: React.HTMLAttributes<HTMLSpanElement> & { tone?: Tone; dot?: boolean }) {
   return (
     <span
-      className={cn('inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-[12px] font-medium leading-none', tones[tone], className)}
+      title={title ?? (typeof children === 'string' ? children : undefined)}
+      className={cn('inline-flex h-[22px] max-w-full shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-[12px] font-medium leading-none', tones[tone], className)}
       {...p}
     >
-      {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-      {p.children}
+      {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
+      <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden text-ellipsis">{children}</span>
     </span>
   )
 }

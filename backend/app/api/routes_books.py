@@ -104,6 +104,26 @@ def list_ideas(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     return [idea_out(i) for i in s.exec(select(Idea).order_by(Idea.id.desc()).limit(200))]  # type: ignore[union-attr]
 
 
+@router.delete("/ideas/{idea_id}")
+def delete_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, bool]:
+    idea = s.get(Idea, idea_id)
+    if idea is None:
+        raise HTTPException(404, "选题不存在")
+    s.delete(idea)  # 已建的书不受影响
+    s.commit()
+    return {"ok": True}
+
+
+@router.post("/ideas/clear")
+def clear_ideas(s: Session = Depends(get_session)) -> dict[str, int]:
+    """删除所有未建书的选题。"""
+    rows = list(s.exec(select(Idea).where(Idea.chosen == False)))  # noqa: E712
+    for r in rows:
+        s.delete(r)
+    s.commit()
+    return {"deleted": len(rows)}
+
+
 @router.post("/ideas/{idea_id}/adopt")
 def adopt_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     book = planning.adopt_idea(idea_id)
@@ -210,6 +230,36 @@ def update_outline(node_id: int, body: OutlineUpdate, s: Session = Depends(get_s
     return node_out(n)
 
 
+@router.delete("/outline/{node_id}")
+def delete_outline(node_id: int, s: Session = Depends(get_session)) -> dict[str, int]:
+    """删除大纲节点及其子树；子树里有已提交的章节时拒绝，未提交的草稿一并删除。"""
+    n = s.get(OutlineNode, node_id)
+    if n is None:
+        raise HTTPException(404, "大纲节点不存在")
+    if n.level == "book":
+        raise HTTPException(400, "总纲不能删除，可以重新生成大纲")
+    all_nodes = common.outline_nodes(s, n.book_id)
+    kids: dict[int | None, list[OutlineNode]] = {}
+    for x in all_nodes:
+        kids.setdefault(x.parent_id, []).append(x)
+    subtree, stack = [], [n]
+    while stack:
+        cur = stack.pop()
+        subtree.append(cur)
+        stack.extend(kids.get(cur.id, []))
+    ids = {x.id for x in subtree}
+    chapters = list(s.exec(select(Chapter).where(Chapter.book_id == n.book_id)))
+    linked = [c for c in chapters if c.outline_node_id in ids or any(x.chapter_id == c.id for x in subtree)]
+    if any(c.status == "committed" for c in linked):
+        raise HTTPException(409, "这部分大纲下已有提交入账的章节，不能删除")
+    for c in linked:
+        s.delete(c)
+    for x in subtree:
+        s.delete(x)
+    s.commit()
+    return {"deleted": len(subtree)}
+
+
 # ------------------------------------------------------------------ chapters
 
 @router.get("/books/{book_id}/chapters")
@@ -230,6 +280,24 @@ def get_chapter(chapter_id: int, s: Session = Depends(get_session)) -> dict[str,
 @router.put("/chapters/{chapter_id}")
 def update_chapter(chapter_id: int, body: ChapterUpdate) -> dict[str, Any]:
     return chapter_out(writing.update_chapter(chapter_id, body.title, body.content))
+
+
+@router.delete("/chapters/{chapter_id}")
+def delete_chapter(chapter_id: int, s: Session = Depends(get_session)) -> dict[str, bool]:
+    """只能删未提交的草稿；已提交的章节牵动人物状态与伏笔底账，不允许直接删。"""
+    c = s.get(Chapter, chapter_id)
+    if c is None:
+        raise HTTPException(404, "章节不存在")
+    if c.status == "committed":
+        raise HTTPException(409, "已提交入账的章节不能删除")
+    for node in s.exec(select(OutlineNode).where(OutlineNode.chapter_id == chapter_id)):
+        node.chapter_id = None
+        if node.status == "written":
+            node.status = "planned"
+        s.add(node)
+    s.delete(c)
+    s.commit()
+    return {"ok": True}
 
 
 @router.post("/books/{book_id}/chapters/write-next")

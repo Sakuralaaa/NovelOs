@@ -1,6 +1,6 @@
 """LLM 网关：OpenAI 兼容 chat completions + images，多渠道按角色路由、重试与切换、token 记录。
 
-- 角色：planner / writer / reviewer / embedding / image
+- 角色：planner / writer / reviewer / search / embedding / image
 - 路由值："channel_id:model" 或 null
 - 没有任何启用的渠道 → mock 模式（确定性假数据，见 app.llm.mock）
 """
@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import re
+import socket
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -21,13 +22,17 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.db import kv_get, session_scope
 from app.llm import mock
+from app.llm import protocols as proto
 from app.llm.crypto import decrypt
 from app.models.tables import Channel, TokenUsage
 
 log = logging.getLogger("novelos.llm")
 
-ROLES = ("planner", "writer", "reviewer", "embedding", "image")
+ROLES = ("planner", "writer", "reviewer", "search", "embedding", "image")
+# 只走路由指定模型、不向其它渠道切换的角色（普通文本模型做不了这些事）
+STRICT_ROLES = ("search", "embedding", "image")
 ROUTING_KEY = "routing"
+IMAGE_MODE_KEY = "image_mode"  # images：/images/generations；chat：对话接口出图
 
 # 任务默认走哪个角色
 TASK_ROLE: dict[str, str] = {
@@ -57,6 +62,12 @@ class Target:
     base_url: str
     api_key: str
     model: str
+    api_format: str = "openai"
+
+
+def get_image_mode(s: Session) -> str:
+    v = kv_get(s, IMAGE_MODE_KEY, "images")
+    return v if v in ("images", "chat") else "images"
 
 
 def get_routing(s: Session) -> dict[str, str | None]:
@@ -93,7 +104,7 @@ def resolve_targets(s: Session, role: str) -> list[Target]:
         return []
     routing = get_routing(s)
     route = _parse_route(routing.get(role))
-    if route is None and role in ("image", "embedding"):
+    if route is None and role in STRICT_ROLES:
         return []
     out: list[Target] = []
     primary_model: str | None = None
@@ -101,14 +112,16 @@ def resolve_targets(s: Session, role: str) -> list[Target]:
     if route and route[0] in by_id:
         c = by_id[route[0]]
         primary_model = route[1]
-        out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), route[1]))
+        out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), route[1], c.api_format or "openai"))
+    if role == "search":
+        return out
     for c in chans:
         if any(t.channel_id == c.id for t in out):
             continue
         if not c.models:
             continue
         model = primary_model if primary_model in c.models else c.models[0]
-        out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), model))
+        out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), model, c.api_format or "openai"))
     return out
 
 
@@ -134,6 +147,71 @@ def _record_usage(target: Target, role: str, task: str, usage: dict[str, Any] | 
             s.commit()
     except Exception:  # pragma: no cover - 记账失败不影响主流程
         log.exception("记录 token 用量失败")
+
+
+def _search_params(t: Target) -> dict[str, Any]:
+    """部分服务商需要显式打开联网：通义千问 enable_search，智谱 web_search 工具。
+
+    Perplexity sonar、OpenRouter 的 `:online` 模型、gpt-4o-search-preview 等本身就联网，不用额外参数。
+    """
+    base = t.base_url.lower()
+    if "dashscope" in base:
+        return {"enable_search": True}
+    if "bigmodel.cn" in base:
+        return {"tools": [{"type": "web_search", "web_search": {"enable": True}}]}
+    return {}
+
+
+def _not_retryable(e: Exception) -> bool:
+    return bool(re.match(r"HTTP (400|401|403|404|422)\b", str(e)))
+
+
+def _friendly(e: Exception) -> str:
+    msg = str(e)
+    if "model_not_found" in msg or "unknown provider for model" in msg or "model not found" in msg.lower():
+        return "模型名不存在，请在渠道里用「拉取模型」选择接口返回的模型 ID（不是页面上显示的名称）"
+    if re.match(r"HTTP (401|403)\b", msg):
+        return "API Key 无效或没有该模型的权限"
+    return msg
+
+
+_THINK_RE = re.compile(r"<think>.*?(</think>|$)", re.S)
+
+
+def _clean_search_text(text: str) -> str:
+    """去掉混进正文的思维链标签和网关占位文字。"""
+    text = _THINK_RE.sub("", text)
+    text = re.sub(r"^\s*(深度思考中[.。…]*\s*)+", "", text)
+    return text.strip()
+
+
+def _keepalive_transport() -> httpx.HTTPTransport:
+    opts: list[tuple[int, int, int]] = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+    for name, val in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 15), ("TCP_KEEPCNT", 8)):
+        if hasattr(socket, name):
+            opts.append((socket.IPPROTO_TCP, getattr(socket, name), val))
+    return httpx.HTTPTransport(socket_options=opts, retries=1)
+
+
+def _download(c: httpx.Client, u: str) -> bytes:
+    r = c.get(u)
+    r.raise_for_status()
+    return r.content
+
+
+def parse_model_list(data: Any) -> list[str]:
+    """兼容 OpenAI {data:[{id}]}、{models:[{name|id}]} 与纯数组。"""
+    items: Any = data
+    if isinstance(data, dict):
+        items = data.get("data") or data.get("models") or []
+    out: list[str] = []
+    for it in items if isinstance(items, list) else []:
+        mid = it if isinstance(it, str) else (it.get("id") or it.get("name") or it.get("model")) if isinstance(it, dict) else None
+        if mid:
+            mid = str(mid).removeprefix("models/")
+            if mid not in out:
+                out.append(mid)
+    return sorted(out, key=str.lower)
 
 
 def extract_json(text: str) -> Any:
@@ -179,10 +257,26 @@ class LLMGateway:
                 try:
                     return self._chat_once(t, role, task, messages, temperature, max_tokens)
                 except Exception as e:  # noqa: BLE001
-                    errors.append(f"{t.name}/{t.model} 第{attempt + 1}次：{e}")
+                    errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
                     log.warning("LLM 调用失败 %s", errors[-1])
+                    if _not_retryable(e):  # 模型名错、key 无效这类请求错误，重试也没用，直接换下一个渠道
+                        break
                     time.sleep(min(2.0, 0.5 * (attempt + 1)))
-        raise LLMError("所有渠道均失败：" + "；".join(errors[-4:]))
+        raise LLMError("所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:])))
+
+    def _post_chat(
+        self, t: Target, messages: list[dict[str, str]], temperature: float | None, max_tokens: int | None,
+        want_image: bool = False, timeout: float | None = None,
+    ) -> dict[str, Any]:
+        path, body = proto.chat_request(t.api_format, t.model, messages, temperature, max_tokens, want_image)
+        with httpx.Client(timeout=timeout or self.settings.llm_timeout, transport=_keepalive_transport()) as c:
+            r = c.post(proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body)
+        if r.status_code >= 400:
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            return r.json()
+        except ValueError as e:
+            raise LLMError("返回的不是 JSON，检查 Base URL 和接口格式是否匹配") from e
 
     def _chat_once(
         self,
@@ -193,23 +287,12 @@ class LLMGateway:
         temperature: float,
         max_tokens: int | None,
     ) -> str:
-        body: dict[str, Any] = {"model": t.model, "messages": messages, "temperature": temperature}
-        if max_tokens:
-            body["max_tokens"] = max_tokens
-        with httpx.Client(timeout=self.settings.llm_timeout) as c:
-            r = c.post(
-                _url(t.base_url, "/chat/completions"),
-                headers={"Authorization": f"Bearer {t.api_key}"},
-                json=body,
-            )
-        if r.status_code >= 400:
-            raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
-        data = r.json()
-        _record_usage(t, role, task, data.get("usage"))
-        content = data["choices"][0]["message"].get("content") or ""
+        data = self._post_chat(t, messages, temperature, max_tokens)
+        content, usage, _ = proto.parse_chat(t.api_format, data)
+        _record_usage(t, role, task, usage)
         if not content.strip():
             raise LLMError("模型返回空内容")
-        return str(content)
+        return content
 
     def chat_json(
         self,
@@ -233,31 +316,126 @@ class LLMGateway:
             out = self.chat(task, messages, meta=meta, role=role, temperature=0.3)
             return extract_json(out)
 
+    # ---------- search ----------
+    def has_search(self) -> bool:
+        with session_scope() as s:
+            return bool(resolve_targets(s, "search"))
+
+    def search(self, query: str, context: str = "") -> str | None:
+        """用路由里的联网搜索模型查一个问题；未配置返回 None。失败抛 LLMError。"""
+        system = (
+            "你是小说创作的资料核查员，可以联网搜索。针对问题检索可靠来源，用中文给出简洁、可直接用于写作的事实，"
+            "250 字以内，末尾列出 1~3 个来源链接。查不到或说法有争议时直说，不要编造。"
+        )
+        user = f"问题：{query}" + (f"\n\n写作背景（仅供理解问题）：{context[:600]}" if context else "")
+        with session_scope() as s:
+            targets = resolve_targets(s, "search")
+        if not targets:
+            return None
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        errors: list[str] = []
+        t = targets[0]
+        for attempt in range(2):
+            try:
+                return self._search_once(t, msgs)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{t.name}/{t.model} 第{attempt + 1}次：{e}")
+                log.warning("联网搜索失败 %s", errors[-1])
+                time.sleep(1.0 + attempt)
+        raise LLMError("联网搜索失败：" + "；".join(errors[-2:]))
+
+    def _search_once(self, t: Target, messages: list[dict[str, str]]) -> str:
+        """流式读取搜索结果。
+
+        多 agent 搜索模型可能几分钟不吐正文、也不给思维链（网关只补一个占位 reasoning），
+        非流式请求在这段静默里容易被中间层掐断，所以：流式 + 只收 content + 长空闲超时 + TCP keepalive；
+        中途断开但已收到足够正文时直接用已收到的部分。
+        """
+        limit = max(self.settings.search_timeout, self.settings.llm_timeout)
+        if t.api_format != "openai":
+            data = self._post_chat(t, messages, None, None, timeout=limit)
+            text, usage, _ = proto.parse_chat(t.api_format, data)
+            _record_usage(t, "search", "search", usage)
+            text = _clean_search_text(text)
+            if not text:
+                raise LLMError("搜索模型返回空内容")
+            return text
+        body: dict[str, Any] = {"model": t.model, "messages": messages, "stream": True}
+        body.update(_search_params(t))
+        timeout = httpx.Timeout(connect=20.0, read=limit, write=30.0, pool=20.0)
+        deadline = time.monotonic() + limit
+        parts: list[str] = []
+        usage: dict[str, Any] | None = None
+        with httpx.Client(timeout=timeout, transport=_keepalive_transport()) as c:
+            try:
+                with c.stream(
+                    "POST", _url(t.base_url, "/chat/completions"),
+                    headers={"Authorization": f"Bearer {t.api_key}", "Accept": "text/event-stream"}, json=body,
+                ) as r:
+                    if r.status_code >= 400:
+                        raise LLMError(f"HTTP {r.status_code}: {r.read().decode(errors='replace')[:200]}")
+                    if "text/event-stream" not in r.headers.get("content-type", ""):
+                        data = json.loads(r.read() or b"{}")
+                        _record_usage(t, "search", "search", data.get("usage"))
+                        msg = (data.get("choices") or [{}])[0].get("message") or {}
+                        return _clean_search_text(str(msg.get("content") or ""))
+                    for line in r.iter_lines():
+                        if time.monotonic() > deadline:
+                            raise LLMError(f"超过 {int(limit)} 秒未完成")
+                        if not line or line.startswith(":") or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        try:
+                            ev = json.loads(payload)
+                        except ValueError:
+                            continue
+                        if ev.get("error"):
+                            raise LLMError(str(ev["error"])[:200])
+                        usage = ev.get("usage") or usage
+                        for ch in ev.get("choices") or []:
+                            piece = (ch.get("delta") or ch.get("message") or {}).get("content")
+                            if piece:
+                                parts.append(str(piece))
+            except (httpx.TransportError, LLMError) as e:
+                got = _clean_search_text("".join(parts))
+                if len(got) >= 80:
+                    log.warning("联网搜索中途断开，使用已收到的 %d 字：%s", len(got), e)
+                    return got
+                raise LLMError(str(e) or type(e).__name__) from e
+        _record_usage(t, "search", "search", usage)
+        text = _clean_search_text("".join(parts))
+        if not text:
+            raise LLMError("搜索模型返回空内容")
+        return text
+
     # ---------- images ----------
     def images(self, prompt: str, n: int = 1) -> list[bytes] | None:
         """返回图片字节列表；未配置 image 路由（或 mock 模式）返回 None，由调用方本地生成。"""
         with session_scope() as s:
             targets = resolve_targets(s, "image")
+            mode = get_image_mode(s)
         if not targets:
             return None
         errors: list[str] = []
-        for t in targets:
+        for t in targets[:1]:
             for attempt in range(self.settings.llm_retries + 1):
                 try:
+                    if mode == "chat" or t.api_format in ("anthropic", "gemini"):
+                        return self._images_via_chat(t, prompt, n)
                     return self._images_once(t, prompt, n)
                 except Exception as e:  # noqa: BLE001
-                    errors.append(f"{t.name}/{t.model}：{e}")
+                    errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
+                    if _not_retryable(e):
+                        break
                     time.sleep(0.5 * (attempt + 1))
-        raise LLMError("生图失败：" + "；".join(errors[-3:]))
+        raise LLMError("生图失败：" + "；".join(dict.fromkeys(errors[-3:])))
 
     def _images_once(self, t: Target, prompt: str, n: int) -> list[bytes]:
         body = {"model": t.model, "prompt": prompt, "n": n, "size": self.settings.image_size}
-        with httpx.Client(timeout=max(self.settings.llm_timeout, 180)) as c:
-            r = c.post(
-                _url(t.base_url, "/images/generations"),
-                headers={"Authorization": f"Bearer {t.api_key}"},
-                json=body,
-            )
+        with httpx.Client(timeout=max(self.settings.llm_timeout, 300), follow_redirects=True) as c:
+            r = c.post(proto.url(t.base_url, "/images/generations"), headers=proto.headers("openai", t.api_key), json=body)
             if r.status_code >= 400:
                 raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
             data = r.json()
@@ -267,34 +445,64 @@ class LLMGateway:
                 if item.get("b64_json"):
                     out.append(base64.b64decode(item["b64_json"]))
                 elif item.get("url"):
-                    img = c.get(item["url"])
-                    img.raise_for_status()
-                    out.append(img.content)
+                    out.append(_download(c, item["url"]))
         if not out:
             raise LLMError("生图接口未返回图片")
         return out
 
+    def _images_via_chat(self, t: Target, prompt: str, n: int) -> list[bytes]:
+        """对话接口出图：一次请求一张，从返回里取 base64 / data URL / 图片链接。"""
+        w, _, h = self.settings.image_size.partition("x")
+        ask = f"{prompt}\n\n直接生成图片，竖版，尺寸约 {w}×{h}，不要文字说明。"
+        out: list[bytes] = []
+        with httpx.Client(timeout=60, follow_redirects=True) as dl:
+            for _ in range(max(1, n)):
+                data = self._post_chat(t, [{"role": "user", "content": ask}], None, None, want_image=True,
+                                       timeout=max(self.settings.llm_timeout, 300))
+                _, usage, imgs = proto.parse_chat(t.api_format, data)
+                _record_usage(t, "image", "cover", usage)
+                for im in imgs:
+                    out.append(im if isinstance(im, bytes) else _download(dl, im))
+                    break
+        if not out:
+            raise LLMError("对话接口没有返回图片，确认该模型支持出图，或改用生图接口")
+        return out
+
+    # ---------- model list ----------
+    @staticmethod
+    def list_models(base_url: str, api_key: str, api_format: str = "openai", timeout: float = 20.0) -> list[str]:
+        path, params = proto.models_request(api_format)
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True) as c:
+                r = c.get(proto.url(base_url, path), headers=proto.headers(api_format, api_key), params=params)
+        except httpx.HTTPError as e:
+            raise LLMError(f"连接失败：{e}") from e
+        if r.status_code >= 400:
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise LLMError("返回的不是 JSON，检查 Base URL 和接口格式") from e
+        models = parse_model_list(data)
+        if not models:
+            raise LLMError("接口没有返回任何模型")
+        return models
+
     # ---------- channel test ----------
     @staticmethod
-    def test_channel(base_url: str, api_key: str, models: list[str], timeout: float = 20.0) -> dict[str, Any]:
+    def test_channel(base_url: str, api_key: str, models: list[str], api_format: str = "openai",
+                     timeout: float = 30.0) -> dict[str, Any]:
         t0 = time.perf_counter()
+        ms = lambda: int((time.perf_counter() - t0) * 1000)  # noqa: E731
         try:
-            with httpx.Client(timeout=timeout) as c:
-                headers = {"Authorization": f"Bearer {api_key}"}
-                if models:
-                    r = c.post(
-                        _url(base_url, "/chat/completions"),
-                        headers=headers,
-                        json={"model": models[0], "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
-                    )
-                else:
-                    r = c.get(_url(base_url, "/models"), headers=headers)
-            latency = int((time.perf_counter() - t0) * 1000)
-            if r.status_code >= 400:
-                return {"ok": False, "latency_ms": latency, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
-            return {"ok": True, "latency_ms": latency}
+            if not models:
+                LLMGateway.list_models(base_url, api_key, api_format, timeout)
+                return {"ok": True, "latency_ms": ms()}
+            t = Target(0, "test", base_url, api_key, models[0], api_format)
+            LLMGateway()._post_chat(t, [{"role": "user", "content": "ping"}], None, 16, timeout=timeout)
+            return {"ok": True, "latency_ms": ms()}
         except Exception as e:  # noqa: BLE001
-            return {"ok": False, "latency_ms": int((time.perf_counter() - t0) * 1000), "error": str(e)}
+            return {"ok": False, "latency_ms": ms(), "error": _friendly(e)}
 
 
 _gateway: LLMGateway | None = None

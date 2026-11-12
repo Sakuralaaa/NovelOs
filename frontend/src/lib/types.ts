@@ -20,16 +20,20 @@ export interface Channel {
   api_key_masked: string
   models: string[]
   enabled: boolean
+  api_format: ApiFormat
 }
+export type ApiFormat = 'openai' | 'responses' | 'anthropic' | 'gemini'
 export interface ChannelInput {
   name: string
   base_url: string
   api_key?: string
   models: string[]
   enabled?: boolean
+  api_format?: ApiFormat
 }
-export type RouteKey = 'planner' | 'writer' | 'reviewer' | 'embedding' | 'image'
-export type Routing = Record<RouteKey, string | null>
+export type RouteKey = 'planner' | 'writer' | 'reviewer' | 'search' | 'embedding' | 'image'
+export type ImageMode = 'images' | 'chat'
+export type Routing = Record<RouteKey, string | null> & { image_mode?: ImageMode }
 
 export type Gender = 'male' | 'female'
 export interface RankItem {

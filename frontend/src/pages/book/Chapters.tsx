@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, RotateCw, Sparkles, Type, Wand2, AlertCircle, Copy,
+  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Sheet } from '@/components/ui/dialog'
+import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
 import { Kbd, Skeleton } from '@/components/ui/misc'
 import { Select } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -218,6 +218,20 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     mutationFn: (c: string) => api.saveChapter(id, { title: latest.current.title, content: c }),
     meta: { errorTitle: '应用修改失败' },
   })
+  const [confirmDel, setConfirmDel] = useState(false)
+  const rmDraft = useMutation({
+    mutationFn: () => api.deleteChapter(id),
+    meta: { errorTitle: '删除失败' },
+    onSuccess: () => {
+      dirty.current = false
+      setConfirmDel(false)
+      qc.removeQueries({ queryKey: qk.chapter(id) })
+      qc.invalidateQueries({ queryKey: qk.chapters(bookId) })
+      qc.invalidateQueries({ queryKey: qk.outline(bookId) })
+      toast.success('草稿已删除')
+      nav(`/books/${bookId}/chapters`, { replace: true })
+    },
+  })
   const commit = useMutation({
     mutationFn: async () => { await save(); return api.commitChapter(id) },
     meta: { errorTitle: '提交失败' },
@@ -305,6 +319,11 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <Button size="sm" variant="ghost" loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onClick={runReview}><span className="hidden sm:inline">审稿</span></Button>
             <Button size="sm" variant="ghost" loading={!!humanizeJob} disabled={busy || hasVariants} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={() => runRewrite('humanize')}><span className="hidden sm:inline">人味修整</span></Button>
             <Button size="sm" variant="ghost" loading={!!thickenJob} disabled={busy || hasVariants} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => runRewrite('thicken')}><span className="hidden sm:inline">描写增厚</span></Button>
+            {ch.status !== 'committed' && <Tip content="删除草稿"><Button size="icon-sm" variant="ghost" disabled={busy} onClick={() => setConfirmDel(true)} aria-label="删除草稿" className="text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button></Tip>}
+            <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
+              <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
+                footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rmDraft.isPending} onClick={() => rmDraft.mutate()}>删除</Button></>} />
+            </Dialog>
             <Tip content={hasVariants ? '先采纳一个版本' : ch.status === 'committed' ? '已提交，修改后可再次提交' : '确认本章，人物状态与伏笔写入底账'}>
               <span><Button size="sm" variant={ch.status === 'committed' ? 'secondary' : 'primary'} loading={commit.isPending} disabled={busy || hasVariants} icon={<CheckCheck className="h-3.5 w-3.5" />} onClick={() => commit.mutate()}><span className="hidden sm:inline">提交</span></Button></span>
             </Tip>

@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlmodel import Session, func, select
 
+from app.services.research import research_notes
 from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway
 from app.models.tables import Book, OutlineNode, utcnow
@@ -261,6 +262,7 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
             "outline", book_context=common.book_context(s, book), target_words=book.target_words,
             chapter_words=book.chapter_words,
         )
+    user += research_notes("outline", user, book_id, ctx, 5)
     ctx.progress(10, "生成总纲、卷与前两弧")
     data = gw.chat_json("outline", system_prompt("outline"), user, meta=meta)
     if not isinstance(data, dict) or not data.get("volumes"):

@@ -69,6 +69,7 @@ export const api = {
   createChannel: (b: ChannelInput) => post<Channel>('/settings/channels', b),
   updateChannel: (id: number, b: Partial<ChannelInput>) => put<Channel>(`/settings/channels/${id}`, b),
   deleteChannel: (id: number) => del<void>(`/settings/channels/${id}`),
+  fetchModels: (b: { base_url: string; api_key?: string; channel_id?: number; api_format?: string }) => post<{ models: string[] }>('/settings/models/fetch', b),
   testChannel: (id: number) => post<{ ok: boolean; latency_ms: number; error?: string }>(`/settings/channels/${id}/test`),
   routing: () => get<Routing>('/settings/routing'),
   saveRouting: (b: Routing) => put<Routing>('/settings/routing', b),
@@ -93,18 +94,22 @@ export const api = {
 
   generateIdeas: (b: { genre?: string; gender?: Gender; from_trends: boolean; count: number }) => post<Job>('/ideas/generate', b),
   ideas: () => get<Idea[]>('/ideas'),
+  deleteIdea: (id: number) => del<{ ok: boolean }>(`/ideas/${id}`),
+  clearIdeas: () => post<{ deleted: number }>('/ideas/clear'),
   adoptIdea: (id: number) => post<Book>(`/ideas/${id}/adopt`),
 
   generateBible: (bookId: number) => post<Job>(`/books/${bookId}/bible/generate`),
   cards: (bookId: number, type?: CardType) => get<Card[]>(`/books/${bookId}/cards${qs({ type })}`),
   createCard: (bookId: number, b: Partial<Card>) => post<Card>(`/books/${bookId}/cards`, b),
   updateCard: (id: number, b: Partial<Card>) => put<Card>(`/cards/${id}`, b),
+  deleteChapter: (id: number) => del<{ ok: boolean }>(`/chapters/${id}`),
   deleteCard: (id: number) => del<void>(`/cards/${id}`),
   facts: (bookId: number) => get<Fact[]>(`/books/${bookId}/facts`),
 
   generateOutline: (bookId: number) => post<Job>(`/books/${bookId}/outline/generate`),
   expandOutline: (nodeId: number) => post<Job>(`/outline/${nodeId}/expand`),
   outline: (bookId: number) => get<OutlineNode[]>(`/books/${bookId}/outline`),
+  deleteOutline: (nodeId: number) => del<{ deleted: number }>(`/outline/${nodeId}`),
   updateOutline: (nodeId: number, b: Partial<OutlineNode>) => put<OutlineNode>(`/outline/${nodeId}`, b),
 
   chapters: (bookId: number) => get<Chapter[]>(`/books/${bookId}/chapters`),

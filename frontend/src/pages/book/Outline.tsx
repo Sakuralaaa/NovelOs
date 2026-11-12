@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Pencil, Plus, Sparkles, UnfoldVertical, X } from '@/components/icons'
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Pencil, Plus, Sparkles, Trash2, UnfoldVertical, X } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Sheet } from '@/components/ui/dialog'
+import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
@@ -107,7 +107,7 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
         <span className={cn('mt-0.5 inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[11px] font-semibold', LEVEL[n.level].cls)}>{LEVEL[n.level].label}</span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={cn('font-medium', n.level === 'book' || n.level === 'volume' ? 'text-[14.5px]' : 'text-[13.5px]')}>{n.title}</span>
+            <span title={n.title} className={cn('min-w-0 truncate font-medium', n.level === 'book' || n.level === 'volume' ? 'text-[14.5px]' : 'text-[13.5px]')}>{n.title}</span>
             <Badge tone={st.t} className="h-5 text-[11px]">{st.l}</Badge>
           </div>
           {n.summary && <p className={cn('mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground', isChapter ? 'line-clamp-1' : 'line-clamp-2')}>{n.summary}</p>}
@@ -150,9 +150,22 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
     meta: { errorTitle: '保存失败' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); toast.success('大纲已保存'); onClose() },
   })
+  const [confirmDel, setConfirmDel] = useState(false)
+  const rm = useMutation({
+    mutationFn: () => api.deleteOutline(node!.id),
+    meta: { errorTitle: '删除失败' },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); qc.invalidateQueries({ queryKey: qk.chapters(bookId) }); toast.success('已删除'); setConfirmDel(false); onClose() },
+  })
   return (
     <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`}
-      footer={<><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></>}>
+      footer={<div className="flex w-full items-center gap-2">
+        {node && node.level !== 'book' && <Button variant="ghost" className="text-danger hover:bg-danger-soft" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDel(true)}>删除</Button>}
+        <div className="ml-auto flex gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></div>
+      </div>}>
+      <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
+        <DialogContent title={`删除「${node?.title ?? ''}」？`} desc={node?.level === 'chapter' ? '未提交的草稿会一起删除。' : '下面的所有子节点和未提交的草稿会一起删除。'}
+          footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rm.isPending} onClick={() => rm.mutate()}>删除</Button></>} />
+      </Dialog>
       <div className="space-y-4">
         <Field label="标题"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
         <Field label="内容概要"><Textarea value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} className="min-h-[160px] leading-relaxed" /></Field>

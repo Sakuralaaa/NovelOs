@@ -95,7 +95,7 @@ export default function RadarPage() {
           title={category || '全部题材'}
           action={<Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: <Rows3 className="h-3.5 w-3.5" /> }, { value: 'grid', label: <LayoutGrid className="h-3.5 w-3.5" /> }]} />}
         />
-        <div className="flex gap-1.5 overflow-x-auto border-b px-5 py-3 [scrollbar-width:none]">
+        <div className="flex flex-wrap gap-1.5 border-b px-5 py-3">
           <Chip active={!category} onClick={() => setCategory('')}>全部<span className="num opacity-55">{items.length}</span></Chip>
           {cats.map(([c, n]) => <Chip key={c} active={category === c} onClick={() => setCategory(c)}>{c}<span className="num opacity-55">{n}</span></Chip>)}
         </div>

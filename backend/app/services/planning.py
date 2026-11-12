@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlmodel import select
 
+from app.services.research import research_notes
 from app.db import session_scope
 from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway
@@ -100,6 +101,7 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
         meta = common.kit_meta(s, book)
         user = render("bible", title=book.title, genre=book.genre,
                       gender_label=common.GENDER_LABEL.get(book.gender, book.gender), premise=book.premise or book.tagline)
+    user += research_notes("bible", user, book_id, ctx, 10)
     ctx.progress(15, "生成设定库")
     data = get_gateway().chat_json("bible", system_prompt("bible"), user, meta=meta)
     if not isinstance(data, dict) or not data.get("cards"):

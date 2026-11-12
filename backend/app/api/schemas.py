@@ -37,6 +37,7 @@ class ChannelIn(BaseModel):
     api_key: str = ""
     models: list[str] = []
     enabled: bool = True
+    api_format: Literal["openai", "responses", "anthropic", "gemini"] = "openai"
 
 
 class ChannelUpdate(BaseModel):
@@ -45,12 +46,22 @@ class ChannelUpdate(BaseModel):
     api_key: str | None = None
     models: list[str] | None = None
     enabled: bool | None = None
+    api_format: Literal["openai", "responses", "anthropic", "gemini"] | None = None
+
+
+class ModelFetchIn(BaseModel):
+    base_url: str = Field(min_length=1)
+    api_key: str = ""
+    channel_id: int | None = None  # 编辑已有渠道且没重填 key 时，用库里存的 key
+    api_format: Literal["openai", "responses", "anthropic", "gemini"] = "openai"
 
 
 class RoutingIn(BaseModel):
     planner: str | None = None
     writer: str | None = None
     reviewer: str | None = None
+    search: str | None = None
+    image_mode: Literal["images", "chat"] | None = None
     embedding: str | None = None
     image: str | None = None
 
@@ -171,7 +182,7 @@ def channel_out(c: Channel) -> dict[str, Any]:
     except ValueError:
         masked = "****（无法解密）"
     return {"id": c.id, "name": c.name, "base_url": c.base_url, "api_key_masked": masked,
-            "models": list(c.models or []), "enabled": c.enabled}
+            "models": list(c.models or []), "enabled": c.enabled, "api_format": c.api_format or "openai"}
 
 
 def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:

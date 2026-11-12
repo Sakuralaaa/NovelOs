@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from app.services.research import research_notes
 from app.config import get_settings
 from app.db import kv_get, session_scope
 from app.jobs.manager import JobContext
@@ -295,6 +296,9 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         meta = {**common.kit_meta(s, book), "number": number, "beats": beats, "title": book.title,
                 "pronoun": common.pronoun(book), "words": book.chapter_words}
         pool = _sensory_pool(s, book)
+
+    # 0) 本章涉及的现实细节先联网核实（未配置搜索模型时跳过）
+    plan += research_notes("chapter", plan, book_id, ctx, 5)
 
     # 1) 场景节拍
     ctx.progress(8, f"第{number}章：拆分场景节拍")

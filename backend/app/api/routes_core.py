@@ -12,15 +12,18 @@ from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    ChannelIn, ChannelUpdate, RadarConfigIn, RoutingIn, WritingSettingsIn, channel_out, job_out, rank_item_out,
+    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, WritingSettingsIn, channel_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
 from app.jobs.manager import submit
 from app.llm.crypto import decrypt, encrypt
-from app.llm.gateway import ROLES, ROUTING_KEY, LLMGateway, get_routing, is_mock_mode
+from app.llm.gateway import (
+    IMAGE_MODE_KEY, ROLES, ROUTING_KEY, LLMError, LLMGateway, get_image_mode, get_routing, is_mock_mode,
+)
 from app.models.tables import Channel, Job, RadarSnapshot, TokenUsage
 from app.radar import service as radar
+from app.services.research import recent_logs
 from app.services.writing import WRITING_SETTINGS_KEY, writing_settings
 
 router = APIRouter(prefix="/api")
@@ -81,7 +84,7 @@ def list_channels(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
 @router.post("/settings/channels")
 def create_channel(body: ChannelIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     c = Channel(name=body.name, base_url=body.base_url.strip(), api_key_enc=encrypt(body.api_key.strip()),
-                models=[m.strip() for m in body.models if m.strip()], enabled=body.enabled)
+                models=[m.strip() for m in body.models if m.strip()], enabled=body.enabled, api_format=body.api_format)
     s.add(c)
     s.commit()
     s.refresh(c)
@@ -103,6 +106,8 @@ def update_channel(cid: int, body: ChannelUpdate, s: Session = Depends(get_sessi
         c.models = [m.strip() for m in body.models if m.strip()]
     if body.enabled is not None:
         c.enabled = body.enabled
+    if body.api_format is not None:
+        c.api_format = body.api_format
     s.add(c)
     s.commit()
     s.refresh(c)
@@ -132,18 +137,45 @@ async def test_channel(cid: int) -> dict[str, Any]:
             key = decrypt(c.api_key_enc)
         except ValueError as e:
             return {"ok": False, "latency_ms": 0, "error": str(e)}
-        base, models = c.base_url, list(c.models or [])
-    return await asyncio.to_thread(LLMGateway.test_channel, base, key, models)
+        base, models, fmt = c.base_url, list(c.models or []), c.api_format or "openai"
+    return await asyncio.to_thread(LLMGateway.test_channel, base, key, models, fmt)
+
+
+@router.post("/settings/models/fetch")
+async def fetch_models(body: ModelFetchIn) -> dict[str, Any]:
+    key = body.api_key.strip()
+    fmt = body.api_format
+    if not key and body.channel_id:
+        with session_scope() as s:
+            c = s.get(Channel, body.channel_id)
+            if c is None:
+                raise HTTPException(404, "渠道不存在")
+            try:
+                key = decrypt(c.api_key_enc)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
+    base = body.base_url.strip().rstrip("/")
+    try:
+        models = await asyncio.to_thread(LLMGateway.list_models, base, key, fmt)
+    except LLMError as e:
+        raise HTTPException(400, f"拉取失败：{e}") from e
+    return {"models": models}
+
+
+@router.get("/research/logs")
+def research_logs(book_id: int | None = None, limit: int = Query(30, ge=1, le=200)) -> list[dict[str, Any]]:
+    return recent_logs(book_id, limit)
 
 
 @router.get("/settings/routing")
 def routing_get(s: Session = Depends(get_session)) -> dict[str, str | None]:
-    return get_routing(s)
+    return {**get_routing(s), "image_mode": get_image_mode(s)}
 
 
 @router.put("/settings/routing")
 def routing_put(body: RoutingIn, s: Session = Depends(get_session)) -> dict[str, str | None]:
     data = body.model_dump()
+    image_mode = data.pop("image_mode", None)
     for role, v in data.items():
         if v is None or v == "":
             data[role] = None
@@ -154,7 +186,9 @@ def routing_put(body: RoutingIn, s: Session = Depends(get_session)) -> dict[str,
         if not cid.isdigit() or s.get(Channel, int(cid)) is None:
             raise HTTPException(400, f"{role} 路由引用的渠道 {cid} 不存在")
     kv_set(s, ROUTING_KEY, {r: data.get(r) for r in ROLES})
-    return get_routing(s)
+    if image_mode:
+        kv_set(s, IMAGE_MODE_KEY, image_mode)
+    return {**get_routing(s), "image_mode": get_image_mode(s)}
 
 
 @router.get("/settings/status")
