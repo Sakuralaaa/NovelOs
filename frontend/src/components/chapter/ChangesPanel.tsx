@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Sparkle, UserPlus } from 'lucide-react'
+import { ArrowRightLeft, Sparkle, UserPlus } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/common/States'
 import type { ChangeSet } from '@/lib/types'

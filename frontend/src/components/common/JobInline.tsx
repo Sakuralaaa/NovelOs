@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2 } from '@/components/icons'
 import { Progress } from '@/components/ui/misc'
 import type { TrackedJob } from '@/lib/jobs'
 import { cn } from '@/lib/utils'

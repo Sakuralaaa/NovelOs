@@ -1,5 +1,5 @@
 import * as S from '@radix-ui/react-select'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
 export interface Opt { value: string; label: React.ReactNode; group?: string; disabled?: boolean }

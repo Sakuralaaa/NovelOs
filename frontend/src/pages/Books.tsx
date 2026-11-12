@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { MoreHorizontal, Plus, Trash2 } from 'lucide-react'
+import { MoreHorizontal, Plus, Trash2 } from '@/components/icons'
 import * as DM from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

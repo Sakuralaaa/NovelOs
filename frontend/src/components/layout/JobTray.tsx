@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CheckCircle2, ChevronDown, Loader2, X, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Loader2, X, XCircle } from '@/components/icons'
 import { Progress } from '@/components/ui/misc'
 import { clearFinished, dismissJob, useTrackedJobs } from '@/lib/jobs'
 import { cn } from '@/lib/utils'

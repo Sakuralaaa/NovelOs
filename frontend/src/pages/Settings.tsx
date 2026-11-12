@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Copy, LogOut, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Sun, Trash2, XCircle, Zap } from 'lucide-react'
+import { CheckCircle2, Copy, LogOut, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Sun, Trash2, XCircle, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

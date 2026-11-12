@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, ArrowUpRight, Check, CircleDashed, FileText, Lightbulb, Plus, Radar, X } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, Check, CircleDashed, FileText, Lightbulb, Plus, Radar, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader } from '@/components/ui/card'
 import { Progress, Skeleton } from '@/components/ui/misc'

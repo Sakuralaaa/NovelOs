@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Eye, EyeOff, Loader2, LockKeyhole } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, Loader2, LockKeyhole } from '@/components/icons'
 import { api, qk } from '@/lib/api'
 import { LogoMark } from '@/components/common/States'
 import { cn } from '@/lib/utils'

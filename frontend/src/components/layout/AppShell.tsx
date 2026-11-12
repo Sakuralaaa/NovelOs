@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
-import { Menu } from 'lucide-react'
+import { Menu } from '@/components/icons'
 import { Sidebar } from './Sidebar'
 import { JobTray } from './JobTray'
 import { CommandPalette } from './CommandPalette'

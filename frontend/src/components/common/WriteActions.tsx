@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as P from '@radix-ui/react-popover'
-import { ChevronDown, Layers3, PenLine } from 'lucide-react'
+import { ChevronDown, Layers3, PenLine } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'

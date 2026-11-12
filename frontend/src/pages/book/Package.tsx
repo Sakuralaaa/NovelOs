@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Check, CheckCircle2, Download, ImagePlus, PenLine, Save, Sparkles, Tag, Type } from 'lucide-react'
+import { Check, CheckCircle2, Download, ImagePlus, PenLine, Save, Sparkles, Tag, Type } from '@/components/icons'
 import * as CB from '@radix-ui/react-checkbox'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen, Feather, FileText, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
   PanelLeftClose, PanelLeftOpen, Radar, Search, Settings, Sun, Waypoints,
-} from 'lucide-react'
+} from '@/components/icons'
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
@@ -100,7 +100,7 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
                   <NavLink to={n.to} end={n.end} onClick={onNavigate} className={({ isActive }) => item(n.to === '/books' ? loc.pathname === '/books' : isActive)}>
                     {({ isActive }) => {
                       const a = n.to === '/books' ? loc.pathname === '/books' : isActive
-                      return <><n.icon className={icon(a)} strokeWidth={1.8} />{!collapsed && <span>{n.label}</span>}</>
+                      return <><n.icon className={icon(a)} weight={a ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>
                     }}
                   </NavLink>
                 </div>
@@ -122,7 +122,7 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
                 <Tip key={n.to} content={collapsed ? n.label : null} side="right">
                   <div>
                     <NavLink to={`/books/${bookId}${n.to ? `/${n.to}` : ''}`} end={n.end} onClick={onNavigate} className={({ isActive }) => item(isActive)}>
-                      {({ isActive }) => <><n.icon className={icon(isActive)} strokeWidth={1.8} />{!collapsed && <span>{n.label}</span>}</>}
+                      {({ isActive }) => <><n.icon className={icon(isActive)} weight={isActive ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>}
                     </NavLink>
                   </div>
                 </Tip>
@@ -142,24 +142,24 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
           <Tip content={collapsed ? '设置' : null} side="right">
             <div className={cn(!collapsed && 'flex-1')}>
               <NavLink to="/settings" onClick={onNavigate} className={({ isActive }) => item(isActive)}>
-                {({ isActive }) => <><Settings className={icon(isActive)} strokeWidth={1.8} />{!collapsed && <span>设置</span>}</>}
+                {({ isActive }) => <><Settings className={icon(isActive)} weight={isActive ? 'duotone' : 'regular'} />{!collapsed && <span>设置</span>}</>}
               </NavLink>
             </div>
           </Tip>
           <div className={cn('flex items-center gap-0.5', collapsed && 'flex-col')}>
             <Tip content={theme === 'dark' ? '浅色模式' : '深色模式'} side={collapsed ? 'right' : 'top'}>
               <button onClick={toggleTheme} className={footBtn} aria-label="切换主题">
-                {theme === 'dark' ? <Sun className="h-[17px] w-[17px]" strokeWidth={1.8} /> : <Moon className="h-[17px] w-[17px]" strokeWidth={1.8} />}
+                {theme === 'dark' ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
               </button>
             </Tip>
             {auth?.enabled && (
               <Tip content="退出登录" side={collapsed ? 'right' : 'top'}>
-                <button onClick={logout} className={footBtn} aria-label="退出登录"><LogOut className="h-[17px] w-[17px]" strokeWidth={1.8} /></button>
+                <button onClick={logout} className={footBtn} aria-label="退出登录"><LogOut className="h-[17px] w-[17px]" /></button>
               </Tip>
             )}
             {collapsed && (
               <Tip content={`展开侧栏 (${modKey}+B)`} side="right">
-                <button onClick={onToggle} className={cn(footBtn, 'hidden md:flex')} aria-label="展开侧栏"><PanelLeftOpen className="h-[17px] w-[17px]" strokeWidth={1.8} /></button>
+                <button onClick={onToggle} className={cn(footBtn, 'hidden md:flex')} aria-label="展开侧栏"><PanelLeftOpen className="h-[17px] w-[17px]" /></button>
               </Tip>
             )}
           </div>

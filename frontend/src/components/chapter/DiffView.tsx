@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, RotateCcw, Undo2, X } from 'lucide-react'
+import { Check, RotateCcw, Undo2, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { diffParas, type DiffRow } from '@/lib/textAnalysis'
 import { cn } from '@/lib/utils'

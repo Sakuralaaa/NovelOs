@@ -1,4 +1,4 @@
-import { AlertTriangle, Highlighter, Sparkles, Wand2 } from 'lucide-react'
+import { AlertTriangle, Highlighter, Sparkles, Wand2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'

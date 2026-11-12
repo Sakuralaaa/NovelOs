@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { RotateCw } from 'lucide-react'
+import { RotateCw } from '@/components/icons'
 import { Illustration } from './Illustrations'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

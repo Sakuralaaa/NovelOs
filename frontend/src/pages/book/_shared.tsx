@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight } from '@/components/icons'
 import { useBook } from '@/hooks/queries'
 
 export function BookCrumb({ bookId, page }: { bookId: number; page?: string }) {

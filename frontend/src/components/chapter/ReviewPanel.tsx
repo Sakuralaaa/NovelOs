@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, CornerDownRight, RotateCw, XCircle } from 'lucide-react'
+import { CheckCircle2, CornerDownRight, RotateCw, XCircle } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScoreRing } from '@/components/ui/misc'

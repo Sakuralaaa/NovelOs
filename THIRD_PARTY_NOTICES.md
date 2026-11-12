@@ -85,3 +85,8 @@ httpx（BSD-3）、cryptography（Apache-2.0 / BSD）、Pillow（MIT-CMU）、uv
 ## 番茄网页字体映射表
 
 `backend/app/radar/fanqie_charset.py` 中的 PUA 码位→汉字映射参考社区逆向结果 https://github.com/ying-ck/fanqienovel-downloader （src/charset.json），仅用于还原榜单书名等公开字段。
+
+## 前端字体与图标
+
+- @phosphor-icons/react（MIT）：界面图标，统一出口在 `frontend/src/components/icons.tsx`。
+- @fontsource/noto-serif-sc（SIL OFL 1.1）：标题与正文宋体。

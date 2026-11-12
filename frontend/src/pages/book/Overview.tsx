@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, Waypoints, X,
-} from 'lucide-react'
+} from '@/components/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'

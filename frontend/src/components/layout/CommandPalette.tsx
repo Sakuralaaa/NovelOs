@@ -1,7 +1,7 @@
 import { Command } from 'cmdk'
 import * as D from '@radix-ui/react-dialog'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, CornerDownLeft, Home, Lightbulb, Moon, Radar, Settings } from 'lucide-react'
+import { BookOpen, CornerDownLeft, Home, Lightbulb, Moon, Radar, Settings } from '@/components/icons'
 import { useBooks } from '@/hooks/queries'
 import { toggleTheme } from '@/hooks/useTheme'
 import { BOOK_NAV } from './Sidebar'

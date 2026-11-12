@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X } from '@/components/icons'
 import { cn } from '@/lib/utils'
 
 /** 标签/模型名输入：回车或逗号添加 */
