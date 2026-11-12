@@ -31,8 +31,30 @@ def init_engine(settings: Settings) -> Engine:
         cur.close()
 
     SQLModel.metadata.create_all(engine)
+    _add_missing_columns(engine)
     _engine = engine
     return engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """轻量迁移：给已有 SQLite 表补上模型里新增的列（只加列，不改不删）。"""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in SQLModel.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl_type = col.type.compile(engine.dialect)
+                default = col.default.arg if col.default is not None and not callable(col.default.arg) else None
+                if default is None:
+                    default = "" if "CHAR" in ddl_type.upper() or "TEXT" in ddl_type.upper() else 0
+                lit = f"'{default}'" if isinstance(default, str) else str(int(default))
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type} NOT NULL DEFAULT {lit}'))
 
 
 def get_engine() -> Engine:

@@ -7,7 +7,7 @@ const ACT = { plant: { l: '埋设', t: 'primary' }, advance: { l: '推进', t: '
 const show = (x: any) => (typeof x === 'string' ? x : x?.name ? `${x.name}${x.type ? `（${x.type}）` : ''}` : x?.entity ? `${x.entity}：${x.change ?? x.value ?? ''}` : JSON.stringify(x))
 
 export function ChangesPanel({ changes }: { changes?: ChangeSet | null }) {
-  if (!changes) return <EmptyState compact kind="foreshadow" className="border-0 bg-transparent" title="暂无变更声明" desc="每章写完会附一份“变更声明”：新出场的人物、状态变化、伏笔动作。审核通过后入账到设定库。" />
+  if (!changes) return <EmptyState compact kind="foreshadow" className="border-0 bg-transparent" title="暂无变更声明" />
   const empty = !changes.new_entities?.length && !changes.state_changes?.length && !changes.foreshadow?.length
   if (empty) return <p className="py-8 text-center text-[13px] text-muted-foreground">本章没有新的设定变更</p>
   return (

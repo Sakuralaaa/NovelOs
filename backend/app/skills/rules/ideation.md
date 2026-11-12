@@ -1,12 +1,13 @@
 ---
 stage: ideation
 title: 选题规则
-version: 0.1
+version: 0.2
 sources:
   - huahuakandaima/human-novel-writer | MIT | adapted
   - wei125775-lab/novel-writing-skills (save-the-cat-novel) | MIT | adapted
   - aby-aby111/fanqie-short-story.skill | GPL-3.0 | idea-only
   - WindXRan/fanqie-radar | MIT | idea-only
+  - wangwen666.com/post/321（期待感：读者能期待的长期承诺）| 文章 | idea-only
 ---
 # 选题规则（NovelOS 自写，参考来源见元数据）
 
@@ -16,3 +17,5 @@ sources:
 4. 卖点写成读者能感到的爽，不写作者想表达的主题。每条卖点用“谁 + 做了什么 + 谁吃亏/谁震惊”来写。
 5. 每个 idea 自评：新颖度 novelty（0–100，和榜单头部撞车越多分越低）、适配度 fit（0–100，番茄读者口味、日更 4000 字是否可持续）。热度分由程序按榜单计算，不由模型给。
 6. 番茄男频偏好：开局即冲突、身份反差、系统/金手指有代价；女频偏好：情绪钩子、关系拉扯、身份反转与打脸。
+
+7. 每个选题要能说出“读者追下去能期待什么”：至少两条长期期待线（升级、复仇、身世、感情、谜团之一），并且第一条在前三章就能被读者看见。只有一个开局爽点、没有长期期待的选题撑不过 10 万字。

@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,8 +39,12 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("./data")
     secret: str | None = None  # Fernet 主密钥；为空时自动生成并存入 data_dir/secret.key
+    # 登录鉴权（见 app/auth.py）
+    password: str | None = None  # 登录密码；留空则使用 data/auth.json，首次启动自动生成
     basic_user: str = "novelos"
-    basic_password: str | None = None
+    basic_password: str | None = None  # 旧版变量，等同于 NOVELOS_PASSWORD
+    auth_disabled: bool = False  # 仅限本机开发/测试：关闭登录
+    cookie_secure: bool | None = None  # 会话 Cookie 的 Secure 标记；None=按请求是否 HTTPS 自动判断
     static_dir: Path = Path("/app/static")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     disable_scheduler: bool = False
@@ -53,6 +57,7 @@ class Settings(BaseSettings):
     # 雷达
     radar_base_url: str = "https://api-lf.fanqiesdk.com/api/novel/channel/homepage/rank/rank_list/v2/"
     radar_side_types: list[int] = [10, 12, 13]
+    radar_per_board: int = 30  # 网页阅读榜：每个题材榜取前 N 本（10–100）
     radar_timeout: float = 10.0
     radar_interval_s: float = 1.0  # 单次刷新内请求间隔
     radar_user_agent: str = (
@@ -66,6 +71,11 @@ class Settings(BaseSettings):
     font_path: str | None = None  # 封面排版用中文字体
 
     lint: LintThresholds = LintThresholds()
+
+    @field_validator("cookie_secure", "password", "basic_password", mode="before")
+    @classmethod
+    def _blank_is_none(cls, v):  # docker compose 会把未设置的变量传成空字符串
+        return None if isinstance(v, str) and not v.strip() else v
 
     @property
     def db_path(self) -> Path:

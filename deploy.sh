@@ -85,5 +85,12 @@ LAN_IP="$( (hostname -I 2>/dev/null || true) | awk '{print $1}')"
 say "部署完成！"
 echo "  本机访问：   http://127.0.0.1:${APP_PORT}"
 [ -n "${LAN_IP}" ] && echo "  局域网访问： http://${LAN_IP}:${APP_PORT}"
+if grep -q '^NOVELOS_PASSWORD=.\+' .env; then
+  echo "  登录密码：   .env 里的 NOVELOS_PASSWORD"
+elif [ -f data/initial_password.txt ]; then
+  echo "  初始密码：   $(head -1 data/initial_password.txt | sed 's/^.*：//')   （登录后到「设置 → 账户安全」修改）"
+else
+  echo "  登录密码：   沿用之前设置的密码"
+fi
 echo "  第一次打开请进入“设置”页填写模型渠道（OpenAI 兼容 base_url + Key）；不填也能用演示（mock）模式体验全流程。"
 echo "  查看日志：${COMPOSE[*]} logs -f novelos    停止：${COMPOSE[*]} down"

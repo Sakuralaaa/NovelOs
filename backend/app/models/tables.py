@@ -65,6 +65,7 @@ class RadarSnapshot(SQLModel, table=True):
     taken_at: datetime = Field(default_factory=utcnow)
     source: str = "mock"
     items_count: int = 0
+    version: str = ""  # 番茄榜单版本号（rankVersion），同版本不重复入库
 
 
 class RankItem(SQLModel, table=True):
@@ -75,6 +76,7 @@ class RankItem(SQLModel, table=True):
     author: str = ""
     category: str = ""
     rank: int = 0
+    rank_diff: int = 0  # 较上一版名次变化，正数为上升
     read_count: int = 0
     word_count: int = 0
     abstract: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))

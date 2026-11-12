@@ -38,6 +38,7 @@ export interface RankItem {
   author: string
   category: string
   rank: number
+  rank_diff?: number
   read_count: number
   word_count: number
   abstract: string
@@ -49,6 +50,7 @@ export interface RadarSnapshot {
   taken_at: string
   source: 'app' | 'web' | 'mock'
   items_count: number
+  version?: string
 }
 export interface TrendTopic {
   category: string

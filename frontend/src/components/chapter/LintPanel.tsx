@@ -83,7 +83,6 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
             )
           })}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">段落标注由前端按规则估算（引号外只剩“他说”这类不超过 3 字的对白视为裸对白；含“于是/随后/几天后”等且较长的段落视为概述），仅作提示。</p>
       </div>
 
       {lint && lint.warnings.length > 0 && (

@@ -41,7 +41,6 @@ export function WriteNextButton({ bookId, size = 'md', className, navigateOnDone
         <P.Portal>
           <P.Content align="end" sideOffset={6} className="z-50 w-[280px] rounded-xl bg-popover p-4 shadow-pop hairline animate-zoom-in">
             <div className="text-[13px] font-semibold">一次写几个版本？</div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">多版本会并行写作并各自打分，你挑最喜欢的一版采纳。版本越多，耗时和费用越高。</p>
             <Segmented className="mt-3 w-full" value={String(variants) as '1' | '2' | '3'} onChange={(v) => set(Number(v) as V)} options={[{ value: '1', label: '1 版' }, { value: '2', label: '2 版' }, { value: '3', label: '3 版' }]} />
           </P.Content>
         </P.Portal>
@@ -62,13 +61,12 @@ export function BatchWriteButton({ bookId, size = 'md' }: { bookId: number; size
         {job ? `批量写作 ${Math.round(job.progress)}%` : '批量写'}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent title="批量写章" desc="按细纲连续写作，每章都会经过审稿和人味检查。单次最多 10 章。"
+        <DialogContent title="批量写章"
           footer={<><Button variant="ghost" onClick={() => setOpen(false)}>取消</Button><Button variant="primary" onClick={() => { setOpen(false); start(api.writeBatch(bookId, n), { key: `write-batch:${bookId}`, label: `批量写 ${n} 章`, successMsg: `${n} 章已写完` }) }}>开始写 {n} 章</Button></>}>
           <div className="flex items-center gap-4">
             <input type="range" min={1} max={10} value={n} onChange={(e) => setN(Number(e.target.value))} className="flex-1 accent-[hsl(var(--primary))]" />
             <div className="num w-16 rounded-md bg-muted py-1.5 text-center text-lg font-semibold">{n}<span className="ml-0.5 text-xs font-normal text-muted-foreground">章</span></div>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">建议新书先写 3 章，读一读再决定要不要继续批量。</p>
         </DialogContent>
       </Dialog>
     </>

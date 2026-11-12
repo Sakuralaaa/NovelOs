@@ -11,6 +11,7 @@ import pytest
 _TMP = tempfile.mkdtemp(prefix="novelos-test-")
 os.environ["NOVELOS_DATA_DIR"] = _TMP
 os.environ["NOVELOS_DISABLE_SCHEDULER"] = "1"
+os.environ["NOVELOS_AUTH_DISABLED"] = "1"
 os.environ["NOVELOS_STATIC_DIR"] = os.path.join(_TMP, "no-static")
 os.environ.pop("NOVELOS_SECRET", None)
 

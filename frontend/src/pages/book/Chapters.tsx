@@ -88,7 +88,7 @@ export default function Chapters() {
         {list.error ? <div className="p-8"><ErrorState error={list.error} onRetry={() => list.refetch()} /></div>
           : !list.isLoading && !chapters.length ? (
             <div className="flex flex-1 items-center justify-center p-8">
-              <EmptyState kind="chapter" className="w-full max-w-lg" title="还没有正文" desc="AI 会按大纲的章细纲写作，写完自动审稿和人味检查。第一章建议写 2 个版本挑一挑。"
+              <EmptyState kind="chapter" className="w-full max-w-lg" title="还没有正文"
                 action={<><WriteNextButton bookId={bookId} /><BatchWriteButton bookId={bookId} /></>} />
             </div>
           ) : cid ? <ChapterWorkspace key={cid} id={cid} bookId={bookId} chapters={chapters} />
@@ -342,7 +342,6 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-1.5 text-[14px] font-semibold"><Copy className="h-4 w-4 text-primary" />这一章写了 {variants.length} 个版本</div>
-                      <p className="mt-0.5 text-xs text-muted-foreground">切换阅读，挑最顺眼的一版采纳；采纳后才能编辑和提交。</p>
                     </div>
                     <Button size="sm" variant="primary" loading={adopt.isPending} disabled={!curVariant} onClick={() => curVariant && adopt.mutate(curVariant.id)}>采纳此版</Button>
                   </div>

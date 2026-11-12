@@ -31,11 +31,11 @@ export default function Foreshadows() {
   return (
     <div className="page max-w-[1320px]">
       <BookCrumb bookId={id} page="伏笔" />
-      <PageHeader className="mt-3" title="伏笔" desc="写作时自动登记的伏笔池。埋下太久没推进的线索会被标红，提醒你别忘了回收。"
+      <PageHeader className="mt-3" title="伏笔"
         actions={<div className="relative w-56"><Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="搜索伏笔" className="pl-8" /></div>} />
       {q.isLoading ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{COLS.map((c) => <Skeleton key={c.key} className="h-80 rounded-xl" />)}</div>
         : q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} />
-        : !q.data?.length ? <EmptyState kind="foreshadow" title="还没有伏笔" desc="开始写正文后，每章的变更声明里提到的伏笔会自动出现在这里。" action={<Link to={`/books/${id}/chapters`} className="text-sm font-medium text-primary hover:underline">去写正文 →</Link>} />
+        : !q.data?.length ? <EmptyState kind="foreshadow" title="还没有伏笔" action={<Link to={`/books/${id}/chapters`} className="text-sm font-medium text-primary hover:underline">去写正文 →</Link>} />
         : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {COLS.map((col) => {
@@ -46,7 +46,6 @@ export default function Foreshadows() {
                     <div className="flex items-center gap-2"><span className={cn('h-2 w-2 rounded-full', col.bg)} /><span className="text-[14px] font-semibold">{col.label}</span><span className="num rounded-full bg-surface px-1.5 text-xs text-muted-foreground hairline">{items.length}</span></div>
                     <col.icon className={cn('h-4 w-4', col.accent)} />
                   </div>
-                  <p className="px-1.5 pb-2 text-[11.5px] text-muted-foreground">{col.desc}</p>
                   <div className="flex-1 space-y-2">
                     {items.map((f, i) => {
                       const stale = (f.status === 'planted' || f.status === 'advancing') && latestCh - f.last_ch >= 20

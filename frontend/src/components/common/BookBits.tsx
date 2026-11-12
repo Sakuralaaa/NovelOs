@@ -18,11 +18,18 @@ const GRADS = [
   ['#a855f7', '#ec4899'], ['#334155', '#64748b'], ['#d97706', '#b45309'],
 ]
 
-export function BookCover({ book, className }: { book: Pick<Book, 'id' | 'title' | 'cover_url' | 'genre'>; className?: string }) {
+export function BookCover({ book, className, mini }: { book: Pick<Book, 'id' | 'title' | 'cover_url' | 'genre'>; className?: string; mini?: boolean }) {
   const [broken, setBroken] = useState(false)
   if (book.cover_url && !broken)
-    return <img src={book.cover_url} alt={book.title} onError={() => setBroken(true)} className={cn('aspect-[3/4] w-full rounded-md object-cover shadow-card', className)} />
+    return <img src={book.cover_url} alt={book.title} onError={() => setBroken(true)} className={cn('aspect-[3/4] w-full rounded-md object-cover shadow-card ring-1 ring-black/5', className)} />
   const [a, b] = GRADS[book.id % GRADS.length]
+  if (mini)
+    return (
+      <div className={cn('relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-[5px] text-white shadow-card ring-1 ring-black/5', className)} style={{ background: `linear-gradient(145deg, ${a}, ${b})` }}>
+        <div className="absolute -right-3 -top-3 h-8 w-8 rounded-full bg-white/15" />
+        <span className="relative font-serif text-[17px] font-bold [text-shadow:0_1px_3px_rgb(0_0_0/0.25)]">{book.title.slice(0, 1)}</span>
+      </div>
+    )
   return (
     <div className={cn('relative flex aspect-[3/4] w-full flex-col justify-end overflow-hidden rounded-md p-2.5 text-white shadow-card', className)} style={{ background: `linear-gradient(145deg, ${a}, ${b})` }}>
       <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-white/15" />
@@ -75,7 +82,6 @@ export function QuickCreateDialog({ open, onOpenChange, defaults }: { open: bool
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="一键开写"
-        desc="选个题材，写一句你的点子（可不写）。建书后会自动生成设定库。"
         footer={
           <>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
@@ -96,10 +102,10 @@ export function QuickCreateDialog({ open, onOpenChange, defaults }: { open: bool
               ))}
             </div>
           </Field>
-          <Field label="书名" hint="可留空，之后在包装页再定">
+          <Field label="书名">
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：我在末世开超市" />
           </Field>
-          <Field label="一句话点子" hint="可选">
+          <Field label="一句话点子">
             <Textarea value={premise} onChange={(e) => setPremise(e.target.value)} placeholder="例如：全球冰封，主角的超市每天零点自动补货。" className="min-h-[72px]" />
           </Field>
         </div>

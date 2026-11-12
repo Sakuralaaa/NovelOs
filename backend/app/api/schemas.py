@@ -175,13 +175,13 @@ def channel_out(c: Channel) -> dict[str, Any]:
 
 
 def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:
-    return {"id": sn.id, "taken_at": iso(sn.taken_at), "source": sn.source, "items_count": sn.items_count}
+    return {"id": sn.id, "taken_at": iso(sn.taken_at), "source": sn.source, "items_count": sn.items_count, "version": sn.version}
 
 
 def rank_item_out(r: RankItem) -> dict[str, Any]:
     return {"book_id_ext": r.book_id_ext, "title": r.title, "author": r.author, "category": r.category, "rank": r.rank,
             "read_count": r.read_count, "word_count": r.word_count, "abstract": r.abstract, "tags": list(r.tags or []),
-            "gender": r.gender}
+            "gender": r.gender, "rank_diff": r.rank_diff}
 
 
 def book_out(s: Session, b: Book) -> dict[str, Any]:

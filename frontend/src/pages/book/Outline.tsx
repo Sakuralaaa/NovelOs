@@ -60,7 +60,7 @@ export default function Outline() {
   return (
     <div className="page">
       <BookCrumb bookId={id} page="大纲" />
-      <PageHeader className="mt-3" title="大纲" desc="总纲 → 卷 → 剧情弧 → 章细纲。采用“滚动规划”：只把眼前的部分展开得很细，后面的等写到再展开，避免越写越偏。"
+      <PageHeader className="mt-3" title="大纲"
         actions={<>
           {!!q.data?.length && <>
             <Button size="sm" variant="ghost" icon={<ChevronsUpDown className="h-4 w-4" />} onClick={() => setCollapsed(new Set())}>全部展开</Button>
@@ -72,7 +72,7 @@ export default function Outline() {
 
       {q.isLoading ? <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
         : q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} />
-        : !tree.length ? <EmptyState kind="outline" title="还没有大纲" desc="点「生成大纲」，AI 会根据设定库写出总纲、分卷和前两段剧情的章细纲。" action={<Button variant="primary" loading={!!job} icon={<ListTree className="h-4 w-4" />} onClick={gen}>生成大纲</Button>} />
+        : !tree.length ? <EmptyState kind="outline" title="还没有大纲" action={<Button variant="primary" loading={!!job} icon={<ListTree className="h-4 w-4" />} onClick={gen}>生成大纲</Button>} />
         : (
           <>
             <div className="mb-4 flex flex-wrap gap-2 text-[12.5px] text-muted-foreground">
@@ -151,7 +151,7 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); toast.success('大纲已保存'); onClose() },
   })
   return (
-    <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`} desc="修改后，后续写作会以新大纲为准"
+    <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`}
       footer={<><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></>}>
       <div className="space-y-4">
         <Field label="标题"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>

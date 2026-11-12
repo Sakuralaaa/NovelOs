@@ -6,7 +6,6 @@ import asyncio
 import base64
 import binascii
 import logging
-import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +18,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import routes_books, routes_core
+from app.api import routes_auth, routes_books, routes_core
+from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
 from app.db import init_engine
 from app.jobs.manager import recover_on_startup
@@ -51,27 +51,30 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="NovelOS", version=__version__, lifespan=lifespan)
 
+    auth = AuthManager(settings.data_dir, settings.password or settings.basic_password, settings.basic_user)
+    app.state.auth = auth
+    app.state.settings = settings
+
     @app.middleware("http")
-    async def password_protection(request: Request, call_next):
-        if not settings.basic_password or request.url.path == "/api/health":
-            return await call_next(request)
-        header = request.headers.get("authorization", "")
-        scheme, _, encoded = header.partition(" ")
-        try:
-            decoded = base64.b64decode(encoded, validate=True) if scheme.lower() == "basic" else b""
-        except (ValueError, binascii.Error):
-            decoded = b""
-        username, separator, password = decoded.partition(b":")
-        if not (separator and secrets.compare_digest(username, settings.basic_user.encode())
-                and secrets.compare_digest(password, settings.basic_password.encode())):
-            return PlainTextResponse("Authentication required", status_code=401,
-                                     headers={"WWW-Authenticate": 'Basic realm="NovelOS", charset="UTF-8"'})
+    async def security(request: Request, call_next):
+        path = request.url.path
+        protected = path.startswith(PROTECTED_PREFIXES) and path not in PUBLIC_PATHS
+        if protected and not settings.auth_disabled and not _authorized(request, auth):
+            return JSONResponse({"detail": "未登录或登录已过期"}, status_code=401)
+        # 写操作校验来源，防跨站请求伪造（配合 SameSite=Lax Cookie）
         origin = request.headers.get("origin")
-        if request.method not in ("GET", "HEAD", "OPTIONS") and origin:
+        if protected and request.method not in ("GET", "HEAD", "OPTIONS") and origin and not settings.auth_disabled:
             parsed = urlsplit(origin)
-            if parsed.scheme not in ("http", "https") or parsed.netloc.lower() != request.headers.get("host", "").lower():
+            host = request.headers.get("x-forwarded-host", request.headers.get("host", "")).lower()
+            if parsed.scheme not in ("http", "https") or parsed.netloc.lower() != host:
                 return PlainTextResponse("Origin not allowed", status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        if path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     app.add_middleware(
         CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True,
@@ -100,12 +103,33 @@ def create_app() -> FastAPI:
         msg = "；".join(f"{'.'.join(str(x) for x in err.get('loc', [])[1:])}: {err.get('msg')}" for err in errs[:5])
         return JSONResponse({"detail": f"参数错误：{msg}"}, status_code=422)
 
+    app.include_router(routes_auth.router)
     app.include_router(routes_core.router)
     app.include_router(routes_books.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 
     _mount_spa(app, settings.static_dir)
     return app
+
+
+PROTECTED_PREFIXES = ("/api/", "/media/", "/docs", "/redoc", "/openapi.json")
+PUBLIC_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+
+
+def _authorized(request: Request, auth: AuthManager) -> bool:
+    if auth.check(request.cookies.get(COOKIE_NAME)):
+        return True
+    # 兼容脚本调用：Authorization: Basic base64(任意用户名:密码)
+    header = request.headers.get("authorization", "")
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        return False
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode()
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return False
+    _, sep, password = decoded.partition(":")
+    return bool(sep) and auth.verify_cached(password)
 
 
 def _mount_spa(app: FastAPI, static_dir: Path) -> None:

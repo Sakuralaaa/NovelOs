@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Copy, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Sparkles, Sun, Trash2, XCircle, Zap } from 'lucide-react'
+import { CheckCircle2, Copy, LogOut, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Sun, Trash2, XCircle, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { Select, type Opt } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { TagInput } from '@/components/ui/tag-input'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
-import { useChannels, useStatus } from '@/hooks/queries'
+import { useChannels } from '@/hooks/queries'
+import { useAuth } from '@/components/auth/AuthGate'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { api, qk } from '@/lib/api'
 import type { Channel, RouteKey, Routing } from '@/lib/types'
@@ -36,21 +37,15 @@ const ROUTES: { key: RouteKey; label: string; desc: string }[] = [
 ]
 
 export default function SettingsPage() {
-  const { data: status } = useStatus()
   return (
-    <div className="page max-w-[980px]">
-      <PageHeader title="设置" desc="接入你自己的模型（支持任何 OpenAI 兼容接口，包括 new-api、one-api 等网关），再为每个环节分配模型。" />
-      {status?.mock_mode && (
-        <div className="mb-6 flex items-start gap-3 rounded-xl bg-warning-soft px-4 py-3.5 text-[13px] leading-relaxed hairline">
-          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-          <div><b className="font-semibold">当前为演示模式。</b>还没有可用的模型渠道，所有生成内容都是内置示例数据，方便你先熟悉流程。添加一个渠道后自动切换为真实生成。</div>
-        </div>
-      )}
+    <div className="page">
+      <PageHeader title="设置" />
       <div className="space-y-6">
         <Channels />
         <RoutingCard />
         <WritingCard />
         <RadarCard />
+        <AccountCard />
         <Appearance />
       </div>
     </div>
@@ -86,10 +81,10 @@ function Channels() {
   }
   return (
     <Card>
-      <CardHeader title="模型渠道" desc="API Key 只保存在你自己的服务器上" icon={<Plug className="h-4 w-4" />} action={<Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setEditing('new')}>添加渠道</Button>} />
-      <CardBody>
+      <CardHeader divider title="模型渠道" icon={<Plug className="h-4 w-4" />} action={<Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setEditing('new')}>添加渠道</Button>} />
+      <CardBody className="pt-5">
         {q.isLoading ? <div className="space-y-2"><Skeleton className="h-20" /><Skeleton className="h-20" /></div> : q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !q.data?.length ? (
-          <EmptyState compact kind="channel" title="还没有模型渠道" desc="选一个服务商，填入 API Key 就能用。不确定选哪个？DeepSeek、通义千问对中文网文友好且便宜。"
+          <EmptyState compact kind="channel" className="border-0 bg-transparent" title="还没有模型渠道"
             action={<div className="flex flex-wrap justify-center gap-2">{PRESETS.slice(0, 5).map((p) => <Button key={p.key} size="sm" onClick={() => setEditing({ id: 0, name: p.name, base_url: p.base_url, models: p.models, api_key_masked: '', enabled: true })}><span className="h-2 w-2 rounded-full" style={{ background: p.color }} />{p.name}</Button>)}</div>} />
         ) : (
           <div className="space-y-2.5">
@@ -153,7 +148,7 @@ function ChannelSheet({ value, onClose }: { value: Channel | 'new' | null; onClo
   const p = PRESETS.find((x) => x.key === preset)!
   const valid = f.name.trim() && /^https?:\/\//.test(f.base_url.trim()) && (!isNew || f.api_key.trim()) && f.models.length > 0
   return (
-    <Sheet open={!!value} onOpenChange={(o) => !o && onClose()} title={isNew ? '添加模型渠道' : `编辑：${(value as Channel | null)?.name ?? ''}`} desc="任何 OpenAI 兼容接口都可以"
+    <Sheet open={!!value} onOpenChange={(o) => !o && onClose()} title={isNew ? '添加模型渠道' : `编辑：${(value as Channel | null)?.name ?? ''}`}
       footer={<><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" disabled={!valid} loading={m.isPending} onClick={() => m.mutate()}>保存</Button></>}>
       <div className="space-y-5">
         <Field label="服务商">
@@ -167,14 +162,14 @@ function ChannelSheet({ value, onClose }: { value: Channel | 'new' | null; onClo
           </div>
         </Field>
         <Field label="名称"><Input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="例如：我的 DeepSeek" /></Field>
-        <Field label="Base URL" hint="通常以 /v1 结尾"><Input value={f.base_url} onChange={(e) => setF({ ...f, base_url: e.target.value })} placeholder="https://api.example.com/v1" className="font-mono text-[13px]" /></Field>
+        <Field label="Base URL"><Input value={f.base_url} onChange={(e) => setF({ ...f, base_url: e.target.value })} placeholder="https://api.example.com/v1" className="font-mono text-[13px]" /></Field>
         <Field label="API Key" hint={isNew ? undefined : `当前：${(value as Channel)?.api_key_masked || '未设置'}`}>
           <div className="relative">
             <Input type={show ? 'text' : 'password'} value={f.api_key} onChange={(e) => setF({ ...f, api_key: e.target.value })} placeholder={isNew ? 'sk-…' : '留空则不修改'} className="pr-9 font-mono text-[13px]" autoComplete="off" />
             <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground" aria-label={show ? '隐藏' : '显示'}>{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
           </div>
         </Field>
-        <Field label="模型列表" hint="回车添加，至少一个">
+        <Field label="模型列表">
           <TagInput value={f.models} onChange={(v) => setF({ ...f, models: v })} placeholder="例如：deepseek-chat" suggestions={p.models} />
         </Field>
       </div>
@@ -198,19 +193,18 @@ function RoutingCard() {
   const noCh = !opts.length
   return (
     <Card>
-      <CardHeader title="任务路由" desc="不同环节用不同模型，兼顾质量与成本" icon={<Route className="h-4 w-4" />} action={dirty && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => r && m.mutate(r)}>保存</Button>} />
-      <CardBody>
-        {q.isLoading || !r ? <Skeleton className="h-60" /> : (
-          <div className="divide-y divide-border/70 rounded-xl hairline">
+      <CardHeader divider title="任务路由" icon={<Route className="h-4 w-4" />} action={dirty && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => r && m.mutate(r)}>保存</Button>} />
+      <CardBody className="p-0">
+        {q.isLoading || !r ? <Skeleton className="m-5 h-60" /> : (
+          <div className="divide-y divide-border/70">
             {ROUTES.map((x) => (
-              <div key={x.key} className="grid items-center gap-3 px-4 py-3 sm:grid-cols-[1fr_260px]">
-                <div><div className="text-[13.5px] font-medium">{x.label}</div><div className="text-xs text-muted-foreground">{x.desc}</div></div>
+              <div key={x.key} className="grid min-h-[60px] items-center gap-3 px-5 py-3 sm:grid-cols-[1fr_240px]">
+                <div className="text-[13.5px] font-medium">{x.label}</div>
                 <Select value={r[x.key]} onChange={(v) => { setR({ ...r, [x.key]: v }); setDirty(true) }} options={opts} allowEmpty emptyLabel={noCh ? '演示模式（mock）' : '自动（使用默认）'} placeholder={noCh ? '演示模式（mock）' : '选择模型'} />
               </div>
             ))}
           </div>
         )}
-        {noCh && <p className="mt-3 text-xs text-muted-foreground">先添加并启用一个模型渠道，这里才能选择模型。</p>}
       </CardBody>
     </Card>
   )
@@ -228,20 +222,20 @@ function WritingCard() {
   const c = q.data
   return (
     <Card>
-      <CardHeader title="写作偏好" desc="多版本写作与自动化程度" icon={<Copy className="h-4 w-4" />} />
-      <CardBody>
-        {!c ? <Skeleton className="h-28" /> : (
-          <div className="divide-y divide-border/70 rounded-xl hairline">
-            <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <div><div className="text-[13.5px] font-medium">默认版本数</div><div className="text-xs text-muted-foreground">写下一章时一次写几个版本供挑选</div></div>
-              <div className="w-[140px]"><Select value={String(c.default_variants)} onChange={(v) => v && m.mutate({ default_variants: Number(v) as 1 | 2 | 3 })} options={[1, 2, 3].map((n) => ({ value: String(n), label: `${n} 个版本` }))} /></div>
+      <CardHeader divider title="写作偏好" icon={<Copy className="h-4 w-4" />} />
+      <CardBody className="p-0">
+        {!c ? <Skeleton className="m-5 h-28" /> : (
+          <div className="divide-y divide-border/70">
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">默认版本数</div>
+              <div className="w-[240px]"><Select value={String(c.default_variants)} onChange={(v) => v && m.mutate({ default_variants: Number(v) as 1 | 2 | 3 })} options={[1, 2, 3].map((n) => ({ value: String(n), label: `${n} 个版本` }))} /></div>
             </div>
-            <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-              <div><div className="text-[13.5px] font-medium">自动采纳最高分版本</div><div className="text-xs text-muted-foreground">开启后多版本不再等你挑选，直接用审稿分最高的一版</div></div>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">自动采纳最高分版本</div>
               <Switch checked={c.auto_adopt_best} onCheckedChange={(v) => m.mutate({ auto_adopt_best: v })} />
             </label>
-            <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-              <div><div className="text-[13.5px] font-medium">审稿通过后自动提交</div><div className="text-xs text-muted-foreground">关闭时每章都需要你点「提交」确认（推荐新手关闭）</div></div>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">审稿通过后自动提交</div>
               <Switch checked={c.auto_commit} onCheckedChange={(v) => m.mutate({ auto_commit: v })} />
             </label>
           </div>
@@ -262,17 +256,17 @@ function RadarCard() {
   const c = q.data
   return (
     <Card>
-      <CardHeader title="热点雷达" desc="每天定时抓取一次番茄公开榜单，仅取公开字段" icon={<Radar className="h-4 w-4" />} />
-      <CardBody>
-        {!c ? <Skeleton className="h-20" /> : (
-          <div className="divide-y divide-border/70 rounded-xl hairline">
-            <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
-              <div><div className="text-[13.5px] font-medium">每日自动抓取</div><div className="text-xs text-muted-foreground">关闭后只能手动刷新，或使用示例数据</div></div>
+      <CardHeader divider title="热点雷达" icon={<Radar className="h-4 w-4" />} />
+      <CardBody className="p-0">
+        {!c ? <Skeleton className="m-5 h-20" /> : (
+          <div className="divide-y divide-border/70">
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">每日自动抓取</div>
               <Switch checked={c.enabled} onCheckedChange={(v) => m.mutate({ ...c, enabled: v })} />
             </label>
-            <div className={cn('flex items-center justify-between gap-4 px-4 py-3', !c.enabled && 'opacity-50')}>
-              <div><div className="text-[13.5px] font-medium">抓取时间</div><div className="text-xs text-muted-foreground">建议放在凌晨或早上，避开高峰</div></div>
-              <div className="w-[140px]"><Select value={String(c.daily_hour)} onChange={(v) => v && m.mutate({ ...c, daily_hour: Number(v) })} options={Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `每天 ${String(h).padStart(2, '0')}:00` }))} /></div>
+            <div className={cn('flex min-h-[60px] items-center justify-between gap-4 px-5 py-3', !c.enabled && 'opacity-50')}>
+              <div className="text-[13.5px] font-medium">抓取时间</div>
+              <div className="w-[240px]"><Select value={String(c.daily_hour)} onChange={(v) => v && m.mutate({ ...c, daily_hour: Number(v) })} options={Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `每天 ${String(h).padStart(2, '0')}:00` }))} /></div>
             </div>
           </div>
         )}
@@ -285,12 +279,46 @@ function Appearance() {
   const t = useTheme()
   return (
     <Card>
-      <CardHeader title="外观" icon={t === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />} />
-      <CardBody>
-        <div className="flex items-center justify-between rounded-xl px-4 py-3 hairline">
-          <div><div className="text-[13.5px] font-medium">深色模式</div><div className="text-xs text-muted-foreground">夜里写作更护眼</div></div>
+      <CardHeader divider title="外观" icon={t === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />} />
+      <CardBody className="p-0">
+        <div className="flex min-h-[60px] items-center justify-between px-5 py-3">
+          <div className="text-[13.5px] font-medium">深色模式</div>
           <Switch checked={t === 'dark'} onCheckedChange={toggleTheme} />
         </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function AccountCard() {
+  const { data: auth } = useAuth()
+  const qc = useQueryClient()
+  const [f, setF] = useState({ current: '', next: '', confirm: '' })
+  const min = auth?.min_password_len ?? 8
+  const err = f.next && f.next.length < min ? `至少 ${min} 位` : f.confirm && f.confirm !== f.next ? '两次输入不一致' : ''
+  const m = useMutation({
+    mutationFn: () => api.changePassword(f.current, f.next),
+    meta: { errorTitle: '修改失败' },
+    onSuccess: () => { setF({ current: '', next: '', confirm: '' }); toast.success('密码已修改，其他设备需要重新登录') },
+  })
+  const logout = async () => { try { await api.logout() } finally { qc.clear(); qc.invalidateQueries({ queryKey: qk.auth }) } }
+  if (!auth?.enabled) return null
+  return (
+    <Card>
+      <CardHeader divider title="账户安全" icon={<ShieldCheck className="h-4 w-4" />} action={<Button size="sm" variant="ghost" icon={<LogOut className="h-3.5 w-3.5" />} onClick={logout}>退出登录</Button>} />
+      <CardBody className="pt-5">
+        {auth.managed_by_env ? (
+          <div className="text-[13.5px] text-muted-foreground">密码由 .env 中的 NOVELOS_PASSWORD 管理</div>
+        ) : (
+          <form className="grid gap-4 sm:grid-cols-3" onSubmit={(e) => { e.preventDefault(); if (!err && f.current && f.next && f.confirm) m.mutate() }}>
+            <Field label="当前密码"><Input type="password" autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} /></Field>
+            <Field label="新密码"><Input type="password" autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} /></Field>
+            <Field label="确认新密码" hint={err ? <span className="text-danger">{err}</span> : undefined}><Input type="password" autoComplete="new-password" value={f.confirm} onChange={(e) => setF({ ...f, confirm: e.target.value })} /></Field>
+            <div className="flex justify-end sm:col-span-3">
+              <Button type="submit" variant="primary" loading={m.isPending} disabled={!!err || !f.current || !f.next || !f.confirm}>修改密码</Button>
+            </div>
+          </form>
+        )}
       </CardBody>
     </Card>
   )

@@ -1,7 +1,7 @@
 ---
 stage: writing
 title: 正文写作规则（场景化）
-version: 0.1
+version: 0.2
 sources:
   - chengzhi-c/natural-talk | MIT | adapted（references/fiction.md B1–B9、叙事工法；SKILL.md 第 7、12、15 条）
   - KKKKhazix/human-writing | MIT | adapted
@@ -14,6 +14,9 @@ sources:
   - tance-mang/chinese-webnovel-skills | MIT | adapted
   - evelynyaxueke/anti-ai-writing-kit-zh | MIT | idea-only
   - Hurricane0698/novelwriter | AGPL-3.0 | idea-only（只注入相关设定、生成即草稿）
+  - zenstory-ai/oh-story-claudecode（story-deslop banned-words：最毒句式、总结句式、替换不复用）| MIT | adapted
+  - fuxiangxu/novel-ops（character-state：情绪/位置/关系/已知信息逐章追踪）| MIT | idea-only
+  - Narcooo/inkos（Observer 抽取角色、位置、资源、关系、情感、信息、伏笔、时间、物理状态 9 类事实）| AGPL-3.0 | idea-only
 ---
 # 正文写作规则（场景化）
 
@@ -48,9 +51,18 @@ sources:
 8. 不写点题升华和预告式套话（他不知道的是、这一切才刚刚开始、命运的齿轮）。
 9. 叙述者不替人物数拍子（一下，两下，三下）。
 
-## 五、变更声明
+## 五、连贯与章末
+1. 本章第一个场景从“上一章结尾原文”接着写：位置、时间、伤势、手里的东西、情绪都要连上，不要重新开场或跳过上一章留下的悬念。
+2. “人物与世界当前状态”是底账：已死亡的人只能以回忆、遗物或揭晓假死的方式出现；受了伤的人下一章还疼；丢了的东西不能凭空拿出来；角色只知道底账里他“已知信息”的内容。
+3. 章末断在变化发生的那一刻：一个不可撤回的决定、一条改变解释的新发现、一次读者看得出的误判、或目标刚达成时冒出的更大代价。禁止用“他终于明白”“这一切才刚刚开始”“他不知道的是”“无论如何他都会坚持下去”这类总结、升华、空泛预告收尾。
+4. 爽点按“期待 → 压抑 → 释放”写：释放前要让读者等，释放后给围观反应或实际收获。
+
+## 六、变更声明
 正文写完后另起一行写 `---CHANGES---`，后面跟一个 JSON：
 {"new_entities":[{"type":"character|item|location|faction|power|world","name":"","summary":""}],
  "state_changes":[{"entity":"名字","key":"状态项","value":"新值","visibility":"reader|author"}],
  "foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":""}]}
 没有就写空数组。生成结果是草稿，确认提交前不会进入事实底账。
+
+state_changes 的 key 尽量用统一的键名，便于下一章核对：位置、处境、身体/伤势、境界/实力、持有物品、情绪、目标、已知信息、关系:对方名字、身份、生死。
+全书级的变化（故事内时间、天气、局势）用 entity 写“全书”。角色得知秘密时登记“已知信息”，没登记的秘密下一章不能当作他已经知道。

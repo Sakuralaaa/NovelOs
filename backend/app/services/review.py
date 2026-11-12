@@ -67,13 +67,34 @@ def first_sentence(content: str) -> str:
     return m.group(0).strip() if m else content[:30]
 
 
+# 章末“总结 / 升华 / 空泛预告”收尾（oh-story-claudecode story-deslop 的总结句式，MIT，改写；maliangwriter 弱章尾示例）
+ENDING_SUMMARY_RX = re.compile(
+    r"(终于明白|这才意识到|才刚刚开始|从这一刻(?:开始|起)|这一刻[，,]?[他她]终于|他知道|她知道|他不知道的是|她不知道的是|"
+    r"命运的齿轮|无论如何[，,]?[他她]都|未来(?:还|会)有|更大的(?:风暴|挑战|危机)(?:即将|正在)|一切都(?:将|会)(?:改变|不同))"
+)
+
+
+def last_sentence(content: str) -> str:
+    sents = [m.group(0).strip() for m in re.finditer(r"[^。！？\n]+[。！？”」]*", content) if m.group(0).strip()]
+    return sents[-1] if sents else ""
+
+
+def ending_issue(content: str) -> dict[str, str] | None:
+    """章末最后一句是总结、升华或空泛预告 → 钩子落空（mid）。"""
+    last = last_sentence(content)
+    if last and len(last) >= 4 and ENDING_SUMMARY_RX.search(last) and not last.startswith(("“", "「")):
+        return {"severity": "mid", "dimension": "hook", "quote": last,
+                "comment": "章末收在总结/升华/空泛预告上，读者合上也不损失什么。断在一个决定、发现、误判或代价出现的那一刻"}
+    return None
+
+
 def deterministic_issues(
     content: str,
     protagonist: str | None,
     required_chars: list[str],
     number: int,
 ) -> list[dict[str, str]]:
-    """程序检查：主角 300 字内出场、出场守卫。quote 由程序取自正文，天然可校验。"""
+    """程序检查：主角 300 字内出场、出场守卫、章末总结句。quote 由程序取自正文，天然可校验。"""
     out: list[dict[str, str]] = []
     if protagonist and protagonist not in content[:300]:
         out.append({
@@ -90,6 +111,9 @@ def deterministic_issues(
                 "quote": first_sentence(content),
                 "comment": f"出场守卫：细纲要求的角色「{name}」没有出现在正文中",
             })
+    end = ending_issue(content)
+    if end:
+        out.append(end)
     return out
 
 
@@ -107,12 +131,14 @@ def run_review(
     protagonist: str | None,
     required_chars: list[str],
     meta: dict[str, Any] | None = None,
+    context: str = "",
 ) -> tuple[dict[str, Any], int]:
-    """返回（Review dict, 被丢弃的无证据 issue 数）。"""
+    """返回（Review dict, 被丢弃的无证据 issue 数）。context：人物当前状态 + 上一章结尾，供连贯性核对。"""
     raw = gw.chat_json(
         "review",
         system_prompt("review"),
-        render("review", number=number, chapter_plan=chapter_plan, content=content),
+        render("review", number=number, chapter_plan=chapter_plan, content=content,
+               context=context or "（无：本书尚无已登记状态）"),
         meta={**(meta or {}), "content": content, "number": number},
         temperature=0.2,
     )

@@ -29,7 +29,7 @@ export default function Ideas() {
   const { start } = useJobs()
   const job = useActiveJob('ideas')
   const ideas = useQuery({ queryKey: qk.ideas, queryFn: api.ideas })
-  const trends = useQuery({ queryKey: qk.radarTrends, queryFn: api.radarTrends, enabled: fromTrends })
+  const trends = useQuery({ queryKey: qk.radarTrends(), queryFn: () => api.radarTrends(), enabled: fromTrends })
 
   useEffect(() => { if (sp.get('genre')) setGenre(sp.get('genre')!) }, [sp])
 
@@ -53,7 +53,7 @@ export default function Ideas() {
 
   return (
     <div className="page">
-      <PageHeader title="选题" desc="告诉我大概方向，AI 会结合热点生成选题卡：书名、一句话卖点、钩子和评分。满意就采纳建书。" />
+      <PageHeader title="选题" />
 
       <Card className="overflow-hidden">
         <div className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:p-6">
@@ -62,7 +62,7 @@ export default function Ideas() {
               <Field label="频道">
                 <Segmented value={gender} onChange={setGender} options={[{ value: 'male', label: '男频' }, { value: 'female', label: '女频' }]} />
               </Field>
-              <Field label="题材" className="min-w-[220px] flex-1" hint="可留空，让 AI 自己挑">
+              <Field label="题材" className="min-w-[220px] flex-1">
                 <Input value={genre} onChange={(e) => setGenre(e.target.value)} placeholder="例如：末世求生、年代重生…" onKeyDown={(e) => e.key === 'Enter' && !job && generate()} />
               </Field>
               <Field label="数量">
@@ -78,7 +78,7 @@ export default function Ideas() {
             </div>
             <label className="flex w-fit cursor-pointer items-center gap-2.5 text-[13px]">
               <Switch checked={fromTrends} onCheckedChange={setFromTrends} />
-              <span>参考今日热点 <span className="text-muted-foreground">（结合雷达榜单的题材热度与头部书卖点）</span></span>
+              <span>参考今日热点</span>
             </label>
           </div>
           <div className="flex items-end">
@@ -95,7 +95,7 @@ export default function Ideas() {
           <h2 className="text-[15px] font-semibold">选题卡 {ideas.data?.length ? <span className="ml-1 text-muted-foreground">{ideas.data.length}</span> : null}</h2>
         </div>
         {ideas.isLoading ? <GridSkeleton n={3} h="h-64" /> : ideas.error ? <ErrorState error={ideas.error} onRetry={() => ideas.refetch()} /> : !list.length ? (
-          <EmptyState kind="idea" title="还没有选题" desc="在上面选个频道和题材，点「生成选题」。第一次可以什么都不填，直接生成看看。" />
+          <EmptyState kind="idea" title="还没有选题" />
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <AnimatePresence initial={false}>

@@ -41,7 +41,7 @@ SOFTWARE.
 ### 其他 MIT 来源（版权归各仓库作者所有，许可文本同上 MIT 模板）
 | 仓库 | 用在哪里 |
 |---|---|
-| zenstory-ai/oh-story-claudecode | 主角 300 字内出场、1000 字内钩子、章尾钩子；JSON 唯一底账思路 |
+| zenstory-ai/oh-story-claudecode（worldwonderer/oh-story-claudecode） | 主角 300 字内出场、1000 字内钩子、章尾钩子；JSON 唯一底账思路；story-deslop 禁用句式与禁用词（`backend/app/lint/banned_zh.py`） |
 | PenglongHuang/chinese-novelist-skill | 每章写前分析 → 写 → 润色 → 更新摘要的流程 |
 | op7418/Humanizer-zh | AI 腔模式类别（不是X而是Y、三段式、意义拔高等） |
 | wei125775-lab/deai | 词表与脚本同源维护；“仿佛/一丝/一抹/几分”出现即处理 |
@@ -80,3 +80,8 @@ SOFTWARE.
 ## 三、运行时依赖
 FastAPI（MIT）、Starlette（BSD-3）、SQLModel（MIT）、SQLAlchemy（MIT）、Pydantic（MIT）、pydantic-settings（MIT）、
 httpx（BSD-3）、cryptography（Apache-2.0 / BSD）、Pillow（MIT-CMU）、uvicorn（BSD-3）。Docker 镜像内的文泉驿微米黑字体为 GPLv3 + 字体例外 / Apache-2.0 双许可。
+
+
+## 番茄网页字体映射表
+
+`backend/app/radar/fanqie_charset.py` 中的 PUA 码位→汉字映射参考社区逆向结果 https://github.com/ying-ck/fanqienovel-downloader （src/charset.json），仅用于还原榜单书名等公开字段。

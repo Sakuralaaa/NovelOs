@@ -44,7 +44,7 @@ export default function Bible() {
   return (
     <div className="page">
       <BookCrumb bookId={id} page="设定库" />
-      <PageHeader className="mt-3" title="设定库" desc="世界观、力量体系、人物……写作时 AI 会严格参照这里。“知情者”标注谁知道这条设定，避免人物说出不该知道的事。"
+      <PageHeader className="mt-3" title="设定库"
         actions={<>
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ type: filter === 'all' ? 'character' : filter, name: '', summary: '', data: {}, known_by: [] })}>新建设定</Button>
           <Button variant="primary" loading={!!job} icon={<Wand2 className="h-4 w-4" />} onClick={gen}>AI 生成设定</Button>
@@ -60,7 +60,7 @@ export default function Bible() {
       </div>
 
       {cards.isLoading ? <GridSkeleton n={6} h="h-44" /> : cards.error ? <ErrorState error={cards.error} onRetry={() => cards.refetch()} /> : !list.length ? (
-        <EmptyState kind="cards" title="设定库还是空的" desc="让 AI 根据选题先生成一版，再按自己的想法改。也可以手动一张张建。"
+        <EmptyState kind="cards" title="设定库还是空的"
           action={<><Button onClick={() => setEditing({ type: 'character', name: '', summary: '', data: {}, known_by: [] })}>手动新建</Button><Button variant="primary" loading={!!job} icon={<Sparkles className="h-4 w-4" />} onClick={gen}>AI 生成设定</Button></>} />
       ) : !groups.length ? (
         <EmptyState compact kind="cards" title={`还没有「${CARD_TYPES.find((t) => t.key === filter)?.label}」`} action={<Button size="sm" onClick={() => setEditing({ type: filter as CardType, name: '', summary: '', data: {}, known_by: [] })}>新建一张</Button>} />
@@ -72,7 +72,6 @@ export default function Bible() {
               <section key={g.key}>
                 <div className="mb-3 flex items-baseline gap-2">
                   <h2 className="flex items-center gap-1.5 text-[15px] font-semibold"><Icon className="h-4 w-4 text-muted-foreground" />{g.label}</h2>
-                  <span className="text-xs text-muted-foreground">{g.hint}</span>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {g.items.map((c) => <BibleCard key={c.id} card={c} onClick={() => setEditing(c)} />)}
@@ -181,7 +180,7 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
   const isChar = form.type === 'character'
 
   return (
-    <Sheet open={open} onOpenChange={(o) => { if (!o) { onClose(); setConfirmDel(false) } }} title={isNew ? '新建设定' : `编辑：${card?.name}`} desc={CARD_TYPES.find((t) => t.key === form.type)?.hint}
+    <Sheet open={open} onOpenChange={(o) => { if (!o) { onClose(); setConfirmDel(false) } }} title={isNew ? '新建设定' : `编辑：${card?.name}`}
       footer={<>
         {!isNew && (confirmDel
           ? <Button variant="danger" className="mr-auto" loading={del.isPending} onClick={() => del.mutate()}>确认删除</Button>
@@ -200,9 +199,8 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
           <div className="space-y-4 rounded-xl bg-amber-500/[0.06] p-4 hairline">
             <div>
               <div className="flex items-center gap-1.5 text-[13px] font-semibold"><MessageSquareQuote className="h-4 w-4 text-amber-500" />人物声音</div>
-              <p className="mt-0.5 text-xs text-muted-foreground">写对话时 AI 会照着这里让人物“像他自己”，告别千人一面。</p>
             </div>
-            <Field label="说话方式" hint="语速、用词、句子长短"><Textarea value={form.voice} onChange={(e) => set({ voice: e.target.value })} className="min-h-[64px] bg-surface" placeholder="例如：话少，短句，爱用反问；生气时反而更客气" /></Field>
+            <Field label="说话方式"><Textarea value={form.voice} onChange={(e) => set({ voice: e.target.value })} className="min-h-[64px] bg-surface" placeholder="例如：话少，短句，爱用反问；生气时反而更客气" /></Field>
             <Field label="口头禅"><TagInput value={form.catchphrases} onChange={(v) => set({ catchphrases: v })} placeholder="例如：行。（回车添加）" /></Field>
             <Field label="小动作"><TagInput value={form.habits} onChange={(v) => set({ habits: v })} placeholder="例如：想事情时摩挲袖口" /></Field>
             <Field label="神态习惯"><Input value={form.demeanor} onChange={(e) => set({ demeanor: e.target.value })} className="bg-surface" placeholder="例如：眼皮半耷拉着，看人先看手" /></Field>
@@ -226,7 +224,7 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
           </div>
         </div>
 
-        <Field label="知情者" hint="哪些人物知道这条设定">
+        <Field label="知情者">
           <TagInput value={form.known_by} onChange={(v) => set({ known_by: v })} placeholder="输入人物名，回车添加" suggestions={charNames.filter((n) => n !== form.name)} />
         </Field>
       </div>

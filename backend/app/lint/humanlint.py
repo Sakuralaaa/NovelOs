@@ -17,7 +17,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.config import LintThresholds
-from app.lint.banned_zh import BANNED_PATTERNS, DESCRIPTOR_WORDS, SUMMARY_MARKERS
+from app.lint.banned_zh import BANNED_PATTERNS, DESCRIPTOR_WORDS, ENDING_SUMMARY_PATTERNS, SUMMARY_MARKERS, WEAK_ADVERBS
+
+# 新增指标的阈值（经验值，未校准；放在这里而不是 LintThresholds，避免改动配置模型）
+WEAK_ADVERB_PER_K_MAX = 3.0       # 缓缓/微微/轻轻/淡淡… 每千字合计上限（oh-story-claudecode 经验值）
+SUBJECT_START_MAX = 0.60          # 叙述句以“他/她/主角名”开头的占比上限（主语单调）
+SENT_CV_MIN = 0.40                # 句长变异系数下限：过低说明句长过于均匀（novel-ops 用句长方差 σ² 衡量同一现象）
+WATERFALL_RUN_MAX = 4             # 连续单句成段（无对白）的段数上限（“单句段瀑布流”）
 
 _CJK_RUN = re.compile(r"[\u4e00-\u9fff]+")
 _DIALOGUE = re.compile(r"“[^”]*”|「[^」]*」|\"[^\"\n]*\"")
@@ -25,6 +31,8 @@ _DASH_ELLIPSIS = re.compile(r"——|……|\.\.\.|…")
 _SENT_END = re.compile(r"[^。！？!?；;…\n]+[。！？!?；;…]*")
 _DESCRIPTOR_RX = re.compile("|".join(re.escape(w) for w in sorted(DESCRIPTOR_WORDS, key=len, reverse=True)))
 _SUMMARY_RX = re.compile("|".join(re.escape(w) for w in sorted(SUMMARY_MARKERS, key=len, reverse=True)))
+_WEAK_RX = re.compile("|".join(re.escape(w) for w in WEAK_ADVERBS))
+_ENDING_RX = re.compile("|".join(ENDING_SUMMARY_PATTERNS))
 
 
 def count_words(text: str) -> int:
@@ -240,6 +248,56 @@ def repeated_ngrams(
     return [{"text": k, "count": c} for k, c in kept[: th.ngram_report_max]]
 
 
+# ---------- 节奏与句式指纹 ----------
+
+def weak_adverb_density(text: str) -> float:
+    """弱化副词（缓缓/微微/轻轻/淡淡…）每千字出现次数，只计叙述。"""
+    spans = dialogue_spans(text)
+    n = sum(1 for m in _WEAK_RX.finditer(text) if not any(a <= m.start() < b for a, b in spans))
+    return round(n * 1000.0 / max(count_words(text), 1), 2)
+
+
+def subject_start_ratio(text: str, names: Sequence[str] = ()) -> float:
+    """叙述句中以“他/她/它”或人物名开头的占比（主语单调：每句都以“他”起头）。"""
+    starts = ("他", "她", "它", *[n for n in names if n])
+    narr = [u.text.lstrip("，,。 ") for u in _units(text) if u.kind == "n" and _core_len(u.text) >= 4]
+    if len(narr) < 8:
+        return 0.0
+    hit = sum(1 for t in narr if t.startswith(starts))
+    return round(hit / len(narr), 4)
+
+
+def sentence_len_cv(text: str) -> float:
+    lens = [n for n in (_core_len(x) for x in sentences(text)) if n > 0]
+    if len(lens) < 10:
+        return 1.0
+    mean = statistics.mean(lens)
+    return round(statistics.pstdev(lens) / mean, 4) if mean else 1.0
+
+
+def single_sentence_waterfall(text: str) -> tuple[float, int]:
+    """（单句成段的叙述段占比, 最长连续单句段数）。对白段不计。"""
+    paras = paragraphs(text)
+    if not paras:
+        return 0.0, 0
+    flags = [(not _DIALOGUE.search(p)) and len([x for x in _SENT_END.findall(p) if _core_len(x) > 0]) <= 1 for p in paras]
+    run = best = 0
+    for f in flags:
+        run = run + 1 if f else 0
+        best = max(best, run)
+    return round(sum(flags) / len(paras), 4), best
+
+
+def ending_summary(text: str) -> str | None:
+    """章末最后一段的叙述里出现总结/升华/空泛预告，返回命中片段。"""
+    paras = paragraphs(text)
+    if not paras:
+        return None
+    last = _DIALOGUE.sub("", paras[-1])
+    m = _ENDING_RX.search(last)
+    return m.group(0) if m else None
+
+
 # ---------- 汇总 ----------
 
 @dataclass
@@ -256,6 +314,11 @@ class LintResult:
     # 内部：精修定位
     bare_paragraphs: list[int] = field(default_factory=list)
     summary_paragraphs: list[int] = field(default_factory=list)
+    # 扩展指标（合约外的附加字段，前端可忽略）
+    weak_adverb_per_k: float = 0.0
+    subject_start_ratio: float = 0.0
+    sentence_len_cv: float = 1.0
+    waterfall_run: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -268,6 +331,10 @@ class LintResult:
             "short_sentence_ratio": self.short_sentence_ratio,
             "bare_dialogue_ratio": self.bare_dialogue_ratio,
             "summary_ratio": self.summary_ratio,
+            "weak_adverb_per_k": self.weak_adverb_per_k,
+            "subject_start_ratio": self.subject_start_ratio,
+            "sentence_len_cv": self.sentence_len_cv,
+            "waterfall_run": self.waterfall_run,
         }
 
     def needs_patch(self, th: LintThresholds) -> bool:
@@ -311,6 +378,11 @@ def lint_chapter(
     ss = sentence_stats(text)
     bare_ratio, bare_paras = bare_dialogue_analysis(text)
     sum_ratio, sum_paras = summary_analysis(text)
+    weak_k = weak_adverb_density(text)
+    subj = subject_start_ratio(text, exclude_names)
+    scv = sentence_len_cv(text)
+    _, waterfall = single_sentence_waterfall(text)
+    ending = ending_summary(text)
 
     # 分项（满分 100）
     s_banned = min(1.0, banned_density / th.banned_per_k_max) * 30
@@ -328,8 +400,20 @@ def lint_chapter(
         s_short += min(1.0, (th.avg_sentence_len_min - ss["avg"]) / th.avg_sentence_len_min) * 5
     s_bare = min(1.0, bare_ratio / 0.8) * 15
     s_summary = min(1.0, sum_ratio / 0.25) * 10
+    # 扩展项（各至多 3 分）：弱化副词堆叠、主语单调、句长过匀、单句段瀑布流、章末总结
+    s_extra = 0.0
+    if weak_k > WEAK_ADVERB_PER_K_MAX:
+        s_extra += min(1.0, (weak_k - WEAK_ADVERB_PER_K_MAX) / WEAK_ADVERB_PER_K_MAX) * 3
+    if subj > SUBJECT_START_MAX:
+        s_extra += min(1.0, (subj - SUBJECT_START_MAX) / 0.3) * 3
+    if scv < SENT_CV_MIN:
+        s_extra += min(1.0, (SENT_CV_MIN - scv) / SENT_CV_MIN) * 3
+    if waterfall > WATERFALL_RUN_MAX:
+        s_extra += 3
+    if ending:
+        s_extra += 3
     ai_score = round(
-        min(100.0, s_banned + s_ngram + s_uniform + s_punct + s_dialogue + s_short + s_bare + s_summary), 1
+        min(100.0, s_banned + s_ngram + s_uniform + s_punct + s_dialogue + s_short + s_bare + s_summary + s_extra), 1
     )
 
     if dr > th.dialogue_warn:
@@ -344,6 +428,10 @@ def lint_chapter(
         ("叙述破折号", "叙述中用破折号解释/列举/揭晓"),
         ("修饰副词+动作", "动作前多余修饰副词（微微点头→点头）"),
         ("翻译腔", "翻译腔连接词（当……时、对于……来说、这意味着、然而/此外）"),
+        ("万能状语", "万能状语（“，带着一丝……”）"),
+        ("无情绪声线", "无情绪声线套句（声音不大却带着、语气毫无波澜）"),
+        ("总结收束", "总结收束句（终于明白、才刚刚开始、从这一刻开始）"),
+        ("告知式心理", "告知式心理（他感到一丝、显得有些）"),
     ):
         if cats.get(cat):
             warnings.append(f"{label} {cats[cat]} 处")
@@ -361,6 +449,16 @@ def lint_chapter(
         warnings.append(f"裸对白占 {bare_ratio:.0%}：对白前后缺少动作、神态或环境，读起来像念稿")
     if sum_ratio > th.summary_ratio_max:
         warnings.append(f"概述式叙述约占 {sum_ratio:.0%}（经过一番/很快/于是/随后…），把概述改成可见的场面")
+    if weak_k > WEAK_ADVERB_PER_K_MAX:
+        warnings.append(f"弱化副词（缓缓/微微/轻轻/淡淡…）每千字 {weak_k:.1f} 处，超过 {WEAK_ADVERB_PER_K_MAX:.0f}，删掉动作前的垫词")
+    if subj > SUBJECT_START_MAX:
+        warnings.append(f"叙述句以“他/她/人名”开头的占 {subj:.0%}，主语单调；换成动作、物件或环境起句，或把连续动作并成一句")
+    if scv < SENT_CV_MIN:
+        warnings.append(f"句长变异系数 {scv:.2f}，句子长短过于均匀，关键处用短句，过程用长句")
+    if waterfall > WATERFALL_RUN_MAX:
+        warnings.append(f"连续 {waterfall} 段都是单句成段（单句段瀑布流），把同一动作链并成完整段落")
+    if ending:
+        warnings.append(f"章末用总结/升华/空泛预告收尾（「{ending}」），改成断在一个具体的决定、发现或代价上")
     if chapter_number is not None and chapter_number <= 3:
         for p in paras:
             if count_words(p) > th.first3_monologue_chars and not _DIALOGUE.search(p):
@@ -382,6 +480,10 @@ def lint_chapter(
         summary_ratio=sum_ratio,
         bare_paragraphs=bare_paras,
         summary_paragraphs=sum_paras,
+        weak_adverb_per_k=weak_k,
+        subject_start_ratio=subj,
+        sentence_len_cv=scv,
+        waterfall_run=waterfall,
     )
 
 
@@ -405,4 +507,6 @@ def text_stats(text: str) -> dict[str, Any]:
         "summary_ratio": sum_ratio,
         "avg_paragraph_len": round(statistics.mean(plens), 1) if plens else 0,
         "paragraphs": len(paras),
+        "sentence_len_cv": sentence_len_cv(text),
+        "weak_adverb_per_k": weak_adverb_density(text),
     }

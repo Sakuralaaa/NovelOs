@@ -4,6 +4,7 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import { Toaster, toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppShell } from '@/components/layout/AppShell'
+import { AuthGate } from '@/components/auth/AuthGate'
 import { JobsProvider } from '@/lib/jobs'
 import { useTheme } from '@/hooks/useTheme'
 import { PageSkeleton } from '@/pages/_skeleton'
@@ -25,10 +26,11 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 const qc = new QueryClient({
   defaultOptions: {
     queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: (n, e: any) => (e?.status >= 400 && e?.status < 500 ? false : n < 1) },
+    mutations: { retry: false },
   },
   mutationCache: new MutationCache({
     onError: (e: any, _v, _c, m) => {
-      if (m.meta?.silent) return
+      if (m.meta?.silent || e?.status === 401) return
       toast.error((m.meta?.errorTitle as string) || '操作失败', { description: e?.message })
     },
   }),
@@ -43,6 +45,7 @@ export function App() {
   return (
     <QueryClientProvider client={qc}>
       <TooltipProvider delayDuration={250}>
+        <AuthGate>
         <JobsProvider>
           <BrowserRouter>
             <Routes>
@@ -64,8 +67,9 @@ export function App() {
               </Route>
             </Routes>
           </BrowserRouter>
-          <ThemedToaster />
         </JobsProvider>
+        </AuthGate>
+        <ThemedToaster />
       </TooltipProvider>
     </QueryClientProvider>
   )

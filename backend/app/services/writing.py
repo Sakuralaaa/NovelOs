@@ -36,6 +36,23 @@ WRITING_SETTINGS_KEY = "writing_settings"
 DEFAULT_WRITING_SETTINGS: dict[str, Any] = {"auto_adopt_best": False, "auto_commit": True, "default_variants": 1}
 OUTCOMES = ("yes", "no", "yes-but", "no-and")
 MIN_SCENES, MAX_SCENES = 3, 6
+PAYOFF_PHASES = ("setup", "delivery", "aftermath")  # 爽点三段：铺垫 / 兑现 / 余韵
+
+
+def planned_foreshadow_gaps(beats: dict[str, Any], cs: ChangeSet) -> list[str]:
+    """细纲要求的伏笔动作，变更声明里没有对应条目 → 警告（作者核对正文是否真的写到了）。"""
+    warns: list[str] = []
+    declared = [(f.action, f.desc, f.id) for f in cs.foreshadow]
+    for f in beats.get("foreshadow") or []:
+        act, desc, fid = f.get("action"), str(f.get("desc", "")), f.get("id")
+        if act not in ("plant", "advance", "resolve"):
+            continue
+        hit = any(a == act and ((fid is not None and i == fid) or (desc and d and (desc in d or d in desc)))
+                  for a, d, i in declared)
+        if not hit:
+            label = {"plant": "埋下", "advance": "推进", "resolve": "回收"}[act]
+            warns.append(f"细纲要求{label}伏笔「{desc}」，但变更声明里没有这一项：确认正文是否写到")
+    return warns
 
 
 def writing_settings(s: Session) -> dict[str, Any]:
@@ -58,13 +75,21 @@ def normalize_scenes(raw: Any, beats: dict[str, Any], sensory_pool: list[str]) -
     for it in items if isinstance(items, list) else []:
         if not isinstance(it, dict):
             continue
-        scenes.append({
+        sc = {
             "goal": str(it.get("goal", "")),
             "conflict": str(it.get("conflict", "")),
             "outcome": it.get("outcome") if it.get("outcome") in OUTCOMES else "yes-but",
             "characters": [str(c) for c in (it.get("characters") or beats.get("characters") or [])],
             "sensory": str(it.get("sensory") or (sensory_pool[len(scenes) % len(sensory_pool)] if sensory_pool else "")),
-        })
+        }
+        # 可选：这场戏结束时改变了什么（信息/关系/计划/风险/权力/情绪）、在爽点里承担的位置、给读者的悬念
+        if it.get("turn"):
+            sc["turn"] = str(it["turn"])[:120]
+        if it.get("payoff_phase") in PAYOFF_PHASES:
+            sc["payoff_phase"] = it["payoff_phase"]
+        if it.get("exit_hook"):
+            sc["exit_hook"] = str(it["exit_hook"])[:120]
+        scenes.append(sc)
     scenes = scenes[:MAX_SCENES]
     while len(scenes) < MIN_SCENES:
         scenes.append({"goal": beats.get("goal", ""), "conflict": beats.get("conflict", ""), "outcome": "yes-but",
@@ -136,7 +161,8 @@ def _evaluate(
     s: Session, book: Book, pack: ContextPack, content: str, number: int, plan: str, meta: dict[str, Any],
     exclude_chapter_id: int | None,
 ) -> tuple[dict[str, Any], LintResult, int]:
-    review, dropped = run_review(get_gateway(), content, number, plan, pack.protagonist, pack.required_chars, meta)
+    review, dropped = run_review(get_gateway(), content, number, plan, pack.protagonist, pack.required_chars, meta,
+                                 context=pack.state_text)
     lint = lint_for(s, book.id or 0, content, number, exclude_chapter_id)
     return review, lint, dropped
 
@@ -155,6 +181,9 @@ def patch_rewrite(content: str, review: dict[str, Any] | None, lint: LintResult,
             problems.append(f"- [{it['severity']}/{it['dimension']}] 「{it['quote']}」：{it.get('comment', '')}")
     for h in lint.banned_hits[:15]:
         problems.append(f"- AI 腔：{h['word']}（{h['count']} 处）")
+    for w in lint.warnings:
+        if w.startswith(("章末用总结", "弱化副词")):
+            problems.append(f"- {w}")
     if not problems:
         return content, 0
     raw = get_gateway().chat_json(
@@ -300,6 +329,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
             known = {c.name for c in common.cards(s, book_id)}
             opens = {f.id or 0: f.desc for f in common.open_foreshadows(s, book_id)}
             cs, warns2 = check_against_ledger(cs, known, opens)
+            warns2 += planned_foreshadow_gaps(beats, cs)
             review, lint, dropped = _evaluate(s, book, pack, content, number, plan, meta, None)
         vlist.append({
             "id": v + 1, "content": content, "words": count_words(content), "lint": lint.to_dict(),
@@ -317,7 +347,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         chapter_id = ch.id or 0
 
     result: dict[str, Any] = {"chapter_id": chapter_id, "number": number, "variants": n_var,
-                              "context": pack.summary(), "scenes": len(scenes)}
+                              "context": pack.summary(), "scenes": len(scenes), "preflight": pack.preflight}
     if n_var > 1 and not settings["auto_adopt_best"]:
         result["awaiting_adopt"] = True
         result["committed"] = False

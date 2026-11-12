@@ -214,8 +214,8 @@ def radar_latest(
 
 
 @router.get("/radar/trends")
-def radar_trends(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return radar.compute_trends(s)
+def radar_trends(gender: str | None = Query(None), s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return radar.compute_trends(s, gender or None)
 
 
 @router.get("/radar/config")

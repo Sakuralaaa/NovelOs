@@ -1,7 +1,7 @@
 ---
 stage: review
 title: 证据式审稿规则
-version: 0.1
+version: 0.2
 sources:
   - wfcz10086（evidence-based review）| Apache-2.0 | idea-only
   - lingfengQAQ/webnovel-writer | GPL-3.0 | idea-only
@@ -9,6 +9,8 @@ sources:
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - 304769384-png/fanqie-novel-skill | 无协议 | idea-only
   - Tomsawyerhu/Chinese-WebNovel-Skill | 无协议 | idea-only
+  - XuanRanL/webnovelwriter（六维审查：爽点/一致性/节奏/OOC/连贯/追读力）| GPL-3.0 | idea-only
+  - maliangwriter.com 黄金三章检查（章尾四种断法：决定/发现/误判/代价）| 文章 | idea-only
 ---
 # 证据式审稿规则
 
@@ -19,3 +21,9 @@ sources:
 5. 章末四层诊断：没有落点 / 有落点没后劲 / 硬钩感太重 / 与下一章接不上。
 6. “话疗”检查：大反派不能被几句话说服。
 7. 审稿时不看大纲以外的猜测，不编造正文中没有的内容。
+
+## v0.2 审稿核对清单
+8. 审稿会拿到“人物与世界当前状态 + 上一章结尾”。位置、伤势、持有物品、时间、生死与之矛盾 → coherence/high；角色说出或利用了他“已知信息”之外的秘密 → character/high（认知越界）。
+9. 爽点（payoff）按三段看：有没有铺垫（轻视、压迫、信息差）、兑现是否写成场面、之后有没有反应或实际收获。降智反派、一招秒杀无势能、打完无收获 → payoff/mid。
+10. 追读力并入 hook：前 300 字有没有具体事件；章末是否断在决定/发现/误判/代价上；章末若是总结、升华、空泛预告 → hook/mid（程序也会自动检查最后一句）。黄金三章额外看钩子是否一章比一章更贴近主角。
+11. 细纲要求的伏笔动作没写到 → coherence/mid；细纲 must_avoid 里的内容被写出来 → coherence/high。

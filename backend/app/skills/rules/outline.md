@@ -1,7 +1,7 @@
 ---
 stage: outline
 title: 大纲规则
-version: 0.1
+version: 0.2
 sources:
   - wei125775-lab/novel-writing-skills (save-the-cat-novel) | MIT | adapted
   - danjdewhurst/story-skills | MIT | adapted
@@ -9,6 +9,11 @@ sources:
   - MintoTsukino/claude-novel-workflow | CC BY 4.0（文档） | adapted
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - zenstory-ai/oh-story-claudecode | MIT | idea-only
+  - lingfengQAQ/webnovel-writer（cool-points-guide：六种爽点模式、强度分级、伏笔三层级）| GPL-3.0 | idea-only
+  - XuanRanL/webnovelwriter（Strand Weave：主线/感情线/世界观三线比例与断档红线）| GPL-3.0 | idea-only
+  - fuxiangxu/novel-ops（伏笔 >20 章标黄 >40 章标红；情感连续 3 章同向强制调整）| MIT | idea-only
+  - wangwen666.com/post/321（期待感与多条期待线、伏笔回收 10/30/100 章）| 文章 | idea-only
+  - maliangwriter.com 黄金三章检查（入局/加压/承诺、钩子递进）| 文章 | idea-only
 ---
 # 大纲规则
 
@@ -19,3 +24,14 @@ sources:
 5. 场景结果四种：yes（成了）、no（没成）、yes-but（成了但有代价）、no-and（没成还更糟）。连续 3 个 yes 视为节奏塌陷，需要换成 yes-but 或 no-and。
 6. 伏笔五态：planted（埋下）→ advancing（推进/强化）→ resolved（回收），或 dropped（放弃，需说明）。前三章至少埋 2 条：一条 10–20 章回收，一条 50 章后回收。阶段任务完成不等于长线关闭。
 7. 黄金三章：第 1 章立人设、出冲突；第 2 章完成从被压到反击的转换，写明金手指首次使用的输入、成本、限制；第 3 章完成第一次胜利并结算收益。
+
+## 节奏账本（v0.2，章细纲的可选标注；程序会据此做节奏体检）
+8. 每章标注爽点模式 payoff_type（打脸 / 扮猪吃虎 / 越级反杀 / 打脸权威 / 反派翻车 / 甜蜜超预期 / 真相揭示 / 收获升级 / 危机化解 / 关系突破）与强度 payoff_level（small 小爽点 / combo 两种模式叠加 / milestone 改变主角地位）。同一模式不连续超过 2 章；每 5 章至少 1 个 combo；每 10–15 章至少 1 个 milestone。爽点升级走规模、方式、受众三个维度之一，不原地重复。
+9. 每章标注叙事线 strand：quest（主线）、fire（感情与人物关系）、constellation（世界观、势力、设定扩展），可多选。主线连续不超过 5 章；感情/关系线断档不超过 10 章；世界观线断档不超过 15 章。理想比例约 6:2:2。
+10. 每章标注读者情绪走向 emotion（up 扬 / down 压 / flat 平）。同方向连续不超过 2 章；压扬比按题材：爽文约压 3 扬 7，正剧压 5 扬 5，虐文压 7 扬 3。
+11. 期待感：同时维持 3–5 条期待线（升级、复仇、感情、身世、谜团）。每章 expectation 写清本章挂起或兑现了哪一条；任何一条完全静止超过 3 章，读者就会忘。期待来自“读者已经猜到、但还没写出来”的事（已知到已知），比完全未知的悬念更能留人。
+12. 信息差 info_gap：读者知道而角色不知道的事（例：读者知道主角是隐藏的高手，嘲讽他的人不知道）。打脸与反转之前至少提前 1–2 章建立信息差。
+13. 章末钩子类型 hook_type 轮换使用：危机突降、悬念反转、挑衅叫板、倒计时、信息缺口、选择悬置、后果预示、决定、发现、误判、代价。同一类型不连续超过 2 章。
+14. 伏笔分层 tier：short（10 章内回收，场景细节、小习惯）、mid（30 章内，配角动机、神秘物品）、long（50 章以上，身世、终极敌人、金手指来历）。埋之前先想好怎么收；长线伏笔按“完整初印象 → 中途侧面提及 → 回收”三段刺激，每隔一段给一条新线索。超过 20 章没推进要补线索，超过 40 章必须推进或回收。
+15. 黄金三章的钩子要递进：风险更具体、关系更贴身、选择更难撤回。三章共享同一个核心问题，第 3 章把短期冲突接到长期目标上。
+16. must_avoid：本章不能写的东西（提前揭晓的真相、已经用过的桥段、会让角色越过认知边界的信息）。

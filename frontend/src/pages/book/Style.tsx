@@ -59,7 +59,7 @@ export default function StylePage() {
   return (
     <div className="page">
       <BookCrumb bookId={id} page="文风" />
-      <PageHeader className="mt-3" title="文风" desc="贴一段你喜欢的文字（自己写的或喜欢的作者），AI 会学习它的句子长短、描写密度和对话写法，让这本书读起来像“人写的”。"
+      <PageHeader className="mt-3" title="文风"
         actions={<>
           <Button icon={dirty ? <Save className="h-4 w-4" /> : <Check className="h-4 w-4" />} disabled={!dirty} loading={save.isPending} onClick={() => save.mutate(f, { onSuccess: () => toast.success('已保存') })}>{dirty ? '保存' : '已保存'}</Button>
           <Button variant="primary" loading={!!job} icon={<Sparkles className="h-4 w-4" />} onClick={extract}>提炼文风</Button>
@@ -100,7 +100,7 @@ export default function StylePage() {
             <div className="-mt-2 flex flex-wrap gap-1.5">
               {TONES.map((t) => <button key={t} onClick={() => set({ tone: t })} className={cn('h-6 rounded-full border px-2.5 text-xs transition', f.tone === t ? 'border-primary bg-primary-soft text-primary' : 'text-muted-foreground hover:text-foreground')}>{t}</button>)}
             </div>
-            <Field label="文风笔记" hint="写给 AI 的额外要求">
+            <Field label="文风笔记">
               <Textarea value={f.voice_notes} onChange={(e) => set({ voice_notes: e.target.value })} className="min-h-[90px]" placeholder="例如：多用动作代替心理描写；对白短，前后要有动作或环境；不要用“不禁”“仿佛”。" />
             </Field>
           </CardBody>
@@ -108,11 +108,11 @@ export default function StylePage() {
 
         <div className="space-y-6">
           {ex ? <Extracted ex={ex} /> : (
-            <EmptyState kind="style" title="还没有提炼结果" desc="粘贴范文后点「提炼文风」，这里会显示句长分布、对话比例、描写密度和写作规则。" />
+            <EmptyState kind="style" title="还没有提炼结果" />
           )}
           {local && (
             <Card>
-              <CardHeader title="范文实时速览" desc="前端即时估算，仅供参考" icon={<Info className="h-4 w-4" />} />
+              <CardHeader title="范文实时速览" icon={<Info className="h-4 w-4" />} />
               <CardBody>
                 <div className="grid grid-cols-3 gap-3 text-center">
                   <Mini label="平均句长" value={`${local.avg_sentence_len.toFixed(1)} 字`} />
@@ -173,7 +173,7 @@ function Extracted({ ex }: { ex: Record<string, any> }) {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
       <Card>
-        <CardHeader title="提炼结果" desc="写作每一章时都会注入这些特征" icon={<Sparkles className="h-4 w-4 text-primary" />} action={<Badge tone="success" dot>已生效</Badge>} />
+        <CardHeader title="提炼结果" icon={<Sparkles className="h-4 w-4 text-primary" />} action={<Badge tone="success" dot>已生效</Badge>} />
         <CardBody className="space-y-5">
           <div className="grid grid-cols-3 gap-2.5">
             <Mini label="平均句长" value={typeof st.avg_sentence_len === 'number' ? `${st.avg_sentence_len} 字` : '—'} />

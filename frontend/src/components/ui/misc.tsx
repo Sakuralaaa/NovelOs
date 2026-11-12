@@ -58,10 +58,10 @@ export function ScoreRing({ value, size = 52, stroke = 5, label, className }: { 
 
 export function Stat({ label, value, sub, icon, className }: { label: string; value: React.ReactNode; sub?: React.ReactNode; icon?: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('rounded-xl bg-surface p-4 hairline shadow-card', className)}>
-      <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">{icon}{label}</div>
-      <div className="num mt-1.5 text-[22px] font-semibold tracking-tight">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
+    <div className={cn('flex h-full min-h-[108px] flex-col rounded-xl border bg-surface p-4 shadow-card', className)}>
+      <div className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5">{icon}{label}</div>
+      <div className="num mt-2 text-[22px] font-semibold leading-none tracking-tight">{value}</div>
+      {sub && <div className="mt-auto pt-2 text-xs text-muted-foreground">{sub}</div>}
     </div>
   )
 }

@@ -26,9 +26,9 @@ export default function Books() {
   })
   return (
     <div className="page">
-      <PageHeader title="我的书" desc="每本书都会经历：选题 → 设定 → 大纲 → 正文 → 包装 → 发布。" actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>新建作品</Button>} />
+      <PageHeader title="我的书" actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>新建作品</Button>} />
       {isLoading ? <GridSkeleton n={4} h="h-[300px]" cols="grid-cols-2 md:grid-cols-3 lg:grid-cols-4" /> : error ? <ErrorState error={error} onRetry={refetch} /> : !data?.length ? (
-        <EmptyState kind="book" title="书架还是空的" desc="从热点雷达找个选题，或者直接一键开写。" action={<><Link to="/radar"><Button>看热点</Button></Link><Button variant="primary" onClick={() => setOpen(true)}>一键开写</Button></>} />
+        <EmptyState kind="book" title="书架还是空的" action={<><Link to="/radar"><Button>看热点</Button></Link><Button variant="primary" onClick={() => setOpen(true)}>一键开写</Button></>} />
       ) : (
         <div className="grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4">
           {data.map((b) => (

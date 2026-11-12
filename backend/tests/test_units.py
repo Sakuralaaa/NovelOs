@@ -119,13 +119,14 @@ def test_radar_parse_items() -> None:
 
 
 def test_radar_enabled_failure_falls_back_to_mock(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.radar import fanqie
+    from app.radar import fanqie, fanqie_web
     from conftest import wait_job
 
-    def boom() -> list[dict[str, Any]]:
+    def boom(*a: Any, **k: Any) -> list[dict[str, Any]]:
         raise httpx.ConnectTimeout("timeout")
 
     monkeypatch.setattr(fanqie, "fetch_rank_lists", boom)
+    monkeypatch.setattr(fanqie_web, "fetch_rank_lists", boom)
     assert client.put("/api/radar/config", json={"enabled": True, "daily_hour": 9}).json() == {"enabled": True, "daily_hour": 9}
     j = wait_job(client, client.post("/api/radar/refresh").json())
     assert j["result"]["source"] == "mock" and "回退" in j["result"]["note"]

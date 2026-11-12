@@ -1,7 +1,7 @@
 ---
 stage: bible
 title: 设定库规则
-version: 0.1
+version: 0.2
 sources:
   - huahuakandaima/human-novel-writer | MIT | adapted
   - xiaofeng-928/chinese-longnovel-skill | MIT | adapted
@@ -17,3 +17,4 @@ sources:
 4. 人物卡说话方式（data 约定键）：voice（说话方式，句长、语气词、称呼习惯）、catchphrases[]（口头禅，1–3 个，克制使用）、habits[]（小动作，具体到身体部位）、demeanor（神态习惯）。不同角色隐去名字后要能分辨谁在说话。
 5. 事实分“作者真相”和“读者已知”两条线（visibility = author / reader）。事实只追加，变化时关闭旧事实、写新事实，不改写历史。
 6. 主角、主要对手、关键配角至少各一张卡；地点卡写感官锚点（气味、温度、声响、材质），供正文“人动景才出”时取用。
+7. 初始事实（facts）的 key 用统一键名，供逐章状态追踪：位置、处境、身体、境界/实力、持有物品、目标、已知信息、关系:对方名字、身份、生死；全书级事实（故事起始时间、局势）entity 写“全书”。

@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from app.db import kv_get, kv_set, session_scope
 from app.jobs.manager import JobContext, submit
 from app.models.tables import RadarSnapshot, RankItem
-from app.radar import fanqie
+from app.radar import fanqie, fanqie_web
 from app.radar.mock_data import mock_items_50
 
 log = logging.getLogger("novelos.radar")
@@ -35,54 +35,81 @@ def set_config(s: Session, enabled: bool, daily_hour: int) -> dict[str, Any]:
 
 
 def refresh(ctx: JobContext) -> dict[str, Any]:
+    """抓取顺序：网页阅读榜（真实、分题材）→ App 推荐榜（旧接口）→ 示例数据。
+    同一 rankVersion 已入库时不再新建快照，避免“越刷越变”。"""
     with session_scope() as s:
         cfg = get_config(s)
-    source, fallback_reason = "mock", None
+        last = latest_snapshot(s)
+    source, version, note = "mock", "", None
+    items: list[dict[str, Any]] = []
     if cfg["enabled"]:
-        ctx.progress(10, "请求番茄 App 榜单（请求间隔 ≥1s）")
+        ctx.progress(5, "读取番茄阅读榜")
         try:
-            items = fanqie.fetch_rank_lists()
-            source = "app"
+            items, version = fanqie_web.fetch_rank_lists(progress=ctx.progress)
+            source = "web"
         except Exception as e:  # noqa: BLE001
-            log.warning("榜单抓取失败，回退 mock：%s", e)
-            fallback_reason = f"抓取失败，已回退 mock：{e}"
-            items = mock_items_50()
+            log.warning("网页榜单抓取失败，尝试 App 接口：%s", e)
+            try:
+                items = fanqie.fetch_rank_lists()
+                source = "app"
+                note = f"网页榜单不可用（{e}），已改用 App 榜单"
+            except Exception as e2:  # noqa: BLE001
+                log.warning("App 榜单也失败，回退示例数据：%s", e2)
+                note = f"抓取失败，已回退示例数据：{e2}"
     else:
-        items = mock_items_50()
-        fallback_reason = "雷达未开启，使用 mock 数据"
-    ctx.progress(80, "保存快照")
+        note = "雷达未开启，使用示例数据"
+    if not items:
+        source, items = "mock", mock_items_50()
+        version = f"mock-{datetime.now(TZ).date().isoformat()}"
+
+    if last is not None and version and last.version == version and last.source == source:
+        return {"snapshot_id": last.id, "source": source, "items": last.items_count, "unchanged": True,
+                "note": note or "榜单今天还没更新，沿用当前数据"}
+
+    ctx.progress(85, "保存快照")
     with session_scope() as s:
-        snap = RadarSnapshot(source=source, items_count=len(items))
+        snap = RadarSnapshot(source=source, items_count=len(items), version=version)
         s.add(snap)
         s.flush()
         for it in items:
-            s.add(RankItem(snapshot_id=snap.id or 0, **{k: it[k] for k in (
+            s.add(RankItem(snapshot_id=snap.id or 0, rank_diff=int(it.get("rank_diff") or 0), **{k: it[k] for k in (
                 "book_id_ext", "title", "author", "category", "rank", "read_count", "word_count", "abstract", "tags", "gender")}))
         s.commit()
         sid = snap.id
-    return {"snapshot_id": sid, "source": source, "items": len(items), "note": fallback_reason}
+    return {"snapshot_id": sid, "source": source, "items": len(items), "note": note}
 
 
 def latest_snapshot(s: Session, offset: int = 0) -> RadarSnapshot | None:
     return s.exec(select(RadarSnapshot).order_by(RadarSnapshot.id.desc()).offset(offset)).first()  # type: ignore[union-attr]
 
 
-def snapshot_items(s: Session, snapshot_id: int, gender: str | None = None, category: str | None = None) -> list[RankItem]:
+def snapshot_items(s: Session, snapshot_id: int, gender: str | None = None, category: str | None = None, dedupe: bool = True) -> list[RankItem]:
     q = select(RankItem).where(RankItem.snapshot_id == snapshot_id)
     if gender:
         q = q.where(RankItem.gender == gender)
     if category:
         q = q.where(RankItem.category == category)
-    return list(s.exec(q.order_by(RankItem.gender, RankItem.rank)))
+    if category or not dedupe:
+        return list(s.exec(q.order_by(RankItem.gender, RankItem.rank)))
+    # “全部”视图：同一本书可能上多个题材榜，去重后按在读人数排
+    rows = list(s.exec(q.order_by(RankItem.read_count.desc(), RankItem.rank)))  # type: ignore[attr-defined]
+    seen: set[tuple[str, str]] = set()
+    out = []
+    for r in rows:
+        key = (r.gender, r.book_id_ext)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
 
 
 def _items_for_trends(s: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     snap = latest_snapshot(s)
     if snap is None:
         return mock_items_50(), []
-    cur = [i.model_dump() for i in snapshot_items(s, snap.id or 0)]
+    cur = [i.model_dump() for i in snapshot_items(s, snap.id or 0, dedupe=False)]
     prev_snap = latest_snapshot(s, 1)
-    prev = [i.model_dump() for i in snapshot_items(s, prev_snap.id or 0)] if prev_snap else []
+    prev = [i.model_dump() for i in snapshot_items(s, prev_snap.id or 0, dedupe=False)] if prev_snap else []
     return cur, prev
 
 
@@ -99,7 +126,9 @@ def compute_trends(s: Session, gender: str | None = None) -> list[dict[str, Any]
     for cat, items in groups.items():
         heat = sum((1 / math.sqrt(max(1, i["rank"]))) * math.log10(max(10, i["read_count"])) for i in items)
         rising = 0
-        if prev:
+        if any(i.get("rank_diff") for i in items):
+            rising = sum(1 for i in items if (i.get("rank_diff") or 0) > 0)
+        elif prev:
             for i in items:
                 pr = prev_rank.get((i["gender"], i["book_id_ext"]))
                 if pr is None or pr > i["rank"]:

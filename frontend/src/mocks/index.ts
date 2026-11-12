@@ -227,6 +227,9 @@ const routes: [string, RegExp, H][] = []
 const on = (method: string, path: string, h: H) => routes.push([method, new RegExp(`^${path.replace(/:(\w+)/g, '(\\d+)')}$`), h])
 class HttpErr { constructor(public status: number, public detail: string) {} }
 const must = <T,>(v: T | undefined, what = '资源'): T => { if (!v) throw new HttpErr(404, `${what}不存在`); return v }
+// 演示：默认已登录；地址带 ?auth=out 时展示登录页（密码 novelos-demo）
+if (location.search.includes('auth=out')) sessionStorage.setItem('mock-auth', '0')
+const mockAuthed = () => sessionStorage.getItem('mock-auth') !== '0'
 const bookOf = (id: string) => must(db.books.find((b) => b.id === +id), '作品')
 
 on('GET', '/health', () => ({ status: 'ok', version: '0.1.0-mock' }))
@@ -237,6 +240,10 @@ on('GET', '/jobs', (_m, _b, u) => {
 })
 on('GET', '/jobs/:id', (m) => { const j = must(db.jobs.find((x) => x.id === +m[1]), '任务'); tick(j); return pub(j) })
 
+on('GET', '/auth/status', () => ({ enabled: true, authenticated: mockAuthed(), username: 'novelos', managed_by_env: false, min_password_len: 8 }))
+on('POST', '/auth/login', (_m: any, body: any) => { if (body?.password !== 'novelos-demo') throw new HttpErr(401, '密码不正确'); sessionStorage.setItem('mock-auth', '1'); return { ok: true } })
+on('POST', '/auth/logout', () => { sessionStorage.setItem('mock-auth', '0'); return { ok: true } })
+on('POST', '/auth/password', () => ({ ok: true }))
 on('GET', '/settings/status', () => ({ mock_mode: db.channels.filter((c) => c.enabled).length === 0 }))
 const maskCh = (c: (typeof db.channels)[number]): Channel => ({ id: c.id, name: c.name, base_url: c.base_url, models: c.models, enabled: c.enabled, api_key_masked: c.api_key ? `${c.api_key.slice(0, 3)}••••${c.api_key.slice(-4)}` : '' })
 on('GET', '/settings/channels', () => db.channels.map(maskCh))

@@ -1,7 +1,7 @@
 ---
 stage: chapter_plan
 title: 章细纲与场景节拍规则
-version: 0.1
+version: 0.2
 sources:
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - xiaofeng-928/chinese-longnovel-skill | MIT | adapted
@@ -9,6 +9,8 @@ sources:
   - deedeekong07-alt/fiction-humanizer-zh | MIT | adapted
   - danjdewhurst/story-skills | MIT | adapted
   - Tomsawyerhu/Chinese-WebNovel-Skill | 无协议 | idea-only
+  - lingfengQAQ/webnovel-writer（爽点三段式铺垫/兑现/微反转）| GPL-3.0 | idea-only
+  - socratopia.app 网络小说创作课（期待、压抑、释放三拍）| 文章 | idea-only
 ---
 # 章细纲与场景节拍规则
 
@@ -33,3 +35,17 @@ number、title、goal（本章戏剧问题）、conflict、outcome（yes / no / 
 - characters：在场人物；
 - sensory：一个感官锚点（气味、温度、声响、触感、光线中的一个具体物件）。
 每场戏结束时，信息、关系、计划、风险、权力、情绪至少改变一项；每 300–500 字要有一次压力变化。转折必须来自前面的铺垫。
+
+## v0.2 新增可选字段
+payoff_type、payoff_level、strand[]、emotion、expectation（本章挂起或兑现的读者期待）、info_gap（信息差）、time（故事内时间）、hook_type、must_avoid[]；foreshadow 的 plant 可带 tier（short / mid / long）。
+
+## 爽点三拍
+爽点是读者憋着的那口气吐出来的位置，不是把一段写得更热闹：期待（让读者想看到一件具体的事）→ 压抑（不给，并且“不给”的过程可见、有代价）→ 释放（给，分量配得上压抑的长度）。场景拆分时把三拍落到不同场景：铺垫（setup，约三成篇幅，写清轻视、压迫或信息差）→ 兑现（delivery）→ 余韵（aftermath：围观反应、实际收获、或一个“还有一手”的微反转）。打完必须有收获（资源、认可、资格至少一项）；反派的轻视要基于他已知的信息，不能靠降智。
+
+## 场景节拍新增字段
+- turn：这场戏结束时具体改变了什么（信息、关系、计划、风险、权力、情绪之一）；
+- payoff_phase：setup / delivery / aftermath；
+- exit_hook：留给下一场的一个具体悬念。
+
+## 写前核对（程序执行）
+动笔前程序会核对：细纲人物是否在设定库、是否已登记死亡；地点是否登记；要推进/回收的伏笔是否还在伏笔池；有没有超过 40 章没动的伏笔。核对结果放进“写前核对”，写作时必须照做。

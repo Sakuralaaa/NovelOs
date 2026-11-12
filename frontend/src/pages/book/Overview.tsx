@@ -79,7 +79,6 @@ export default function BookOverview() {
                     {isCur && <span className="absolute -inset-1 animate-ping rounded-full border border-primary/30 [animation-duration:2.4s]" />}
                   </div>
                   <div className={cn('mt-2 text-[13px] font-medium', isCur ? 'text-primary' : active === i ? 'text-foreground' : 'text-foreground/75')}>{s.label}</div>
-                  <div className="mt-0.5 hidden text-[11.5px] text-muted-foreground lg:block">{s.desc}</div>
                 </button>
               )
             })}
@@ -91,12 +90,12 @@ export default function BookOverview() {
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="已写章节" icon={<FileText className="h-3.5 w-3.5" />} value={book.stats.chapters} sub={`每章约 ${fmtNum(book.chapter_words)} 字`} />
         <Stat label="总字数" icon={<PenLine className="h-3.5 w-3.5" />} value={fmtNum(book.stats.words)} sub={<span className="flex items-center gap-2"><Progress value={pct} className="h-1 w-16" />目标 {fmtNum(book.target_words)}</span>} />
-        <Link to={`/books/${id}/foreshadows`}><Stat className="transition hover:shadow-lift" label="开放伏笔" icon={<Waypoints className="h-3.5 w-3.5" />} value={book.stats.foreshadow_open} sub="埋下待回收的线索" /></Link>
+        <Link to={`/books/${id}/foreshadows`} className="block h-full"><Stat className="card-hover" label="开放伏笔" icon={<Waypoints className="h-3.5 w-3.5" />} value={book.stats.foreshadow_open} /></Link>
         <Stat label="最近更新" icon={<CircleDashed className="h-3.5 w-3.5" />} value={<span className="text-[18px]">{fmtTime(book.updated_at)}</span>} sub={STAGES[cur].label + '阶段'} />
       </div>
 
       <Card className="mt-6">
-        <CardHeader title="本书任务" desc="生成类任务的历史与进度" />
+        <CardHeader title="本书任务" />
         <CardBody className="px-3">
           {!jobs?.length ? <p className="py-8 text-center text-[13px] text-muted-foreground">还没有任务</p> : (
             <div className="divide-y divide-border/60">
@@ -181,21 +180,19 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
         setExporting(true)
         try { await api.exportBook(id, `${book.title}-发布包.zip`); toast.success('发布包已开始下载') } catch (e: any) { toast.error('导出失败', { description: e.message }) } finally { setExporting(false) }
       }}>导出发布包</Button>,
-      secondary: <Link to={`/books/${id}/package`}><Button>发布前须知</Button></Link>,
+      secondary: <Link to={`/books/${id}/package`}><Button>打开包装页</Button></Link>,
     },
   ]
   const c = cfg[stage]
   return (
-    <motion.div key={stage} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 border-t bg-subtle/60 px-5 py-5 md:px-6">
+    <motion.div key={stage} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 border-t bg-subtle/50 px-5 py-4 md:px-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="max-w-xl">
           <div className="text-[15px] font-semibold">{c.title}</div>
-          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{c.desc}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">{c.main}{c.secondary}</div>
+        <div className="flex flex-wrap items-center gap-2">{c.main}{c.secondary}{advanceBtn}</div>
       </div>
       {c.job && <JobInline job={c.job} className="mt-4" />}
-      {advanceBtn && <div className="mt-3 flex justify-end">{advanceBtn}</div>}
     </motion.div>
   )
 }

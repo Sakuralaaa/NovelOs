@@ -6,9 +6,10 @@ import fs from 'node:fs'
 const only = process.argv[2]
 const server = await preview({ preview: { port: 4179, strictPort: true }, build: { outDir: 'dist-mock' } })
 const base = 'http://localhost:4179'
-fs.mkdirSync('screenshots', { recursive: true })
+const OUT=process.env.OUT||'screenshots';fs.mkdirSync(OUT, { recursive: true })
 const browser = await chromium.launch()
 const shots = [
+  ['login', '/?auth=out'],
   ['home', '/'],
   ['radar', '/radar'],
   ['ideas', '/ideas'],
@@ -32,9 +33,10 @@ for (const dark of [false, true]) {
     const page = await ctx.newPage()
     page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`))
     page.on('console', (m) => m.type() === 'error' && errors.push(`${name} console: ${m.text()}`))
+    if (name !== 'login') await page.addInitScript(() => sessionStorage.setItem('mock-auth', '1'))
     await page.goto(base + path)
     await page.waitForTimeout(1800)
-    const file = `screenshots/${name}${dark ? '-dark' : ''}.png`
+    const file = `${OUT}/${name}${dark ? '-dark' : ''}.png`
     await page.screenshot({ path: file, fullPage: false })
     console.log('saved', file)
     await ctx.close()

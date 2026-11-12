@@ -16,7 +16,7 @@ export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote 
 }) {
   const [sev, setSev] = useState<'all' | ReviewIssue['severity']>('all')
   if (!review) return (
-    <EmptyState compact kind="chapter" className="border-0 bg-transparent" title="还没有审稿结果" desc="审稿会从钩子、节奏、爽点、人物、连贯五个维度打分，每条意见都引用原文。"
+    <EmptyState compact kind="chapter" className="border-0 bg-transparent" title="还没有审稿结果"
       action={<Button size="sm" variant="primary" loading={reviewing} onClick={onReview}>开始审稿</Button>} />
   )
   const issues = review.issues.filter((i) => sev === 'all' || i.severity === sev)

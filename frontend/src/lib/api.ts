@@ -3,6 +3,8 @@ import type {
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Style, TrendTopic, WritingSettings,
 } from './types'
 
+export interface AuthStatus { enabled: boolean; authenticated: boolean; username: string; managed_by_env: boolean; min_password_len: number }
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -23,6 +25,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   try {
     res = await fetch(`/api${url}`, {
       method,
+      credentials: 'same-origin',
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
@@ -36,6 +39,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
       if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
     } catch { /* ignore */ }
     if (res.status === 502 || res.status === 504) msg = '后端服务暂时不可用，请稍后再试'
+    if (res.status === 401 && !url.startsWith('/auth/')) window.dispatchEvent(new Event('novelos:unauthorized'))
     throw new ApiError(res.status, msg)
   }
   if (res.status === 204) return undefined as T
@@ -51,6 +55,11 @@ const del = <T,>(u: string) => request<T>('DELETE', u)
 
 export const api = {
   health: () => get<{ status: string; version: string }>('/health'),
+
+  authStatus: () => get<AuthStatus>('/auth/status'),
+  login: (password: string, remember: boolean) => post<{ ok: boolean }>('/auth/login', { password, remember }),
+  logout: () => post<{ ok: boolean }>('/auth/logout'),
+  changePassword: (current: string, next: string) => post<{ ok: boolean }>('/auth/password', { current, new: next }),
 
   jobs: (bookId?: number) => get<Job[]>(`/jobs${qs({ book_id: bookId })}`),
   job: (id: number) => get<Job>(`/jobs/${id}`),
@@ -72,7 +81,7 @@ export const api = {
   radarSnapshots: () => get<RadarSnapshot[]>('/radar/snapshots'),
   radarLatest: (p: { gender?: Gender; category?: string }) =>
     get<{ snapshot: RadarSnapshot | null; items: RankItem[] }>(`/radar/latest${qs(p)}`),
-  radarTrends: () => get<TrendTopic[]>('/radar/trends'),
+  radarTrends: (gender?: Gender) => get<TrendTopic[]>(`/radar/trends${qs({ gender })}`),
   radarConfig: () => get<RadarConfig>('/radar/config'),
   saveRadarConfig: (b: RadarConfig) => put<RadarConfig>('/radar/config', b),
 
@@ -124,7 +133,7 @@ export const api = {
   async exportBook(bookId: number, filename: string) {
     let res: Response
     try {
-      res = await fetch(`/api/books/${bookId}/export`)
+      res = await fetch(`/api/books/${bookId}/export`, { credentials: 'same-origin' })
     } catch {
       throw new ApiError(0, '无法连接到后端服务')
     }
@@ -149,6 +158,7 @@ export const api = {
 }
 
 export const qk = {
+  auth: ['auth'] as const,
   status: ['status'] as const,
   channels: ['channels'] as const,
   routing: ['routing'] as const,
@@ -156,7 +166,7 @@ export const qk = {
   jobs: (bookId?: number) => ['jobs', bookId ?? 'all'] as const,
   job: (id: number) => ['job', id] as const,
   radarLatest: (gender?: string, category?: string) => ['radar', 'latest', gender ?? '', category ?? ''] as const,
-  radarTrends: ['radar', 'trends'] as const,
+  radarTrends: (gender?: string) => ['radar', 'trends', gender ?? ''] as const,
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
   books: ['books'] as const,

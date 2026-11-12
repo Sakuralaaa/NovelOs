@@ -11,6 +11,10 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       # 可选：API Key 加密主密钥。留空则首次启动自动生成并保存在 ./data/secret.key
       NOVELOS_SECRET: ${NOVELOS_SECRET:-}
+      # 可选：登录密码。留空则首次启动自动生成并写入 ./data/initial_password.txt
+      NOVELOS_PASSWORD: ${NOVELOS_PASSWORD:-}
+      # 放在 HTTPS 反向代理后面时可设为 true，强制 Cookie 只走 HTTPS
+      NOVELOS_COOKIE_SECURE: ${NOVELOS_COOKIE_SECURE:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
