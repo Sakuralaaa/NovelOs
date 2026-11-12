@@ -183,6 +183,16 @@ class CoversIn(BaseModel):
     title_mode: Literal["model", "overlay"] = "model"
 
 
+class CoverPromptRevise(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)
+    current: str | None = None
+    route: str | None = None
+
+
+class CoverDelete(BaseModel):
+    url: str
+
+
 class StyleIn(BaseModel):
     sample_text: str = ""
     voice_notes: str = ""

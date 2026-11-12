@@ -140,6 +140,48 @@ def generate_covers(book_id: int, prompt: str | None, n: int, ctx: JobContext, t
     return {"covers": urls, "source": "image" if raws else "local"}
 
 
+def revise_cover_prompt(book_id: int, instruction: str, current: str | None, route: str | None, ctx: JobContext) -> dict[str, Any]:
+    """按作者要求改封面提示词；结果只回填页面，作者保存后才落库。"""
+    with session_scope() as s:
+        book = common.get_book(s, book_id)
+        pkg = get_or_create_package(s, book_id)
+        s.commit()
+        cur = (current if current is not None else pkg.cover_prompt) or ""
+        meta = common.kit_meta(s, book)
+        user = render("cover_prompt", book_context=common.book_context(s, book), current=cur or "（空）",
+                      instruction=instruction.strip())
+    ctx.progress(30, "改封面提示词")
+    data = get_gateway().chat_json("cover_prompt", system_prompt("cover_prompt"), user,
+                                   meta={**meta, "current": cur, "instruction": instruction}, route=route)
+    v = str((data.get("prompt") if isinstance(data, dict) else data) or "").strip()
+    if not v:
+        raise ValueError("模型没有给出修改")
+    return {"prompt": v}
+
+
+def delete_cover(book_id: int, url: str) -> None:
+    with session_scope() as s:
+        book = common.get_book(s, book_id)
+        pkg = get_or_create_package(s, book_id)
+        covers = list(pkg.covers or [])
+        if url not in covers:
+            raise ValueError("封面不存在")
+        covers.remove(url)
+        pkg.covers = covers
+        if pkg.chosen_cover == url:
+            pkg.chosen_cover = covers[-1] if covers else None
+            book.cover_url = pkg.chosen_cover
+        elif book.cover_url == url:
+            book.cover_url = pkg.chosen_cover
+        s.add(pkg)
+        s.add(book)
+        s.commit()
+    if url.startswith(f"/media/books/{book_id}/"):
+        p = get_settings().media_dir / url[len("/media/"):]
+        if p.exists():
+            p.unlink()
+
+
 def cover_file(url: str | None) -> bytes | None:
     if not url or not url.startswith("/media/"):
         return None

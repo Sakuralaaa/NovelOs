@@ -179,6 +179,10 @@ def mock_idea_field(meta: dict[str, Any]) -> str:
     return _j({"value": f"{cur}（{note}）"})
 
 
+def mock_cover_prompt(meta: dict[str, Any]) -> str:
+    return _j({"prompt": f"{meta.get('current') or '主角立于高处'}。{meta.get('instruction') or ''}".strip()})
+
+
 # ---------------------------------------------------------------- 设定
 
 def mock_bible(meta: dict[str, Any]) -> str:
@@ -656,6 +660,7 @@ HANDLERS = {
     "thicken": mock_thicken,
     "summary": mock_summary,
     "package": mock_package,
+    "cover_prompt": mock_cover_prompt,
     "style_extract": mock_style_extract,
 }
 

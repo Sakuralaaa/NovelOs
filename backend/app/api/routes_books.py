@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.api.schemas import (
-    AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CoversIn, IdeasGenerate, OutlineUpdate,
+    AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
     IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
@@ -459,6 +459,23 @@ async def covers_generate(book_id: int, body: CoversIn | None = Body(default=Non
     n = body.n if body else 4
     mode = body.title_mode if body else "model"
     return job_out(submit("covers_generate", lambda ctx: packaging.generate_covers(book_id, prompt, n, ctx, mode), book_id=book_id))
+
+
+@router.post("/books/{book_id}/covers/prompt")
+async def cover_prompt_revise(book_id: int, body: CoverPromptRevise, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    return job_out(submit("cover_prompt", lambda ctx: packaging.revise_cover_prompt(book_id, body.instruction, body.current, body.route, ctx), book_id=book_id))
+
+
+@router.post("/books/{book_id}/covers/delete")
+def cover_delete(book_id: int, body: CoverDelete, s: Session = Depends(get_session)) -> dict[str, Any]:
+    _book(s, book_id)
+    try:
+        packaging.delete_cover(book_id, body.url)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    s.expire_all()
+    return package_out(book_id, s.get(Package, book_id))
 
 
 @router.get("/books/{book_id}/package")

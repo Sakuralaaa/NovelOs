@@ -195,6 +195,15 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     assert pkg["chosen_cover"].endswith("_2.png") and pkg["blurb"] == "新简介"
     assert client.get(f"/api/books/{bid}").json()["cover_url"] == pkg["chosen_cover"]
     assert client.get(f"/api/books/{bid}").json()["status"] == "packaging"
+    j = wait_job(client, client.post(f"/api/books/{bid}/covers/prompt", json={"instruction": "主角换成背影", "current": "雨夜老街"}).json())
+    assert "背影" in j["result"]["prompt"] and "雨夜老街" in j["result"]["prompt"]
+    assert client.get(f"/api/books/{bid}/package").json()["cover_prompt"] != j["result"]["prompt"]  # 不自动落库
+    chosen = pkg["chosen_cover"]
+    pkg = client.post(f"/api/books/{bid}/covers/delete", json={"url": chosen}).json()
+    assert chosen not in pkg["covers"] and pkg["chosen_cover"] == pkg["covers"][-1]
+    assert client.get(chosen).status_code == 404
+    assert client.get(f"/api/books/{bid}").json()["cover_url"] == pkg["chosen_cover"]
+    assert client.post(f"/api/books/{bid}/covers/delete", json={"url": chosen}).status_code == 404
 
     z = client.get(f"/api/books/{bid}/export")
     assert z.status_code == 200 and z.headers["content-type"] == "application/zip"

@@ -45,6 +45,7 @@ TASK_ROLE: dict[str, str] = {
     "expand": "planner",
     "scene_plan": "planner",
     "package": "planner",
+    "cover_prompt": "planner",
     "style_extract": "reviewer",
     "writing_scene": "writer",
     "humanize": "writer",

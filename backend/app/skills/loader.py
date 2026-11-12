@@ -23,6 +23,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "thicken": ("humanize", "writing"),
     "summary": (),
     "package": ("package",),
+    "cover_prompt": ("package",),
     "style_extract": ("writing",),
     "idea_score": (),
     "idea_revise": ("ideation",),

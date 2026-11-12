@@ -457,9 +457,11 @@ on('POST', '/books/:id/package/generate', (m) => { const b = bookOf(m[1]); retur
 on('POST', '/books/:id/covers/generate', (m, body) => { const b = bookOf(m[1]); return createJob('covers_generate', b.id, 4200, ['组装封面提示词…', '调用生图模型…', '叠加书名排版…'], () => {
   const p = pkgOf(b.id)
   const shift = (p.covers.length / 4) | 0
-  db.packages.set(b.id, { ...p, covers: Array.from({ length: body.n || 4 }, (_, i) => coverDataUrl(b.title, i + shift + 1)) })
+  db.packages.set(b.id, { ...p, covers: [...p.covers, ...Array.from({ length: body.n || 4 }, (_, i) => coverDataUrl(b.title, i + shift + 1 + p.covers.length))] })
   return {}
 }) })
+on('POST', '/books/:id/covers/prompt', (m, body) => { const b = bookOf(m[1]); return createJob('cover_prompt', b.id, 1500, ['按要求改提示词…'], () => ({ prompt: `${body.current || '主角立于高处'}\n${body.instruction}` })) })
+on('POST', '/books/:id/covers/delete', (m, body) => { const id = +m[1]; const p = pkgOf(id); const covers = p.covers.filter((u: string) => u !== body.url); const chosen = p.chosen_cover === body.url ? covers[covers.length - 1] ?? null : p.chosen_cover; const n = { ...p, covers, chosen_cover: chosen }; db.packages.set(id, n); bookOf(m[1]).cover_url = chosen; return n })
 on('GET', '/books/:id/package', (m) => pkgOf(+m[1]))
 on('PUT', '/books/:id/package', (m, b) => { const p = { ...pkgOf(+m[1]), ...b }; db.packages.set(+m[1], p); if (b.chosen_cover) bookOf(m[1]).cover_url = b.chosen_cover; return p })
 

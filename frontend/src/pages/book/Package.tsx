@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Check, CheckCircle2, Download, ImagePlus, PenLine, Save, Sparkles, Tag, Type } from '@/components/icons'
+import { Check, CheckCircle2, Download, ImagePlus, PenLine, Save, Sparkles, Tag, Trash2, Type, Wand2 } from '@/components/icons'
+import { Select, type Opt } from '@/components/ui/select'
+import { useChannels } from '@/hooks/queries'
 import * as CB from '@radix-ui/react-checkbox'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -42,6 +44,23 @@ export default function PackagePage() {
   const pkgJob = useActiveJob(`package:${id}`)
   const coverJob = useActiveJob(`covers:${id}`)
   const [titleMode, setTitleModeState] = useState<TitleMode>(() => (localStorage.getItem('novelos.cover-title-mode') as TitleMode) || 'model')
+  const [coverAsk, setCoverAsk] = useState('')
+  const [armed, setArmed] = useState<string | null>(null)
+  const promptJob = useActiveJob(`cover-prompt:${id}`)
+  const channels = useChannels()
+  const routeOpts: Opt[] = (channels.data ?? []).filter((c) => c.enabled).flatMap((c) => c.models.map((m) => ({ value: `${c.id}:${m}`, label: <span className="font-mono text-[12.5px]">{m}</span>, group: c.name })))
+  const [route, setRouteState] = useState<string | null>(() => localStorage.getItem('novelos.cover-prompt-route') || null)
+  const promptRoute = route && routeOpts.some((o) => o.value === route) ? route : null
+  const setRoute = (v: string | null) => { setRouteState(v); if (v) localStorage.setItem('novelos.cover-prompt-route', v); else localStorage.removeItem('novelos.cover-prompt-route') }
+  const delCover = useMutation({
+    mutationFn: (url: string) => api.deleteCover(id, url),
+    meta: { errorTitle: '删除封面失败' },
+    onSuccess: (p) => {
+      qc.setQueryData(qk.package(id), p); setArmed(null)
+      setF((cur) => (cur ? { ...cur, covers: p.covers, chosen_cover: p.chosen_cover } : p))
+      qc.invalidateQueries({ queryKey: qk.book(id) }); qc.invalidateQueries({ queryKey: ['books'] })
+    },
+  })
   const setTitleMode = (m: TitleMode) => { setTitleModeState(m); localStorage.setItem('novelos.cover-title-mode', m) }
 
   useEffect(() => { if (q.data && !dirty) setF(q.data) }, [q.data, dirty])
@@ -66,6 +85,15 @@ export default function PackagePage() {
   const genCovers = async () => {
     if (dirty) await save.mutateAsync({ cover_prompt: f.cover_prompt })
     start(api.generateCovers(id, { prompt: f.cover_prompt || undefined, n: 4, title_mode: titleMode }), { key: `covers:${id}`, label: '生成封面', successMsg: '4 张封面已生成，挑一张吧' })
+  }
+  const revisePrompt = () => {
+    const instruction = coverAsk.trim()
+    if (!instruction) return
+    start(api.reviseCoverPrompt(id, { instruction, current: f.cover_prompt, route: promptRoute }), {
+      key: `cover-prompt:${id}`, label: '改封面提示词', silent: true,
+      onSuccess: (j) => { const v = j.result?.prompt; if (typeof v === 'string' && v) { set({ cover_prompt: v }); setCoverAsk(''); toast.success('提示词已改好，记得保存') } },
+      onError: (j) => toast.error('改提示词失败', { description: j.error ?? undefined }),
+    })
   }
   const addChip = (group: string, text: string) => {
     const line = `${group}：${text}。`
@@ -132,7 +160,13 @@ export default function PackagePage() {
               <div>
                 <div className="mb-1.5 text-[13px] font-medium">封面提示词</div>
                 <Textarea value={f.cover_prompt} onChange={(e) => set({ cover_prompt: e.target.value })} className="min-h-[96px] text-[13px]" placeholder="只写画面：主角外观、场景、光线、色调、构图……" />
-                <div className="mt-2 space-y-1.5">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Input value={coverAsk} onChange={(e) => setCoverAsk(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) revisePrompt() }}
+                    className="h-8 min-w-[160px] flex-1 text-[13px]" placeholder="说说要怎么改，比如：主角换成背影，色调更亮" />
+                  <div className="w-[200px]"><Select value={promptRoute} onChange={setRoute} options={routeOpts} allowEmpty emptyLabel="默认（策划模型）" placeholder="默认（策划模型）" /></div>
+                  <Button size="sm" loading={!!promptJob} disabled={!coverAsk.trim()} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={revisePrompt}>AI 改</Button>
+                </div>
+                <div className="mt-3 space-y-1.5">
                   {COVER_CHIPS.map((g) => (
                     <div key={g.group} className="flex items-start gap-2">
                       <span className="mt-[3px] w-14 shrink-0 text-[12px] text-muted-foreground">{g.group}</span>
@@ -159,13 +193,21 @@ export default function PackagePage() {
                   {f.covers.map((u, i) => {
                     const sel = f.chosen_cover === u
                     return (
-                      <motion.button key={u + i} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}
+                      <div key={u + i} className="group relative">
+                      <motion.button initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}
                         onClick={() => { set({ chosen_cover: u }); save.mutate({ chosen_cover: u }, { onSuccess: () => toast.success('已设为封面') }) }}
                         className={cn('group relative overflow-hidden rounded-lg transition', sel ? 'ring-[3px] ring-primary ring-offset-2 ring-offset-surface' : 'hover:shadow-lift')}>
                         <img src={u} alt={`封面 ${i + 1}`} className="aspect-[3/4] w-full object-cover transition group-hover:scale-[1.02]" loading="lazy" />
                         {sel ? <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow"><CheckCircle2 className="h-3 w-3" />已选</span>
                           : <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent py-2 text-center text-xs text-white opacity-0 transition group-hover:opacity-100">设为封面</span>}
                       </motion.button>
+                      <button type="button" aria-label="删除封面" disabled={delCover.isPending}
+                        onClick={() => { if (armed === u) delCover.mutate(u); else { setArmed(u); window.setTimeout(() => setArmed((a) => (a === u ? null : a)), 3000) } }}
+                        className={cn('focus-ring absolute left-2 top-2 flex h-7 items-center gap-1 rounded-full px-2 text-[11px] font-medium shadow transition',
+                          armed === u ? 'bg-danger text-white opacity-100' : 'bg-black/55 text-white opacity-80 hover:opacity-100')}>
+                        <Trash2 className="h-3.5 w-3.5" />{armed === u && '确认删除'}
+                      </button>
+                      </div>
                     )
                   })}
                 </div>
