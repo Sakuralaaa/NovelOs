@@ -72,13 +72,11 @@ function LoginPage() {
 
   return (
     <div className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-5">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,hsl(var(--primary)/0.10),transparent_70%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-dots opacity-40 [mask-image:radial-gradient(ellipse_at_center,black,transparent_70%)]" />
-
+      
       <div className="relative w-full max-w-[380px]">
         <div className="mb-8 flex flex-col items-center">
-          <LogoMark className="h-11 w-11 rounded-xl [&_svg]:h-6 [&_svg]:w-6" />
-          <h1 className="mt-5 text-[22px] font-semibold tracking-tight">登录 NovelOS</h1>
+          <LogoMark className="h-12 w-12" />
+          <h1 className="mt-5 text-[24px] font-bold">NovelOS</h1>
         </div>
 
         <form

@@ -24,7 +24,7 @@ type TNode = OutlineNode & { children: TNode[] }
 const LEVEL: Record<OutlineLevel, { label: string; cls: string }> = {
   book: { label: '总纲', cls: 'bg-foreground text-background' },
   volume: { label: '卷', cls: 'bg-primary text-primary-foreground' },
-  arc: { label: '弧', cls: 'bg-violet-500/15 text-violet-600 dark:text-violet-300' },
+  arc: { label: '弧', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-300' },
   chapter: { label: '章', cls: 'bg-muted text-muted-foreground' },
 }
 const STATUS = { planned: { l: '待展开', t: 'neutral' }, expanded: { l: '已展开', t: 'primary' }, written: { l: '已成文', t: 'success' } } as const

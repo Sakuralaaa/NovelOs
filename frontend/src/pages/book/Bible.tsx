@@ -21,7 +21,7 @@ import { CARD_TYPES, cn, fmtTime } from '@/lib/utils'
 
 const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
 const TYPE_COLOR: Record<CardType, string> = {
-  world: 'from-sky-500/15 text-sky-600 dark:text-sky-400', power: 'from-violet-500/15 text-violet-600 dark:text-violet-400',
+  world: 'from-sky-500/15 text-sky-600 dark:text-sky-400', power: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
   faction: 'from-rose-500/15 text-rose-600 dark:text-rose-400', character: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
   item: 'from-emerald-500/15 text-emerald-600 dark:text-emerald-400', location: 'from-teal-500/15 text-teal-600 dark:text-teal-400',
 }

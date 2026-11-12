@@ -8,11 +8,11 @@ export function Illustration({ kind, size = 132 }: { kind: K; size?: number }) {
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="hsl(var(--primary))" stopOpacity="0.22" />
-          <stop offset="1" stopColor="#a78bfa" stopOpacity="0.14" />
+          <stop offset="1" stopColor="hsl(var(--warning))" stopOpacity="0.10" />
         </linearGradient>
         <linearGradient id={`${id}-s`} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="hsl(var(--primary))" />
-          <stop offset="1" stopColor="#8b5cf6" />
+          <stop offset="1" stopColor="hsl(var(--primary) / 0.75)" />
         </linearGradient>
       </defs>
       <ellipse cx="80" cy="112" rx="56" ry="6" fill="hsl(var(--foreground))" opacity="0.05" />

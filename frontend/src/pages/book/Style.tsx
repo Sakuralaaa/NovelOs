@@ -143,7 +143,7 @@ export function Hist({ data, className }: { data: { bucket: string; ratio: numbe
           <div key={d.bucket} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
             <span className="num text-[10.5px] text-muted-foreground">{Math.round(d.ratio * 100)}%</span>
             <motion.div initial={{ height: 0 }} animate={{ height: `${(d.ratio / max) * 78}%` }} transition={{ delay: i * 0.05, duration: 0.5 }}
-              className="w-full rounded-t-md bg-gradient-to-t from-primary/70 to-violet-400/70" style={{ minHeight: 2 }} />
+              className="w-full rounded-t-md bg-primary/70" style={{ minHeight: 2 }} />
             <span className="text-[11px] text-muted-foreground">{d.bucket}</span>
           </div>
         ))}

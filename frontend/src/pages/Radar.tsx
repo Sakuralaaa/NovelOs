@@ -241,7 +241,7 @@ function RankNo({ n }: { n: number }) {
   const top = n <= 3
   return (
     <span className={cn('num inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1 text-[12px] font-semibold', top ? 'text-white' : 'text-muted-foreground')}
-      style={top ? { background: ['linear-gradient(135deg,#f59e0b,#ef4444)', 'linear-gradient(135deg,#a1a1aa,#71717a)', 'linear-gradient(135deg,#d97706,#92400e)'][n - 1] } : undefined}>
+      style={top ? { background: ['#9b3a2c', '#5e5a52', '#8a5a2b'][n - 1] } : undefined}>
       {n}
     </span>
   )

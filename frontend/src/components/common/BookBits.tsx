@@ -13,29 +13,27 @@ import { useJobs } from '@/lib/jobs'
 import type { Book, BookStatus, Gender } from '@/lib/types'
 import { GENRES_FEMALE, GENRES_MALE, STAGES, cn, stageIndex } from '@/lib/utils'
 
-const GRADS = [
-  ['#5b6cf0', '#8b5cf6'], ['#0ea5e9', '#6366f1'], ['#f97316', '#e11d48'], ['#10b981', '#0ea5e9'],
-  ['#a855f7', '#ec4899'], ['#334155', '#64748b'], ['#d97706', '#b45309'],
-]
+// 布面精装配色：藏青、墨绿、赭石、朱砂、黛灰、栗色、靛蓝
+const CLOTH = ['#2c3e57', '#33503f', '#8a5a2b', '#9b3a2c', '#4a4f57', '#5e3a2e', '#2f4a5e']
 
 export function BookCover({ book, className, mini }: { book: Pick<Book, 'id' | 'title' | 'cover_url' | 'genre'>; className?: string; mini?: boolean }) {
   const [broken, setBroken] = useState(false)
   if (book.cover_url && !broken)
-    return <img src={book.cover_url} alt={book.title} onError={() => setBroken(true)} className={cn('aspect-[3/4] w-full rounded-md object-cover shadow-card ring-1 ring-black/5', className)} />
-  const [a, b] = GRADS[book.id % GRADS.length]
+    return <img src={book.cover_url} alt={book.title} onError={() => setBroken(true)} className={cn('aspect-[3/4] w-full rounded-[3px] object-cover shadow-card ring-1 ring-black/10', className)} />
+  const bg = CLOTH[book.id % CLOTH.length]
+  const cloth = { backgroundColor: bg, backgroundImage: 'linear-gradient(90deg, rgb(0 0 0 / 0.22) 0, rgb(0 0 0 / 0.22) 6%, rgb(255 255 255 / 0.10) 6.5%, transparent 9%), linear-gradient(160deg, rgb(255 255 255 / 0.10), transparent 55%)' }
   if (mini)
     return (
-      <div className={cn('relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-[5px] text-white shadow-card ring-1 ring-black/5', className)} style={{ background: `linear-gradient(145deg, ${a}, ${b})` }}>
-        <div className="absolute -right-3 -top-3 h-8 w-8 rounded-full bg-white/15" />
-        <span className="relative font-serif text-[17px] font-bold [text-shadow:0_1px_3px_rgb(0_0_0/0.25)]">{book.title.slice(0, 1)}</span>
+      <div className={cn('relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-[3px] text-[#f3ead8] shadow-card ring-1 ring-black/10', className)} style={cloth}>
+        <span className="relative pl-[8%] font-serif text-[16px] font-bold">{book.title.slice(0, 1)}</span>
       </div>
     )
   return (
-    <div className={cn('relative flex aspect-[3/4] w-full flex-col justify-end overflow-hidden rounded-md p-2.5 text-white shadow-card', className)} style={{ background: `linear-gradient(145deg, ${a}, ${b})` }}>
-      <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-white/15" />
-      <div className="absolute right-3 top-10 h-8 w-8 rounded-full border border-white/30" />
-      <div className="relative line-clamp-3 font-serif text-[13px] font-bold leading-snug [text-shadow:0_1px_4px_rgb(0_0_0/0.25)]">{book.title}</div>
-      <div className="relative mt-1 text-[10px] opacity-80">{book.genre}</div>
+    <div className={cn('relative flex aspect-[3/4] w-full flex-col items-center justify-center overflow-hidden rounded-[3px] py-3 pl-[12%] pr-[6%] text-[#f3ead8] shadow-card ring-1 ring-black/10', className)} style={cloth}>
+      <div className="absolute inset-y-[7%] left-[13%] right-[7%] border border-[#e9dcc0]/35" />
+      <div className="relative line-clamp-3 text-center font-serif text-[13px] font-bold leading-snug tracking-wide">{book.title}</div>
+      <div className="relative mt-2 h-px w-6 bg-[#e9dcc0]/50" />
+      <div className="relative mt-1.5 text-[10px] tracking-widest opacity-75">{book.genre}</div>
     </div>
   )
 }

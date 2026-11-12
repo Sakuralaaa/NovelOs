@@ -43,13 +43,12 @@ export function PageHeader({ title, desc, actions, eyebrow, className }: { title
   )
 }
 
+// "/N" mark, same slash geometry as Atoll's "/A" so the two sit together in a tab bar.
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <div className={cn('relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-[9px] bg-[linear-gradient(135deg,#6366f1_0%,#7c3aed_100%)] shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_1px_2px_rgb(76_29_149/0.35)]', className)}>
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none">
-        <path d="M6 18.5V6.8c0-.6.7-.9 1.1-.5l9.8 11.4c.4.4 1.1.1 1.1-.5V5.5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
+    <svg viewBox="-15.84 -12 124 124" fill="currentColor" aria-hidden="true" className={cn('h-7 w-7 shrink-0 text-foreground', className)}>
+      <path d="M18.313 0L34.109 0L1.109 100L-14.687 100ZM17.6 100L50.6 0L68.4 0L72.06 58L91.2 0L107 0L74 100L56.2 100L52.54 42L33.4 100Z" />
+    </svg>
   )
 }
 
@@ -57,7 +56,7 @@ export function Logo({ collapsed }: { collapsed?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
       <LogoMark />
-      {!collapsed && <span className="text-[15px] font-semibold tracking-tight">NovelOS</span>}
+      {!collapsed && <span className="font-serif text-[17px] font-semibold tracking-tight">NovelOS</span>}
     </div>
   )
 }

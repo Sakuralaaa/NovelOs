@@ -1,5 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import '@fontsource/noto-serif-sc/500.css'
+import '@fontsource/noto-serif-sc/700.css'
 import './index.css'
 
 async function boot() {
