@@ -50,11 +50,22 @@ def _add_missing_columns(engine: Engine) -> None:
                 if col.name in have:
                     continue
                 ddl_type = col.type.compile(engine.dialect)
+                if "JSON" in ddl_type.upper():  # JSON 列补成空列表，不能用 0
+                    null = "" if col.nullable else " NOT NULL DEFAULT '[]'"
+                    conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}{null}'))
+                    continue
                 default = col.default.arg if col.default is not None and not callable(col.default.arg) else None
                 if default is None:
                     default = "" if "CHAR" in ddl_type.upper() or "TEXT" in ddl_type.upper() else 0
                 lit = f"'{default}'" if isinstance(default, str) else str(int(default))
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type} NOT NULL DEFAULT {lit}'))
+        # 修复旧版本迁移留下的坏数据：JSON 列被补成了 0
+        for table in SQLModel.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            for col in table.columns:
+                if "JSON" in col.type.compile(engine.dialect).upper() and not col.nullable:
+                    conn.execute(text(f'UPDATE "{table.name}" SET "{col.name}" = \'[]\' WHERE typeof("{col.name}") != \'text\' OR "{col.name}" IN (\'0\', \'\')'))
 
 
 def get_engine() -> Engine:

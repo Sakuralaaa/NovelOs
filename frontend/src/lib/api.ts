@@ -102,6 +102,7 @@ export const api = {
   idea: (id: number) => get<Idea>(`/ideas/${id}`),
   updateIdea: (id: number, b: Partial<Record<IdeaField, string | string[]>>) => patch<Idea>(`/ideas/${id}`, b),
   suggestIdeaField: (id: number, b: { field: IdeaField; instruction: string; route?: string | null; draft?: Record<string, unknown> }) => post<Job>(`/ideas/${id}/suggest`, b),
+  rescoreAllIdeas: () => post<Job>('/ideas/rescore'),
   rescoreIdea: (id: number) => post<Job>(`/ideas/${id}/rescore`),
 
   generateBible: (bookId: number) => post<Job>(`/books/${bookId}/bible/generate`),

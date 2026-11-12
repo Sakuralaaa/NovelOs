@@ -178,6 +178,11 @@ def undo_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]
         raise HTTPException(409, str(e)) from e
 
 
+@router.post("/ideas/rescore")
+async def rescore_all_ideas() -> dict[str, Any]:
+    return job_out(submit("idea_rescore", lambda ctx: planning.rescore_all(ctx)))
+
+
 @router.post("/ideas/{idea_id}/adopt")
 def adopt_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     book = planning.adopt_idea(idea_id)

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw } from '@/components/icons'
+import { ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw, RefreshCw } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -94,7 +94,10 @@ export default function Ideas() {
       <div id="idea-results" className="mt-8 scroll-mt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[15px] font-semibold">选题卡 {ideas.data?.length ? <span className="ml-1 text-muted-foreground">{ideas.data.length}</span> : null}</h2>
-          <ClearIdeas count={(ideas.data ?? []).filter((x) => !x.chosen).length} />
+          <div className="flex items-center gap-1">
+            <RescoreAll count={(ideas.data ?? []).filter((x) => !x.chosen).length} />
+            <ClearIdeas count={(ideas.data ?? []).filter((x) => !x.chosen).length} />
+          </div>
         </div>
         {ideas.isLoading ? <GridSkeleton n={3} h="h-64" /> : ideas.error ? <ErrorState error={ideas.error} onRetry={() => ideas.refetch()} /> : !list.length ? (
           <EmptyState kind="idea" title="还没有选题" />
@@ -197,6 +200,18 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
         <Button variant="ghost" size="icon" aria-label="删除选题" loading={rm.isPending} onClick={() => rm.mutate()} className="shrink-0 text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button>
       </div>
     </motion.div>
+  )
+}
+
+function RescoreAll({ count }: { count: number }) {
+  const { start } = useJobs()
+  const job = useActiveJob('ideas-rescore')
+  if (!count) return null
+  return (
+    <Button size="sm" variant="ghost" loading={!!job} icon={<RefreshCw className="h-3.5 w-3.5" />}
+      onClick={() => start(api.rescoreAllIdeas(), { key: 'ideas-rescore', label: '重新打分', successMsg: (j) => `已重新打分 ${j.result?.count ?? count} 个选题` })}>
+      全部重新打分
+    </Button>
   )
 }
 

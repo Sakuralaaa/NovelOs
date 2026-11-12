@@ -97,6 +97,7 @@ export interface Idea {
   issue?: string
   genre: string
   scores: { heat: number; novelty: number; fit: number; overall: number }
+  score_detail?: Record<string, number>
   chosen: boolean
   versions?: number
   last_instruction?: string

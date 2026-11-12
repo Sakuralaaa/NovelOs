@@ -328,6 +328,10 @@ on('POST', '/ideas/:id/suggest', (m, b) => {
   const note = String(b.instruction || '改写').slice(0, 10)
   return createJob('idea_field', null, 1500, ['AI 改写…'], () => ({ field: b.field, value: Array.isArray(cur) ? cur.map((x: string) => `${x}（${note}）`) : `${cur}（${note}）` }))
 })
+on('POST', '/ideas/rescore', () => createJob('idea_rescore', null, 2000, ['复核打分…'], () => {
+  db.ideas.filter((x) => !x.chosen).forEach((x, k) => { const n = 35 + ((k * 17) % 50), f = 40 + ((k * 23) % 50); x.scores = { ...x.scores, novelty: n, fit: f, overall: Math.round(0.15 * x.scores.heat + 0.35 * n + 0.5 * f) } })
+  return { count: db.ideas.length }
+}))
 on('POST', '/ideas/:id/rescore', (m) => {
   const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
   return createJob('idea_rescore', null, 1500, ['编辑复核打分…'], () => { idea.scores = { ...idea.scores, novelty: 70, fit: 78, overall: Math.round(0.3 * idea.scores.heat + 0.3 * 70 + 0.4 * 78) }; return { idea_id: idea.id } })

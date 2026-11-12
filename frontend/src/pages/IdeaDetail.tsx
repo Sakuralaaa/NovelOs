@@ -18,6 +18,10 @@ import { cn } from '@/lib/utils'
 
 type Draft = Pick<Idea, 'title' | 'genre' | 'logline' | 'hook' | 'selling_points'> & { expectations: string[]; arc: string[]; endgame: string }
 
+const RUBRIC: [string, string][] = [
+  ['gf', '金手指玩法'], ['angle', '切入点'], ['fresh', '不撞车'],
+  ['opening', '开篇抓人'], ['payoff', '爽点兑现'], ['growth', '成长后劲'], ['longrun', '长线结构'], ['pitch', '书名简介'],
+]
 const ROUTE_KEY = 'novelos.idea-revise-route'
 
 const toDraft = (i: Idea): Draft => ({
@@ -196,6 +200,18 @@ export default function IdeaDetail() {
                   ))}
                 </div>
               </div>
+              {idea.score_detail && Object.keys(idea.score_detail).length > 0 && (
+                <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-2 border-t pt-4">
+                  {RUBRIC.filter(([k]) => k in idea.score_detail!).map(([k, l]) => (
+                    <div key={k} className="flex items-center justify-between gap-2 text-[12.5px]">
+                      <span className="truncate text-muted-foreground">{l}</span>
+                      <span className="flex shrink-0 gap-0.5">
+                        {[1, 2, 3, 4].map((n) => <span key={n} className={cn('h-1.5 w-3 rounded-full', n <= idea.score_detail![k] ? 'bg-primary/70' : 'bg-muted')} />)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {idea.issue && <div className="mt-4 flex gap-1.5 text-[12.5px] leading-relaxed text-warning"><AlertCircle className="mt-[3px] h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{idea.issue}</span></div>}
             </CardBody>
           </Card>

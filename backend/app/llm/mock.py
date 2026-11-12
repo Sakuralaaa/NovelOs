@@ -167,7 +167,8 @@ def mock_idea_revise(meta: dict[str, Any]) -> str:
 
 def mock_idea_score(meta: dict[str, Any]) -> str:
     n = int(meta.get("count") or 1)
-    return _j({"scores": [{"index": i, "novelty": 60 + (i * 7) % 25, "fit": 65 + (i * 5) % 20, "issue": "爽点兑现偏慢" if i == 2 else "无"} for i in range(1, n + 1)]})
+    keys = ("gf", "angle", "fresh", "opening", "payoff", "growth", "longrun", "pitch")
+    return _j({"scores": [{"index": i, **{k: max(0, min(4, 4 - (i - 1) % 4 + j % 3 - 1)) for j, k in enumerate(keys)}, "issue": "爽点兑现偏慢" if i == 2 else "无"} for i in range(1, n + 1)]})
 
 
 def mock_idea_field(meta: dict[str, Any]) -> str:

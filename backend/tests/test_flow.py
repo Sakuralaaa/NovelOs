@@ -66,6 +66,10 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     up = client.patch(f"/api/ideas/{other}", json={"title": "《我的新书名》", "arc": ["一", " ", "二"]}).json()
     assert up["title"] == "我的新书名" and up["arc"] == ["一", "二"] and up["versions"] == 1
     wait_job(client, client.post(f"/api/ideas/{other}/rescore").json())
+    assert client.get(f"/api/ideas/{other}").json()["score_detail"]
+    assert wait_job(client, client.post("/api/ideas/rescore").json())["result"]["count"] >= 2
+    sc = [i["scores"]["overall"] for i in client.get("/api/ideas").json() if not i["chosen"]]
+    assert max(sc) - min(sc) >= 10
     book = client.post(f"/api/ideas/{idea['id']}/adopt").json()
     assert book["status"] == "bible" and book["stats"] == {"chapters": 0, "words": 0, "foreshadow_open": 0}
     bid = book["id"]

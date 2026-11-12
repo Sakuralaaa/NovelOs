@@ -48,6 +48,35 @@ def _clamp(v: Any, default: int = 50) -> int:
         return default
 
 
+# 分项打分：每项 0–4 档，由程序加总换算，避免模型直接给总分时全挤在 85–95
+RUBRIC: dict[str, tuple[str, str]] = {
+    "gf": ("novelty", "金手指玩法"),
+    "angle": ("novelty", "切入点"),
+    "fresh": ("novelty", "不撞车"),
+    "opening": ("fit", "开篇抓人"),
+    "payoff": ("fit", "爽点兑现"),
+    "growth": ("fit", "成长后劲"),
+    "longrun": ("fit", "长线结构"),
+    "pitch": ("fit", "书名简介"),
+}
+
+
+def _score(rv: dict[str, Any], heat: int, title: str = "") -> dict[str, Any]:
+    """把复核的分项档位换算成分数。复核失败时给中性分，不用模型自评。"""
+    detail = {k: max(0, min(4, int(rv[k]))) for k in RUBRIC if str(rv.get(k, "")).lstrip("-").isdigit()}
+    def part(dim: str) -> int:
+        keys = [k for k, (d, _) in RUBRIC.items() if d == dim]
+        got = [detail[k] for k in keys if k in detail]
+        return round(100 * sum(got) / (4 * len(got))) if got else 50
+    novelty, fit = part("novelty"), part("fit")
+    if title and not 6 <= len(title) <= 18:  # 书名过短或过长，程序直接扣分
+        fit = max(0, fit - 5)
+    issue = str(rv.get("issue") or "").strip()
+    # 同题材下热度几乎一样，只占一成五，主要看选题本身
+    return {"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.15 * heat + 0.35 * novelty + 0.5 * fit),
+            "issue": "" if issue in ("无", "没有", "-") else issue[:40], "detail": detail}
+
+
 def _review_scores(items: list[dict[str, Any]], gender: str, trends: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     """让审稿模型横向复核新颖和适配，压住模型自评虚高。失败时返回空，沿用自评。"""
     tops = [x for t in trends[:8] for x in t.get("sample_titles", [])[:4]]
@@ -150,6 +179,33 @@ def update_idea(idea_id: int, fields: dict[str, Any]) -> Idea:
         return idea
 
 
+def rescore_all(ctx: JobContext) -> dict[str, Any]:
+    """按新的分项标准把未建书的选题重新打一遍，按频道分批，每批 8 个。"""
+    with session_scope() as s:
+        rows = [(i.id, i.gender, {k: getattr(i, k) for k in ("title", "logline", "selling_points", "endgame", "arc", "genre")})
+                for i in s.exec(select(Idea).where(Idea.chosen == False))]  # noqa: E712
+    done = 0
+    for gender in ("male", "female"):
+        group = [r for r in rows if r[1] == gender]
+        if not group:
+            continue
+        with session_scope() as s:
+            trends = radar.compute_trends(s, gender=gender)
+        for k in range(0, len(group), 8):
+            chunk = group[k:k + 8]
+            ctx.progress(5 + int(90 * done / max(1, len(rows))), f"复核打分 {done}/{len(rows)}")
+            rv = _review_scores([r[2] for r in chunk], gender, trends)
+            with session_scope() as s:
+                for n, (iid, _, it) in enumerate(chunk, 1):
+                    idea = s.get(Idea, iid)
+                    if idea is not None and rv.get(n):
+                        idea.scores = _score(rv[n], _heat_for(it["genre"], trends), idea.title)
+                        s.add(idea)
+                s.commit()
+            done += len(chunk)
+    return {"count": done}
+
+
 def rescore_idea(idea_id: int, ctx: JobContext) -> dict[str, Any]:
     with session_scope() as s:
         idea = s.get(Idea, idea_id)
@@ -163,14 +219,11 @@ def rescore_idea(idea_id: int, ctx: JobContext) -> dict[str, Any]:
     if not rv:
         raise ValueError("打分失败，检查审稿模型")
     heat = _heat_for(it["genre"], trends)
-    novelty, fit = _clamp(rv.get("novelty")), _clamp(rv.get("fit"))
-    issue = str(rv.get("issue") or "").strip()
     with session_scope() as s:
         idea = s.get(Idea, idea_id)
         if idea is None:
             raise NotFound("选题不存在")
-        idea.scores = {"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
-                       "issue": "" if issue in ("无", "没有", "-") else issue[:40]}
+        idea.scores = _score(rv, heat, idea.title)
         s.add(idea)
         s.commit()
     return {"idea_id": idea_id}
@@ -197,9 +250,6 @@ def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobConte
     g = str(it.get("genre") or cur["genre"] or "")
     rv = _review_scores([it], gender, trends).get(1) or {}
     heat = _heat_for(g, trends)
-    novelty = round(0.8 * _clamp(rv["novelty"]) + 0.2 * _clamp(it.get("novelty"))) if "novelty" in rv else min(80, _clamp(it.get("novelty")))
-    fit = round(0.8 * _clamp(rv["fit"]) + 0.2 * _clamp(it.get("fit"))) if "fit" in rv else min(80, _clamp(it.get("fit")))
-    issue = str(rv.get("issue") or "").strip()
     with session_scope() as s:
         idea = s.get(Idea, idea_id)
         if idea is None:
@@ -213,8 +263,7 @@ def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobConte
         idea.endgame = str(it.get("endgame") or idea.endgame)[:120]
         idea.arc = [str(x) for x in (it.get("arc") or idea.arc)][:6]
         idea.genre = g
-        idea.scores = {"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
-                       "issue": "" if issue in ("无", "没有", "-") else issue[:40]}
+        idea.scores = _score(rv, heat, idea.title)
         s.add(idea)
         s.commit()
     return {"idea_id": idea_id, "change": str(it.get("change") or "")[:80]}
@@ -272,20 +321,15 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
             g = str(it.get("genre") or genre or "")
             heat = _heat_for(g, trends)
             rv = reviewed.get(n) or {}
-            # 复核分为主，自评只占两成，避免模型自己给自己打 95
-            novelty = round(0.8 * _clamp(rv["novelty"]) + 0.2 * _clamp(it.get("novelty"))) if "novelty" in rv else min(80, _clamp(it.get("novelty")))
-            fit = round(0.8 * _clamp(rv["fit"]) + 0.2 * _clamp(it.get("fit"))) if "fit" in rv else min(80, _clamp(it.get("fit")))
-            issue = str(rv.get("issue") or "").strip()
+            title = _clean_title(it["title"], g)
             idea = Idea(
-                title=_clean_title(it["title"], g), logline=str(it.get("logline", "")),
+                title=title, logline=str(it.get("logline", "")),
                 selling_points=[str(x) for x in (it.get("selling_points") or [])][:4], hook=str(it.get("hook", "")),
                 expectations=[str(x) for x in (it.get("expectations") or [])][:3],
                 endgame=str(it.get("endgame") or "")[:120],
                 arc=[str(x) for x in (it.get("arc") or [])][:6],
                 genre=g, gender=gender,
-                scores={"heat": heat, "novelty": novelty, "fit": fit,
-                        "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
-                        "issue": "" if issue in ("无", "没有", "-") else issue[:40]},
+                scores=_score(rv, heat, title),
             )
             s.add(idea)
             s.flush()
