@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import time as _time
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -41,6 +42,22 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     ideas = client.get("/api/ideas").json()
     idea = next(i for i in ideas if i["id"] == ids[0])
     assert set(idea["scores"]) == {"heat", "novelty", "fit", "overall"}
+    # 按意见修改 → 撤回
+    other = ids[1]
+    old = next(i for i in ideas if i["id"] == other)
+    j = wait_job(client, client.post(f"/api/ideas/{other}/revise", json={"instruction": "主角换成武道高考生"}).json())
+    assert j["status"] == "succeeded", j
+    rev = next(i for i in client.get("/api/ideas").json() if i["id"] == other)
+    assert rev["versions"] == 1 and rev["last_instruction"] == "主角换成武道高考生" and rev["logline"] != old["logline"]
+    bad = client.post(f"/api/ideas/{other}/revise", json={"instruction": "x", "route": "999:nope"}).json()
+    for _ in range(200):
+        jb = client.get(f"/api/jobs/{bad['id']}").json()
+        if jb["status"] in ("succeeded", "failed"):
+            break
+        _time.sleep(0.05)
+    assert jb["status"] == "failed" and "不可用" in (jb["error"] or "")
+    back = client.post(f"/api/ideas/{other}/undo").json()
+    assert back["logline"] == old["logline"] and back["versions"] == 0
     book = client.post(f"/api/ideas/{idea['id']}/adopt").json()
     assert book["status"] == "bible" and book["stats"] == {"chapters": 0, "words": 0, "foreshadow_open": 0}
     bid = book["id"]

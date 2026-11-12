@@ -97,6 +97,8 @@ export const api = {
   deleteIdea: (id: number) => del<{ ok: boolean }>(`/ideas/${id}`),
   clearIdeas: () => post<{ deleted: number }>('/ideas/clear'),
   adoptIdea: (id: number) => post<Book>(`/ideas/${id}/adopt`),
+  reviseIdea: (id: number, b: { instruction: string; route?: string | null }) => post<Job>(`/ideas/${id}/revise`, b),
+  undoIdea: (id: number) => post<Idea>(`/ideas/${id}/undo`),
 
   generateBible: (bookId: number) => post<Job>(`/books/${bookId}/bible/generate`),
   cards: (bookId: number, type?: CardType) => get<Card[]>(`/books/${bookId}/cards${qs({ type })}`),

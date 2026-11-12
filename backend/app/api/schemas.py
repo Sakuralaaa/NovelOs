@@ -101,6 +101,11 @@ class IdeasGenerate(BaseModel):
     count: int = Field(default=3, ge=1, le=10)
 
 
+class IdeaRevise(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)
+    route: str | None = None  # "渠道id:模型"，不填走策划路由
+
+
 CardType = Literal["world", "power", "faction", "character", "item", "location"]
 
 
@@ -208,7 +213,8 @@ def idea_out(i: Idea) -> dict[str, Any]:
     return {"id": i.id, "book_id": i.book_id, "title": i.title, "logline": i.logline,
             "selling_points": list(i.selling_points or []), "hook": i.hook, "genre": i.genre,
             "expectations": list(i.expectations or []), "endgame": i.endgame, "arc": list(i.arc or []), "issue": str(sc.get("issue") or ""),
-            "scores": {k: sc.get(k, 0) for k in ("heat", "novelty", "fit", "overall")}, "chosen": i.chosen}
+            "scores": {k: sc.get(k, 0) for k in ("heat", "novelty", "fit", "overall")}, "chosen": i.chosen,
+            "versions": len(i.versions or []), "last_instruction": str((i.versions or [{}])[-1].get("instruction") or "") if i.versions else ""}
 
 
 def card_out(c: Card) -> dict[str, Any]:

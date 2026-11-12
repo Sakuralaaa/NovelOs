@@ -157,6 +157,14 @@ def mock_ideation(meta: dict[str, Any]) -> str:
     return _j({"ideas": ideas})
 
 
+def mock_idea_revise(meta: dict[str, Any]) -> str:
+    out = {k: meta.get(k) for k in ("title", "logline", "selling_points", "hook", "expectations", "endgame", "arc", "genre")}
+    note = str(meta.get("instruction") or "")[:20]
+    out["logline"] = f"{out.get('logline') or ''}（已按“{note}”调整）"
+    out.update({"novelty": 70, "fit": 75, "change": f"按“{note}”调整了简介"})
+    return _j(out)
+
+
 # ---------------------------------------------------------------- 设定
 
 def mock_bible(meta: dict[str, Any]) -> str:
@@ -621,6 +629,7 @@ def mock_style_extract(meta: dict[str, Any]) -> str:
 
 HANDLERS = {
     "ideation": mock_ideation,
+    "idea_revise": mock_idea_revise,
     "bible": mock_bible,
     "outline": mock_outline,
     "expand": mock_expand,

@@ -98,6 +98,8 @@ export interface Idea {
   genre: string
   scores: { heat: number; novelty: number; fit: number; overall: number }
   chosen: boolean
+  versions?: number
+  last_instruction?: string
 }
 
 export type CardType = 'world' | 'power' | 'faction' | 'character' | 'item' | 'location'

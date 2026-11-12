@@ -114,6 +114,7 @@ class Idea(SQLModel, table=True):
     genre: str = ""
     gender: str = "male"
     scores: Optional[dict[str, Any]] = _json_dict_nullable()
+    versions: list[dict[str, Any]] = _json_list()  # 修改前的旧版本，最近的在最后
     chosen: bool = False
     created_at: datetime = Field(default_factory=utcnow)
 

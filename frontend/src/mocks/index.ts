@@ -306,6 +306,21 @@ on('POST', '/ideas/generate', (_m, b) => createJob('ideas_generate', null, 3800,
   return { idea_ids: ids }
 }))
 on('GET', '/ideas', () => db.ideas)
+const ideaHist: Record<number, Idea[]> = {}
+on('POST', '/ideas/:id/revise', (m, b) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
+  return createJob('idea_revise', null, 2200, ['按意见修改…', '重新打分…'], () => {
+    ;(ideaHist[idea.id] ??= []).push({ ...idea })
+    Object.assign(idea, { logline: `${idea.logline.replace(/（已按.*）$/, '')}（已按“${String(b.instruction).slice(0, 16)}”调整）`, versions: ideaHist[idea.id].length, last_instruction: b.instruction })
+    return { idea_id: idea.id, change: '调整了简介' }
+  })
+})
+on('POST', '/ideas/:id/undo', (m) => {
+  const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')
+  const prev = ideaHist[idea.id]?.pop()
+  if (prev) Object.assign(idea, prev)
+  return idea
+})
 on('POST', '/ideas/clear', () => { const n = db.ideas.filter((x) => !x.chosen).length; db.ideas = db.ideas.filter((x) => x.chosen); return { deleted: n } })
 on('DELETE', '/ideas/:id', (m) => { must(db.ideas.find((x) => x.id === +m[1]), '选题'); db.ideas = db.ideas.filter((x) => x.id !== +m[1]); return { ok: true } })
 on('POST', '/ideas/:id/adopt', (m) => {

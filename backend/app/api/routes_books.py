@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.api.schemas import (
     AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CoversIn, IdeasGenerate, OutlineUpdate,
-    PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
+    IdeaRevise, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
 from app.config import get_settings
@@ -122,6 +122,24 @@ def clear_ideas(s: Session = Depends(get_session)) -> dict[str, int]:
         s.delete(r)
     s.commit()
     return {"deleted": len(rows)}
+
+
+@router.post("/ideas/{idea_id}/revise")
+async def revise_idea(idea_id: int, body: IdeaRevise, s: Session = Depends(get_session)) -> dict[str, Any]:
+    idea = s.get(Idea, idea_id)
+    if idea is None:
+        raise HTTPException(404, "选题不存在")
+    if idea.chosen:
+        raise HTTPException(409, "已建书的选题不能再改，去书里改设定")
+    return job_out(submit("idea_revise", lambda ctx: planning.revise_idea(idea_id, body.instruction, body.route, ctx)))
+
+
+@router.post("/ideas/{idea_id}/undo")
+def undo_idea(idea_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    try:
+        return idea_out(planning.undo_idea(idea_id))
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 @router.post("/ideas/{idea_id}/adopt")

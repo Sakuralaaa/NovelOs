@@ -25,6 +25,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "package": ("package",),
     "style_extract": ("writing",),
     "idea_score": (),
+    "idea_revise": ("ideation",),
 }
 
 

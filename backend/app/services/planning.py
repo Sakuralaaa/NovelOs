@@ -72,6 +72,76 @@ def _review_scores(items: list[dict[str, Any]], gender: str, trends: list[dict[s
     return out
 
 
+_IDEA_FIELDS = ("title", "logline", "selling_points", "hook", "expectations", "endgame", "arc", "genre", "scores")
+
+
+def _idea_text(i: Idea) -> str:
+    return (f"书名：{i.title}\n题材：{i.genre}\n简介：{i.logline}\n卖点：{'；'.join(i.selling_points)}\n钩子：{i.hook}\n"
+            f"长期期待：{'；'.join(i.expectations)}\n长线阶段：{' → '.join(i.arc)}\n终局：{i.endgame}")
+
+
+def revise_idea(idea_id: int, instruction: str, route: str | None, ctx: JobContext) -> dict[str, Any]:
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        gender = idea.gender
+        history = "\n".join(f"- {v.get('instruction')}" for v in idea.versions if v.get("instruction")) or "（无）"
+        user = render("idea_revise", gender_label=common.GENDER_LABEL.get(gender, gender), idea=_idea_text(idea),
+                      history=history, instruction=instruction.strip())
+        cur = {k: getattr(idea, k) for k in _IDEA_FIELDS}
+        meta = {**{k: v for k, v in cur.items() if k != "scores"}, "instruction": instruction, "gender": gender}
+    ctx.progress(20, "按意见修改")
+    it = get_gateway().chat_json("idea_revise", system_prompt("idea_revise"), user, meta=meta, route=route)
+    if not isinstance(it, dict) or not it.get("title"):
+        raise ValueError("模型没有返回修改后的选题")
+    ctx.progress(70, "重新打分")
+    with session_scope() as s:
+        trends = radar.compute_trends(s, gender=gender)
+    g = str(it.get("genre") or cur["genre"] or "")
+    rv = _review_scores([it], gender, trends).get(1) or {}
+    heat = _heat_for(g, trends)
+    novelty = round(0.8 * _clamp(rv["novelty"]) + 0.2 * _clamp(it.get("novelty"))) if "novelty" in rv else min(80, _clamp(it.get("novelty")))
+    fit = round(0.8 * _clamp(rv["fit"]) + 0.2 * _clamp(it.get("fit"))) if "fit" in rv else min(80, _clamp(it.get("fit")))
+    issue = str(rv.get("issue") or "").strip()
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        idea.versions = [*idea.versions, {**cur, "instruction": instruction.strip()}][-10:]
+        idea.title = _clean_title(it["title"], g)
+        idea.logline = str(it.get("logline") or idea.logline)
+        idea.selling_points = [str(x) for x in (it.get("selling_points") or idea.selling_points)][:4]
+        idea.hook = str(it.get("hook") or idea.hook)
+        idea.expectations = [str(x) for x in (it.get("expectations") or idea.expectations)][:3]
+        idea.endgame = str(it.get("endgame") or idea.endgame)[:120]
+        idea.arc = [str(x) for x in (it.get("arc") or idea.arc)][:6]
+        idea.genre = g
+        idea.scores = {"heat": heat, "novelty": novelty, "fit": fit, "overall": round(0.3 * heat + 0.3 * novelty + 0.4 * fit),
+                       "issue": "" if issue in ("无", "没有", "-") else issue[:40]}
+        s.add(idea)
+        s.commit()
+    return {"idea_id": idea_id, "change": str(it.get("change") or "")[:80]}
+
+
+def undo_idea(idea_id: int) -> Idea:
+    with session_scope() as s:
+        idea = s.get(Idea, idea_id)
+        if idea is None:
+            raise NotFound("选题不存在")
+        if not idea.versions:
+            raise ValueError("没有可以撤回的版本")
+        prev = idea.versions[-1]
+        for k in _IDEA_FIELDS:
+            if k in prev:
+                setattr(idea, k, prev[k])
+        idea.versions = idea.versions[:-1]
+        s.add(idea)
+        s.commit()
+        s.refresh(idea)
+        return idea
+
+
 def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
     gender = params.get("gender") or "male"
     count = max(1, min(10, int(params.get("count") or 3)))

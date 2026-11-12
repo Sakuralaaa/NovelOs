@@ -38,6 +38,7 @@ IMAGE_MODE_KEY = "image_mode"  # images：/images/generations；chat：对话接
 TASK_ROLE: dict[str, str] = {
     "ideation": "planner",
     "idea_score": "reviewer",
+    "idea_revise": "planner",
     "bible": "planner",
     "outline": "planner",
     "expand": "planner",
@@ -233,6 +234,15 @@ def extract_json(text: str) -> Any:
     raise ValueError("模型输出不是合法 JSON")
 
 
+def route_target(s: Session, route: str) -> Target:
+    """用户手动指定的「渠道:模型」，不做切换。"""
+    r = _parse_route(route)
+    c = s.get(Channel, r[0]) if r else None
+    if r is None or c is None or not c.enabled:
+        raise LLMError("选的模型不可用，渠道可能已删除或停用")
+    return Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), r[1], c.api_format or "openai")
+
+
 class LLMGateway:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -246,10 +256,11 @@ class LLMGateway:
         role: str | None = None,
         temperature: float = 0.8,
         max_tokens: int | None = None,
+        route: str | None = None,
     ) -> str:
         role = role or TASK_ROLE.get(task, "planner")
         with session_scope() as s:
-            targets = resolve_targets(s, role)
+            targets = [route_target(s, route)] if route else resolve_targets(s, role)
         if not targets:
             return mock.complete(task, messages, meta or {})
         errors: list[str] = []
@@ -303,10 +314,11 @@ class LLMGateway:
         meta: dict[str, Any] | None = None,
         role: str | None = None,
         temperature: float = 0.7,
+        route: str | None = None,
     ) -> Any:
         """要求 JSON 输出；解析失败时追加提醒重试 1 次。"""
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-        out = self.chat(task, messages, meta=meta, role=role, temperature=temperature)
+        out = self.chat(task, messages, meta=meta, role=role, temperature=temperature, route=route)
         try:
             return extract_json(out)
         except ValueError:
@@ -314,7 +326,7 @@ class LLMGateway:
                 {"role": "assistant", "content": out[:4000]},
                 {"role": "user", "content": "上面的输出不是合法 JSON。请只输出符合要求的 JSON，不要任何其他文字。"},
             ]
-            out = self.chat(task, messages, meta=meta, role=role, temperature=0.3)
+            out = self.chat(task, messages, meta=meta, role=role, temperature=0.3, route=route)
             return extract_json(out)
 
     # ---------- search ----------
