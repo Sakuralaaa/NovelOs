@@ -197,8 +197,8 @@ function recalc(bookId: number) {
 seedDemo()
 
 // ---------------- Jobs ----------------
-function createJob(kind: string, bookId: number | null, dur: number, steps: string[], fin: () => Record<string, any> | null): Job {
-  const j = { id: nid(), kind, status: 'queued' as const, progress: 0, message: '排队中…', result: null, error: null, book_id: bookId, created_at: now(), updated_at: now(), _start: Date.now(), _dur: dur, _steps: steps, _fin: fin }
+function createJob(kind: string, bookId: number | null, dur: number, steps: string[], fin: () => Record<string, any> | null, ref = ''): Job {
+  const j = { id: nid(), kind, status: 'queued' as const, progress: 0, message: '排队中…', result: null, error: null, book_id: bookId, ref, created_at: now(), updated_at: now(), _start: Date.now(), _dur: dur, _steps: steps, _fin: fin }
   db.jobs.unshift(j)
   return pub(j)
 }
@@ -244,8 +244,8 @@ const bookOf = (id: string) => must(db.books.find((b) => b.id === +id), '作品'
 on('GET', '/health', () => ({ status: 'ok', version: '0.1.0-mock' }))
 on('GET', '/jobs', (_m, _b, u) => {
   db.jobs.forEach(tick)
-  const bid = u.searchParams.get('book_id')
-  return db.jobs.filter((j) => !bid || j.book_id === +bid).slice(0, 50).map(pub)
+  const bid = u.searchParams.get('book_id'); const kind = u.searchParams.get('kind'); const ref = u.searchParams.get('ref')
+  return db.jobs.filter((j) => (!bid || j.book_id === +bid) && (!kind || j.kind === kind) && (!ref || (j as any).ref === ref)).slice(0, 50).map(pub)
 })
 on('GET', '/jobs/:id', (m) => { const j = must(db.jobs.find((x) => x.id === +m[1]), '任务'); tick(j); return pub(j) })
 
@@ -307,16 +307,29 @@ function mkTeardown(it: (typeof db.items)[number]): Teardown {
   }
 }
 on('GET', '/radar/items/:id/teardown', (m) => must(teardowns.get(+m[1]), '这本书还没有拆解'))
+// v0.7.1：拆解 / 深度拆解 / 换皮选题都是任务接口，立即返回 Job（ref = rank_item:{id}）
+const rankRef = (id: number) => `rank_item:${id}`
+const activeRankJob = (kind: string, id: number) => db.jobs.find((j) => j.kind === kind && (j as any).ref === rankRef(id) && (tick(j), j.status === 'queued' || j.status === 'running'))
+on('GET', '/radar/items/:id/jobs', (m) => { db.jobs.forEach(tick); return db.jobs.filter((j) => (j as any).ref === rankRef(+m[1])).slice(0, 20).map(pub) })
 on('POST', '/radar/items/:id/teardown', (m, _b, u) => {
-  const it = rankOf(m[1]); const old = teardowns.get(it.id!)
-  if (old && u.searchParams.get('refresh') !== 'true') return { ...old, cached: true }
-  const t = { ...mkTeardown(it), deep: old?.deep ?? null }; teardowns.set(it.id!, t); return t
+  const it = rankOf(m[1]); const running = activeRankJob('radar_teardown', it.id!)
+  if (running) return pub(running)
+  const refresh = u.searchParams.get('refresh') === 'true'
+  return createJob('radar_teardown', null, refresh || !teardowns.get(it.id!) ? 3200 : 400, ['拆解中：爽点公式、金手指、人设', '检查和简介的重合并保存'], () => {
+    const old = teardowns.get(it.id!)
+    if (old && !refresh) return { ...old, cached: true }
+    const t = { ...mkTeardown(it), deep: old?.deep ?? null }; teardowns.set(it.id!, t); return t
+  }, rankRef(it.id!))
 })
 on('POST', '/radar/items/:id/deep', (m, b) => {
-  const it = rankOf(m[1]); const t = teardowns.get(it.id!) ?? mkTeardown(it)
+  const it = rankOf(m[1])
   const text = String(b.text ?? ''); const n = text.replace(/\s/g, '').length
   if (!n) throw new HttpErr(400, '请粘贴试读原文')
   if (n > 20000) throw new HttpErr(400, `原文超过 20000 字（现在 ${n} 字），请删减后再试`)
+  return createJob('radar_deep', null, 4200, ['统计按章字数与对白比例', '逐章拆解中', '检查和原文的重合并保存'], () => mockDeep(it, text, n), rankRef(it.id!))
+})
+function mockDeep(it: (typeof db.items)[number], text: string, n: number) {
+  const t = teardowns.get(it.id!) ?? mkTeardown(it)
   const parts = text.split(/\n(?=第[一二三四五六七八九十百\d]+章)/).filter((x) => x.trim())
   const chapters = parts.map((p, i) => {
     const w = p.replace(/\s/g, '').length; const dl = (p.match(/“[^”]*”/g) ?? []).join('').length
@@ -326,9 +339,14 @@ on('POST', '/radar/items/:id/deep', (m, b) => {
   const deep = { chapters, total_words: n, dialogue_ratio: 0.31, first_conflict: { keyword: '退婚', at_char: 186, chapter: 1 }, first_cheat: { keyword: '系统', at_char: 1420, chapter: 1 },
     rhythm: '每章 1 个小冲突 + 1 个小爽点，第 3 章出现第一个大反转；对白占三成，推进快。', learnable: ['冲突在前 200 字内出现', '金手指露出后立刻给一次小兑现', '章末钩子都落在具体的人或物上'], overlap: 0, warnings: [] }
   const out = { ...t, deep, cached: false }; teardowns.set(it.id!, out); return out
-})
+}
 on('POST', '/radar/items/:id/reskin', (m) => {
-  const it = rankOf(m[1]); const t = teardowns.get(it.id!) ?? mkTeardown(it); teardowns.set(it.id!, t)
+  const it = rankOf(m[1]); const running = activeRankJob('radar_reskin', it.id!)
+  if (running) return pub(running)
+  return createJob('radar_reskin', null, 6000, ['读取拆解', '生成选题 1/3', '生成选题 2/3', '生成选题 3/3', '评分与相似点自检'], () => mockReskin(it), rankRef(it.id!))
+})
+function mockReskin(it: (typeof db.items)[number]) {
+  const t = teardowns.get(it.id!) ?? mkTeardown(it); teardowns.set(it.id!, t)
   const seeds = [
     { title: '我在废土当判官', logline: '核冬天第十年，一个被流放的书记员发现自己判下的每一桩案子都会成真。', genre: '废土 · 规则' },
     { title: '潮汐守夜人', logline: '海上城邦每晚涨潮，灯塔学徒能看见潮水里沉着的旧日记忆。', genre: '海洋奇幻' },
@@ -353,7 +371,7 @@ on('POST', '/radar/items/:id/reskin', (m) => {
   }))
   db.ideas.unshift(...ideas)
   return { rank_item_id: it.id, teardown_id: t.id, ref_title: it.title, idea_ids: ideas.map((x) => x.id), ideas, warnings: ideas.flatMap((x) => x.source!.warnings.map((w) => `《${x.title}》：${w}`)) }
-})
+}
 on('GET', '/radar/config', () => db.radarConfig)
 on('PUT', '/radar/config', (_m, b) => (db.radarConfig = { ...db.radarConfig, ...b }))
 
@@ -519,7 +537,7 @@ on('POST', '/chapters/:id/adopt-variant', (m, b) => {
   recalc(c.book_id)
   return c
 })
-on('POST', '/chapters/:id/commit', (m) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); if (c.variants?.length) throw new HttpErr(409, '请先采纳一个版本再提交'); c.status = 'committed'; c.updated_at = now(); return c })
+on('POST', '/chapters/:id/commit', (m) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); if (c.variants?.length) throw new HttpErr(409, '请先采纳一个版本再提交'); return createJob('chapter_commit', c.book_id, 1200, ['生成本章摘要并写入底账'], () => { c.status = 'committed'; c.updated_at = now(); return { chapter_id: c.id, number: c.number, chapter: c } }) })
 
 on('GET', '/books/:id/foreshadows', (m) => db.foreshadows.filter((f) => f.book_id === +m[1]))
 

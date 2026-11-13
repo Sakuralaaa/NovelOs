@@ -9,6 +9,8 @@ export interface Job {
   result: Record<string, any> | null
   error: string | null
   book_id: number | null
+  /** 任务关联的对象，例如 `rank_item:12`（v0.7.1 榜单仿写任务） */
+  ref?: string
   created_at: string
   updated_at: string
 }

@@ -888,7 +888,8 @@ def mock_reskin(meta: dict[str, Any]) -> str:
     sets = RESKIN_SETS_F if gender == "female" else RESKIN_SETS
     ref = str(meta.get("title") or "原书")
     ideas = []
-    for place, who, item, power in sets[:int(meta.get("count") or 3)]:
+    start = int(meta.get("index") or 0)  # v0.7.1：逐个生成，index 表示这一批里的第几个
+    for place, who, item, power in sets[start:start + int(meta.get("count") or 3)]:
         ideas.append({
             "title": f"{who}的{item[-2:]}能看穿一切" if len(item) >= 2 else f"{who}翻身记",
             "logline": f"{who}在{place}被所有人看不起，{item}让他{power}，一步步把欠他的都拿回来。",

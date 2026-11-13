@@ -252,7 +252,7 @@ def test_mock_pipeline_passes_state_between_scenes(client: TestClient, monkeypat
 
     # 第 2 章第一个场景从第 1 章的结束账本接（提交后账本仍保留）
     if not r.get("committed"):
-        assert client.post(f"/api/chapters/{r['chapter_id']}/commit").status_code == 200
+        wait_job(client, client.post(f"/api/chapters/{r['chapter_id']}/commit").json())
     assert client.get(f"/api/chapters/{r['chapter_id']}").json()["changes"]["end_state"]["cast"]
     seen.clear()
     wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next").json(), timeout=120)

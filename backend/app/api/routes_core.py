@@ -37,10 +37,15 @@ def health() -> dict[str, str]:
 # ------------------------------------------------------------------ jobs
 
 @router.get("/jobs")
-def list_jobs(book_id: int | None = None, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def list_jobs(book_id: int | None = None, kind: str | None = None, ref: str | None = None,
+              s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     q = select(Job)
     if book_id is not None:
         q = q.where(Job.book_id == book_id)
+    if kind:
+        q = q.where(Job.kind == kind)
+    if ref:
+        q = q.where(Job.ref == ref)
     return [job_out(j) for j in s.exec(q.order_by(Job.id.desc()).limit(50))]  # type: ignore[union-attr]
 
 
@@ -279,6 +284,31 @@ def radar_config_put(body: RadarConfigIn, s: Session = Depends(get_session)) -> 
 
 
 # ------------------------------------------------------------------ v0.7：榜单仿写（只学结构）
+# v0.7.1：拆解 / 深度拆解 / 换皮选题都走任务系统，立即返回 Job（避免 Cloudflare 等代理约 100 秒的超时，524）。
+# 结果在 Job.result 里；Job.ref = "rank_item:{id}"，可用 GET /api/radar/items/{id}/jobs 或 GET /api/jobs?ref= 找回进行中的任务。
+
+def _rank_ref(item_id: int) -> str:
+    return f"rank_item:{item_id}"
+
+
+def _check_rank_item(item_id: int) -> None:
+    from app.models.tables import RankItem
+
+    with session_scope() as s:
+        if s.get(RankItem, item_id) is None:
+            raise HTTPException(404, "榜单条目不存在")
+
+
+def _submit_rank_job(kind: str, item_id: int, fn: Any, dedupe: bool = True) -> dict[str, Any]:
+    from app.jobs.manager import find_active
+
+    ref = _rank_ref(item_id)
+    if dedupe:
+        running = find_active(kind, ref)
+        if running is not None:  # 同一本书同类任务还在跑：直接返回它，不重复调用模型
+            return job_out(running)
+    return job_out(submit(kind, fn, ref=ref))
+
 
 @router.get("/radar/items/{item_id}/teardown")
 def radar_teardown_get(item_id: int) -> dict[str, Any]:
@@ -287,28 +317,43 @@ def radar_teardown_get(item_id: int) -> dict[str, Any]:
     return imitate.get_teardown(item_id)
 
 
+@router.get("/radar/items/{item_id}/jobs")
+def radar_item_jobs(item_id: int, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    """这本书的仿写任务（radar_teardown / radar_deep / radar_reskin），新的在前，最多 20 条。"""
+    q = select(Job).where(Job.ref == _rank_ref(item_id)).order_by(Job.id.desc()).limit(20)  # type: ignore[union-attr]
+    return [job_out(j) for j in s.exec(q)]
+
+
 @router.post("/radar/items/{item_id}/teardown")
-def radar_teardown(item_id: int, refresh: bool = Query(False)) -> dict[str, Any]:
-    """拆解（按榜单条目缓存，refresh=true 重新拆）。"""
+async def radar_teardown(item_id: int, refresh: bool = Query(False)) -> dict[str, Any]:
+    """拆解（按榜单条目缓存，refresh=true 重新拆）。返回 Job，result 为拆解（同 GET teardown）。"""
     from app.services import imitate
 
-    return imitate.teardown(item_id, refresh=refresh)
+    _check_rank_item(item_id)
+    return _submit_rank_job("radar_teardown", item_id, lambda ctx: imitate.teardown(item_id, refresh=refresh, progress=ctx.progress))
 
 
 @router.post("/radar/items/{item_id}/deep")
-def radar_teardown_deep(item_id: int, body: TeardownDeepIn) -> dict[str, Any]:
-    """深度拆解：作者贴的试读原文 ≤20000 字（超限 400）；原文不落库。"""
+async def radar_teardown_deep(item_id: int, body: TeardownDeepIn) -> dict[str, Any]:
+    """深度拆解：作者贴的试读原文 ≤20000 字（超限/为空同步返回 400）；原文不落库。返回 Job，result 为拆解。"""
     from app.services import imitate
 
-    return imitate.deep(item_id, body.text)
+    _check_rank_item(item_id)
+    text = imitate.check_deep_text(body.text)
+    return _submit_rank_job("radar_deep", item_id, lambda ctx: imitate.deep(item_id, text, progress=ctx.progress), dedupe=False)
 
 
 @router.post("/radar/items/{item_id}/reskin")
-def radar_reskin(item_id: int) -> dict[str, Any]:
-    """出 3 个换皮选题并保存为选题；建书走 POST /api/ideas/{id}/adopt。"""
+async def radar_reskin(item_id: int) -> dict[str, Any]:
+    """出 3 个换皮选题并保存为选题（返回 Job，逐个生成并汇报进度）；result 含 idea_ids 与 ideas。建书走 POST /api/ideas/{id}/adopt。"""
+    _check_rank_item(item_id)
+    return _submit_rank_job("radar_reskin", item_id, lambda ctx: _reskin_job(item_id, ctx))
+
+
+def _reskin_job(item_id: int, ctx: Any) -> dict[str, Any]:
     from app.services import imitate, tropes
 
-    r = imitate.reskin(item_id)
+    r = imitate.reskin(item_id, progress=ctx.progress)
     with session_scope() as s:
         tl = tropes.global_tropes(s)
         ideas = [idea_out(i, tl) for i in (s.get(Idea, x) for x in r["idea_ids"]) if i is not None]

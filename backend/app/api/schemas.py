@@ -343,7 +343,7 @@ class TeardownDeepIn(BaseModel):
 def job_out(j: Job) -> dict[str, Any]:
     return {
         "id": j.id, "kind": j.kind, "status": j.status, "progress": j.progress, "message": j.message,
-        "result": j.result, "error": j.error, "book_id": j.book_id,
+        "result": j.result, "error": j.error, "book_id": j.book_id, "ref": j.ref or "",
         "created_at": iso(j.created_at), "updated_at": iso(j.updated_at),
     }
 

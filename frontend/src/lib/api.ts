@@ -2,10 +2,13 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
-  OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, ReskinResult, Routing, Teardown, Style, TrendTopic, WritingSettings,
+  OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
 } from './types'
 
 export interface AuthStatus { enabled: boolean; authenticated: boolean; username: string; managed_by_env: boolean; min_password_len: number }
+
+/** 502/504/524：通常是 Cloudflare / Nginx 等反向代理等不及后端（模型生成慢）先断开了，后端任务可能还在跑 */
+export const PROXY_TIMEOUT_MSG = '服务器等待模型超时（可能被 Cloudflare 等代理截断），任务可能仍在后台运行'
 
 export class ApiError extends Error {
   status: number
@@ -40,7 +43,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
       const j = await res.json()
       if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
     } catch { /* ignore */ }
-    if (res.status === 502 || res.status === 504) msg = '后端服务暂时不可用，请稍后再试'
+    if (res.status === 502 || res.status === 504 || res.status === 524) msg = PROXY_TIMEOUT_MSG
     if (res.status === 401 && !url.startsWith('/auth/')) window.dispatchEvent(new Event('novelos:unauthorized'))
     throw new ApiError(res.status, msg)
   }
@@ -89,9 +92,12 @@ export const api = {
   saveRadarConfig: (b: RadarConfig) => put<RadarConfig>('/radar/config', b),
   // v0.7：榜单仿写（同步接口）
   teardown: (itemId: number) => get<Teardown>(`/radar/items/${itemId}/teardown`),
-  runTeardown: (itemId: number, refresh = false) => post<Teardown>(`/radar/items/${itemId}/teardown${qs({ refresh: refresh || undefined })}`),
-  deepTeardown: (itemId: number, text: string) => post<Teardown>(`/radar/items/${itemId}/deep`, { text }),
-  reskin: (itemId: number) => post<ReskinResult>(`/radar/items/${itemId}/reskin`),
+  /** v0.7.1 起以下三个都是任务接口：立即返回 Job，结果在 Job.result（拆解为 Teardown，换皮为 ReskinResult） */
+  runTeardown: (itemId: number, refresh = false) => post<Job>(`/radar/items/${itemId}/teardown${qs({ refresh: refresh || undefined })}`),
+  deepTeardown: (itemId: number, text: string) => post<Job>(`/radar/items/${itemId}/deep`, { text }),
+  reskin: (itemId: number) => post<Job>(`/radar/items/${itemId}/reskin`),
+  /** 这本书的仿写任务（新的在前），面板重新打开时用来找回进行中的任务和上次的结果 */
+  itemJobs: (itemId: number) => get<Job[]>(`/radar/items/${itemId}/jobs`),
 
   books: () => get<Book[]>('/books'),
   book: (id: number) => get<Book>(`/books/${id}`),
@@ -135,7 +141,8 @@ export const api = {
   humanizeChapter: (id: number) => post<Job>(`/chapters/${id}/humanize`),
   thickenChapter: (id: number) => post<Job>(`/chapters/${id}/thicken`),
   adoptVariant: (id: number, variantId: number) => post<Chapter>(`/chapters/${id}/adopt-variant`, { variant_id: variantId }),
-  commitChapter: (id: number) => post<Chapter>(`/chapters/${id}/commit`),
+  /** v0.7.1 起是任务接口（要调模型生成摘要），result = { chapter_id, number, chapter } */
+  commitChapter: (id: number) => post<Job>(`/chapters/${id}/commit`),
 
   style: (bookId: number) => get<Style>(`/books/${bookId}/style`),
   saveStyle: (bookId: number, b: Partial<Style>) => put<Style>(`/books/${bookId}/style`, b),
@@ -234,7 +241,7 @@ export const qk = {
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
   teardown: (itemId: number) => ['radar', 'teardown', itemId] as const,
-  reskin: (itemId: number) => ['radar', 'reskin', itemId] as const,
+  itemJobs: (itemId: number) => ['radar', 'jobs', itemId] as const,
   books: ['books'] as const,
   book: (id: number) => ['book', id] as const,
   ideas: ['ideas'] as const,

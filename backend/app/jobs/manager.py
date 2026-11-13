@@ -58,9 +58,9 @@ def book_lock(book_id: int) -> threading.Lock:
         return _book_locks[book_id]
 
 
-def create_job(kind: str, book_id: int | None = None, message: str = "排队中") -> Job:
+def create_job(kind: str, book_id: int | None = None, message: str = "排队中", ref: str = "") -> Job:
     with session_scope() as s:
-        job = Job(kind=kind, book_id=book_id, status="queued", message=message)
+        job = Job(kind=kind, book_id=book_id, status="queued", message=message, ref=ref)
         s.add(job)
         s.commit()
         s.refresh(job)
@@ -109,9 +109,16 @@ def _run_sync(job_id: int, book_id: int | None, fn: Worker, lock_book: bool) -> 
             lock.release()
 
 
-def submit(kind: str, fn: Worker, book_id: int | None = None, lock_book: bool = False) -> Job:
-    """创建 Job 并在后台运行。必须在事件循环中调用（async 路由）。"""
-    job = create_job(kind, book_id)
+def find_active(kind: str, ref: str) -> Job | None:
+    """同一对象上同类、还在排队/运行的任务（用来去重：重复点击直接返回已有任务）。"""
+    with session_scope() as s:
+        return s.exec(select(Job).where(Job.kind == kind, Job.ref == ref, Job.status.in_(["queued", "running"]))  # type: ignore[attr-defined]
+                      .order_by(Job.id.desc())).first()  # type: ignore[union-attr]
+
+
+def submit(kind: str, fn: Worker, book_id: int | None = None, lock_book: bool = False, ref: str = "") -> Job:
+    """创建 Job 并在后台运行。必须在事件循环中调用（async 路由）。ref 标记任务关联的对象（如 "rank_item:12"）。"""
+    job = create_job(kind, book_id, ref=ref)
     job_id = job.id or 0
 
     async def runner() -> None:

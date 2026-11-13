@@ -58,6 +58,7 @@ class Job(SQLModel, table=True):
     result: Optional[Any] = _json_dict_nullable()
     error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     book_id: Optional[int] = Field(default=None, index=True)
+    ref: str = ""  # 任务关联的对象，例如 "rank_item:12"（v0.7.1：榜单仿写任务按条目查进行中的任务）
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

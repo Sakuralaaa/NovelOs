@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from sqlmodel import Session, select
@@ -27,6 +28,13 @@ OVERLAP_N = 8  # 连续 8 字相同算一处重合
 OVERLAP_WARN = 1  # 重合片段数 ≥ 这个值就加 warning
 TITLE_OVERLAP_N = 4  # 书名连续 4 字相同就提醒
 RESKIN_COUNT = 3
+
+Progress = Callable[[int, str], None] | None  # 任务进度回调：JobContext.progress(pct, message)
+
+
+def _report(progress: Progress, pct: int, message: str) -> None:
+    if progress is not None:
+        progress(pct, message)
 
 CONFLICT_WORDS = ("退婚", "废物", "羞辱", "嘲笑", "嘲讽", "冷笑", "欺负", "威胁", "逼", "跪下", "滚", "打断", "耳光", "杀", "动手", "挑衅",
                   "看不起", "瞧不起", "背叛", "陷害", "赶出")
@@ -116,7 +124,7 @@ def _strs(v: Any, k: int = 8, n: int = 80) -> list[str]:
 
 # ------------------------------------------------------------------ 1. 拆解（只用公开信息）
 
-def teardown(rank_item: RankItem | int, refresh: bool = False) -> dict[str, Any]:
+def teardown(rank_item: RankItem | int, refresh: bool = False, progress: Progress = None) -> dict[str, Any]:
     with session_scope() as s:
         it = _item_dict(s, rank_item)
         row = _row(s, it["id"])
@@ -132,6 +140,7 @@ def teardown(rank_item: RankItem | int, refresh: bool = False) -> dict[str, Any]
                 s.commit()
                 s.refresh(r)
                 return teardown_out(r, cached=True)
+    _report(progress, 10, f"拆解中：《{it['title']}》的爽点公式、金手指、人设")
     user = render("teardown", gender_label=common.GENDER_LABEL.get(it["gender"], it["gender"]), title=it["title"],
                   category=it["category"] or "未分类", tags="、".join(it.get("tags") or []) or "（无）",
                   abstract=it["abstract"] or "（无简介）", read_count=it["read_count"], rank=it["rank"], rank_diff=it["rank_diff"])
@@ -152,6 +161,7 @@ def teardown(rank_item: RankItem | int, refresh: bool = False) -> dict[str, Any]
     }
     if not td["payoff_formula"] and not td["transferable"]:
         raise ValueError("模型没有返回有效的拆解")
+    _report(progress, 90, "检查和简介的重合并保存")
     segs = overlap_segments(_dump(td), it["abstract"] or "")
     td["warnings"] = [f"拆解里有 {len(segs)} 处和简介原句连续 {OVERLAP_N} 字相同：{'、'.join(x[:20] for x in segs[:3])}"] if len(segs) >= OVERLAP_WARN else []
     with session_scope() as s:
@@ -222,20 +232,28 @@ def text_stats(text: str) -> dict[str, Any]:
             "first_conflict": locate(CONFLICT_WORDS), "first_cheat": locate(CHEAT_WORDS)}
 
 
-def deep(rank_item: RankItem | int, text: str) -> dict[str, Any]:
+def check_deep_text(text: str) -> str:
+    """校验深度拆解原文（为空/超过 20000 字抛 ValueError → 400），返回去掉首尾空白的原文。"""
     text = (text or "").strip()
     if not text:
         raise ValueError("原文不能为空")
     n = _count(text)
     if n > DEEP_MAX_CHARS:
         raise ValueError(f"原文 {n} 字，超过 {DEEP_MAX_CHARS} 字上限，请只贴前几章")
+    return text
+
+
+def deep(rank_item: RankItem | int, text: str, progress: Progress = None) -> dict[str, Any]:
+    text = check_deep_text(text)
     with session_scope() as s:
         it = _item_dict(s, rank_item)
+    _report(progress, 5, "统计按章字数与对白比例")
     st = text_stats(text)
     stats_text = "\n".join(f"{r['index']}. {r['title']}：{r['words']} 字，对白 {round(100 * r['dialogue_ratio'])}%" for r in st["chapters"])
     for key, label in (("first_conflict", "首个冲突关键词"), ("first_cheat", "首个金手指关键词")):
         h = st[key]
         stats_text += f"\n{label}：" + (f"「{h['keyword']}」在第 {h['at_char']} 字（第 {h['chapter']} 章）" if h else "未出现")
+    _report(progress, 15, f"逐章拆解中（共 {len(st['chapters'])} 章）")
     user = render("teardown_deep", title=it["title"], category=it["category"] or "未分类", stats=stats_text, text=text)
     data = get_gateway().chat_json("teardown_deep", system_prompt("teardown_deep"), user,
                                    meta={"chapters": len(st["chapters"]), "title": it["title"], "stats": st}, temperature=0.3)
@@ -249,6 +267,7 @@ def deep(rank_item: RankItem | int, text: str) -> dict[str, Any]:
                  "hook": _str(by_idx.get(r["index"], {}).get("hook"))} for r in st["chapters"]]
     model_part = {"chapters": [{k: c[k] for k in ("conflict", "payoff", "hook")} for c in chapters],
                   "rhythm": _str(data.get("rhythm")), "learnable": _strs(data.get("learnable"))}
+    _report(progress, 90, "检查和原文的重合并保存")
     segs = overlap_segments(_dump(model_part), text)
     warnings = [f"拆解里有 {len(segs)} 处和原文连续 {OVERLAP_N} 字相同（只该学结构）：{'、'.join(x[:20] for x in segs[:3])}"] if len(segs) >= OVERLAP_WARN else []
     out = {"chapters": chapters, "total_words": st["total_words"], "dialogue_ratio": st["dialogue_ratio"],
@@ -297,11 +316,16 @@ def _self_check(idea: dict[str, Any], it: dict[str, Any], td: dict[str, Any], tl
     return src, warnings
 
 
-def reskin_preview(rank_item: RankItem | int) -> dict[str, Any]:
-    """出 3 个换皮选题（不落库）：返回 {teardown, ideas:[Idea 字段 + scores + source]}。"""
+def reskin_preview(rank_item: RankItem | int, progress: Progress = None) -> dict[str, Any]:
+    """出 3 个换皮选题（不落库）：返回 {teardown, ideas:[Idea 字段 + scores + source]}。
+
+    v0.7.1：逐个生成（每次调用只出 1 个，并把本批已出的选题告诉模型避开），便于汇报进度、缩短单次调用时长。
+    第一个就失败直接报错；后面的失败只少出几个，由调用方加提醒。
+    """
     from app.services import planning
 
-    td_out = teardown(rank_item)
+    _report(progress, 3, "读取拆解")
+    td_out = teardown(rank_item, progress=(lambda p, m: _report(progress, 3 + p // 5, m)) if progress else None)
     td = td_out["teardown"] or {}
     with session_scope() as s:
         it = _item_dict(s, td_out["rank_item_id"])
@@ -316,15 +340,37 @@ def reskin_preview(rank_item: RankItem | int) -> dict[str, Any]:
         f"目标读者：{td.get('target_readers', '')}", f"可迁移结构要素：{'；'.join(td.get('transferable') or [])}",
         f"必须换掉的元素：{'；'.join(td.get('must_replace') or [])}",
     ])
-    user = render("reskin", gender_label=common.GENDER_LABEL.get(it["gender"], it["gender"]), title=it["title"],
-                  category=it["category"] or "未分类", abstract=it["abstract"] or "（无）", teardown=td_text, existing=existing) + tropes.prompt_block(tl)
-    data = get_gateway().chat_json("reskin", system_prompt("reskin"), user,
-                                   meta={"title": it["title"], "category": it["category"], "gender": it["gender"], "count": RESKIN_COUNT,
-                                         "must_replace": td.get("must_replace") or [], "banned_keywords": tropes.keywords(tl)})
-    items = data.get("ideas") if isinstance(data, dict) else data
-    items = [x for x in (items if isinstance(items, list) else []) if isinstance(x, dict) and x.get("title")][:RESKIN_COUNT]
+    items: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for k in range(RESKIN_COUNT):
+        _report(progress, 25 + k * 20, f"生成选题 {k + 1}/{RESKIN_COUNT}")
+        batch = "\n".join(f"- 《{x['title']}》{_str(x.get('logline'), 60)}" for x in items) or "（这是第一个）"
+        user = render("reskin", gender_label=common.GENDER_LABEL.get(it["gender"], it["gender"]), title=it["title"],
+                      category=it["category"] or "未分类", abstract=it["abstract"] or "（无）", teardown=td_text, existing=existing,
+                      index=k + 1, total=RESKIN_COUNT, batch=batch) + tropes.prompt_block(tl)
+        try:
+            data = get_gateway().chat_json("reskin", system_prompt("reskin"), user,
+                                           meta={"title": it["title"], "category": it["category"], "gender": it["gender"], "count": 1,
+                                                 "index": k, "must_replace": td.get("must_replace") or [],
+                                                 "banned_keywords": tropes.keywords(tl)})
+        except Exception as e:  # noqa: BLE001
+            if not items:
+                raise
+            errors.append(f"第 {k + 1} 个选题生成失败：{e}")
+            continue
+        got = data.get("ideas") if isinstance(data, dict) and "ideas" in data else data
+        if isinstance(got, dict):
+            got = [got]
+        got = [x for x in (got if isinstance(got, list) else []) if isinstance(x, dict) and x.get("title")]
+        seen = {str(x["title"]) for x in items}
+        got = [x for x in got if str(x["title"]) not in seen]
+        if not got:
+            errors.append(f"第 {k + 1} 个选题模型没有返回")
+            continue
+        items.append(got[0])
     if not items:
         raise ValueError("模型没有返回换皮选题")
+    _report(progress, 88, "评分与相似点自检")
     reviewed = planning._review_scores(items, it["gender"], trends)
     ideas: list[dict[str, Any]] = []
     for n, x in enumerate(items, 1):
@@ -338,7 +384,7 @@ def reskin_preview(rank_item: RankItem | int) -> dict[str, Any]:
             "arc": _strs(x.get("arc"), 6, 120), "genre": g, "gender": it["gender"],
             "scores": planning._score(reviewed.get(n) or {}, planning._heat_for(g, trends), title), "source": src,
         })
-    return {"rank_item_id": it["id"], "teardown_id": td_out["id"], "ref_title": it["title"], "teardown": td, "ideas": ideas}
+    return {"rank_item_id": it["id"], "teardown_id": td_out["id"], "ref_title": it["title"], "teardown": td, "ideas": ideas, "errors": errors}
 
 
 def save_ideas(ideas: list[dict[str, Any]]) -> list[int]:
@@ -354,11 +400,13 @@ def save_ideas(ideas: list[dict[str, Any]]) -> list[int]:
     return ids
 
 
-def reskin(rank_item: RankItem | int) -> dict[str, Any]:
+def reskin(rank_item: RankItem | int, progress: Progress = None) -> dict[str, Any]:
     """出 3 个换皮选题并保存为 Idea（之后走现有 POST /api/ideas/{id}/adopt 建书）。"""
-    pv = reskin_preview(rank_item)
+    pv = reskin_preview(rank_item, progress=progress)
+    _report(progress, 96, "保存到选题库")
     ids = save_ideas(pv["ideas"])
     warnings = [f"《{x['title']}》：{w}" for x in pv["ideas"] for w in x["source"]["warnings"]]
+    warnings += pv.get("errors") or []
     if len(ids) < RESKIN_COUNT:
         warnings.append(f"模型只给了 {len(ids)} 个选题")
     return {"rank_item_id": pv["rank_item_id"], "teardown_id": pv["teardown_id"], "ref_title": pv["ref_title"],

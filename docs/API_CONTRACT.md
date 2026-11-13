@@ -10,9 +10,10 @@
 ## Job
 ```
 Job { id, kind: string, status: "queued"|"running"|"succeeded"|"failed", progress: 0-100, message: string,
-      result: object|null, error: string|null, book_id: int|null, created_at, updated_at }
+      result: object|null, error: string|null, book_id: int|null, ref: string, created_at, updated_at }
 ```
-- `GET /api/jobs?book_id=` → Job[]（最新在前，最多 50）
+- `ref`（v0.7.1）：任务关联的对象，如 `rank_item:12`；没有时为空串。
+- `GET /api/jobs?book_id=&kind=&ref=` → Job[]（最新在前，最多 50；三个过滤都可选）
 - `GET /api/jobs/{id}` → Job
 
 ## 模型渠道（设置页）
@@ -90,7 +91,7 @@ ChangeSet { new_entities[], state_changes[], foreshadow: [{action:"plant"|"advan
 - `PUT /api/chapters/{id}` (title, content) → Chapter（人工修改）
 - `POST /api/books/{id}/chapters/write-next` → Job（取下一章细纲 → 写 → 检查 → 审稿 → 人味 lint → 定点重写 → 提交；result: {chapter_id}）
 - `POST /api/books/{id}/chapters/write-batch` (count ≤ 10) → Job
-- `POST /api/chapters/{id}/review` → Job；`POST /api/chapters/{id}/humanize` → Job；`POST /api/chapters/{id}/commit` → Chapter
+- `POST /api/chapters/{id}/review` → Job；`POST /api/chapters/{id}/humanize` → Job；`POST /api/chapters/{id}/commit` → Job（v0.7.1 起；见文末 v0.7.1 增补）
 
 ## 伏笔
 ```
@@ -165,11 +166,29 @@ Teardown { id, rank_item_id, book_id_ext, title, created_at, cached: bool,
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/radar/items/{id}/teardown?refresh=` | 只用书名/简介/标签/品类/热度/名次变化拆解 → Teardown。按条目缓存（同一本书在别的快照拆过也复用，`cached=true`）；`refresh=true` 重拆 |
+| POST | `/api/radar/items/{id}/teardown?refresh=` | （v0.7.1 起返回 Job，result 为 Teardown）只用书名/简介/标签/品类/热度/名次变化拆解 → Teardown。按条目缓存（同一本书在别的快照拆过也复用，`cached=true`）；`refresh=true` 重拆 |
 | GET | `/api/radar/items/{id}/teardown` | 读缓存 → Teardown；还没拆过 404 |
-| POST | `/api/radar/items/{id}/deep` | `{text}` 试读原文，去空白后 ≤20000 字（超限或为空 400）→ Teardown（`deep` 已填）。字数/对白比例/首个冲突与金手指关键词位置由程序算（`at_char` 为去空白后第几字），每章冲突/爽点/钩子由模型补；原文不落库；模型输出与原文连续 8 字相同时 `warnings` 提醒 |
-| POST | `/api/radar/items/{id}/reskin` | 基于拆解出 3 个换皮选题并存为 Idea → `{rank_item_id, teardown_id, ref_title, idea_ids[], ideas: Idea[], warnings[]}`；建书沿用 `POST /api/ideas/{id}/adopt` |
+| POST | `/api/radar/items/{id}/deep` | （v0.7.1 起返回 Job，result 为 Teardown）`{text}` 试读原文，去空白后 ≤20000 字（超限或为空 400）→ Teardown（`deep` 已填）。字数/对白比例/首个冲突与金手指关键词位置由程序算（`at_char` 为去空白后第几字），每章冲突/爽点/钩子由模型补；原文不落库；模型输出与原文连续 8 字相同时 `warnings` 提醒 |
+| POST | `/api/radar/items/{id}/reskin` | （v0.7.1 起返回 Job，result 为下述结构）基于拆解出 3 个换皮选题并存为 Idea → `{rank_item_id, teardown_id, ref_title, idea_ids[], ideas: Idea[], warnings[]}`；建书沿用 `POST /api/ideas/{id}/adopt` |
 
 Idea 输出增加 `source`：普通选题为 `null`；仿写选题为 `{kind:"reskin", rank_item_id, ref_title, ref_book_id_ext, ref_category, kept[], changed[], self_check[{aspect, original, ours, similar}], overlap:{count, title, segments[]}, warnings[]}`。`warnings` 包括：与原书书名/简介连续 8 字相同、书名与原书连续 4 字相同、仍含「必须换掉的元素」、命中禁用套路、模型自检仍偏像。只提醒，不拦截。
 
 Agent 新增提案工具 `imitate_rank_book`（`{rank_item_id?, title?}`）：拆解并出 3 个换皮选题，提案 kind=`reskin_ideas`，采纳后存进选题库（不改当前书），撤回删除未建书的那几个选题。
+
+## v0.7.1 增补：长耗时模型接口改为任务（修 Cloudflare 524）
+
+部署在 Cloudflare 等反向代理后面时，单个 HTTP 请求约 100 秒没响应就会被代理断开（524；Nginx 等为 502/504）。下面这些接口原来同步等模型，改为**立即返回 Job**，结果放在 `Job.result`，前端轮询 `GET /api/jobs/{id}`：
+
+| 方法 | 路径 | Job.kind | Job.result | 进度文字（Job.message） |
+|---|---|---|---|---|
+| POST | `/api/radar/items/{id}/teardown?refresh=` | `radar_teardown` | Teardown（同 GET teardown；命中缓存时任务很快完成，`cached=true`） | 拆解中：《…》的爽点公式、金手指、人设 → 检查和简介的重合并保存 |
+| POST | `/api/radar/items/{id}/deep` | `radar_deep` | Teardown（`deep` 已填） | 统计按章字数与对白比例 → 逐章拆解中（共 N 章）→ 检查和原文的重合并保存 |
+| POST | `/api/radar/items/{id}/reskin` | `radar_reskin` | `{rank_item_id, teardown_id, ref_title, idea_ids[], ideas: Idea[], warnings[]}` | 读取拆解（没拆过时先拆）→ 生成选题 1/3 → 2/3 → 3/3 → 评分与相似点自检 → 保存到选题库 |
+| POST | `/api/chapters/{id}/commit` | `chapter_commit` | `{chapter_id, number, chapter: Chapter（不含正文）}` | 生成本章摘要并写入底账 |
+
+- 同步校验不变：榜单条目/章节不存在 404；深度拆解原文为空或超过 20000 字 400；章节正文为空 409。
+- 三个仿写任务的 `Job.ref = "rank_item:{id}"`。同一本书同类任务（teardown / reskin）还在排队或运行时，再次 POST 直接返回那个进行中的 Job，不重复调用模型；deep 每次都新建任务。
+- 新增 `GET /api/radar/items/{id}/jobs` → Job[]：这本书的仿写任务（最新在前，最多 20）。前端打开面板时用它找回进行中的任务、进度，以及最近一次成功的换皮结果。
+- 换皮选题改为逐个生成（每次调用只出 1 个，并把本批已出的选题告诉模型拉开差异）。第 1 个失败则任务失败（`Job.error` 为原因）；后面的失败只少出几个，`warnings` 里写明「第 N 个选题生成失败：…」和「模型只给了 N 个选题」。
+- Agent 工具 `imitate_rank_book` 不变（它本来就在 Agent 的后台任务里运行）。
+- 前端：请求返回 502 / 504 / 524 时统一提示「服务器等待模型超时（可能被 Cloudflare 等代理截断），任务可能仍在后台运行」；任务失败显示后端 `Job.error`。

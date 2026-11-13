@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/misc'
 import { ErrorState } from '@/components/common/States'
-import { useDeepTeardown, useIsMutatingKey, useLastReskin, useReskin, useRunTeardown, useTeardown } from '@/hooks/queries'
+import { useDeepTeardown, useLastReskin, useReskin, useRunTeardown, useTeardown } from '@/hooks/queries'
 import type { DeepTeardown, Idea, KeywordHit, RankItem, ReskinResult, TeardownCore } from '@/lib/types'
 import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
 
@@ -49,21 +49,26 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
   const run = useRunTeardown(id)
   const reskin = useReskin(id)
   const last = useLastReskin(id)
-  const tearing = useIsMutatingKey(['teardown', id])
-  const reskinning = useIsMutatingKey(['reskin', id])
+  const tearing = run.busy
+  const reskinning = reskin.busy
   const td = q.data?.teardown ?? null
   const ideasRef = useRef<HTMLDivElement>(null)
 
-  // 第一次打开、还没拆过：自动拆一次
+  // 第一次打开、还没拆过、也没有进行中/刚失败的拆解任务：自动拆一次
   const auto = useRef(false)
   useEffect(() => {
-    if (!id || auto.current || q.isLoading || q.error || tearing) return
-    if (q.data === null || (q.data && !q.data.teardown)) { auto.current = true; run.mutate(false) }
-  }, [id, q.isLoading, q.data, q.error, tearing]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!id || auto.current || q.isLoading || q.error || !run.ready || tearing || run.error) return
+    if (q.data === null || (q.data && !q.data.teardown)) { auto.current = true; void run.run(false) }
+  }, [id, q.isLoading, q.data, q.error, run.ready, tearing, run.error]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const doReskin = () => reskin.mutate(undefined, {
-    onSuccess: () => setTimeout(() => ideasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60),
-  })
+  // 换皮任务完成后滚到选题区（面板开着时）
+  const wasReskinning = useRef(reskinning)
+  useEffect(() => {
+    if (wasReskinning.current && !reskinning && last) setTimeout(() => ideasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+    wasReskinning.current = reskinning
+  }, [reskinning, last])
+
+  const doReskin = () => { void reskin.run() }
   const openIdea = (i: Idea) => { onClose(); nav(`/ideas/${i.id}`) }
 
   return (
@@ -99,12 +104,13 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
               extra={td && (
                 <div className="flex items-center gap-2">
                   {q.data?.cached && <Badge tone="outline">缓存 · {fmtDateTime(q.data.created_at)}</Badge>}
-                  <Button size="xs" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={tearing} onClick={() => run.mutate(true)}>重新拆解</Button>
+                  <Button size="xs" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} loading={tearing} onClick={() => void run.run(true)}>重新拆解</Button>
                 </div>
               )}
             />
             {q.isLoading || (tearing && !td) ? (
-              <Thinking text="正在拆这本书的爽点、金手指和开篇……" sub="通常要 20–60 秒，可以先关掉面板，结果会留着。" />
+              <Thinking text="正在拆这本书的爽点、金手指和开篇……" sub="后台任务，通常要 20–60 秒，可以先关掉面板，回来还能看到进度和结果。"
+                progress={tearing ? run.progress : undefined} message={run.message} />
             ) : q.error ? (
               <ErrorState error={q.error} onRetry={() => q.refetch()} className="py-10" />
             ) : !td ? (
@@ -112,18 +118,22 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
                 <div className="rounded-xl border border-dashed px-5 py-8 text-center">
                   <XCircle className="mx-auto h-7 w-7 text-danger/70" />
                   <div className="mt-2 text-[14px] font-semibold">拆解没成功</div>
-                  <p className="mx-auto mt-1 max-w-sm text-[12.5px] text-muted-foreground">{(run.error as any)?.message || '模型暂时没响应'}</p>
-                  <Button className="mt-4" size="sm" variant="primary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => run.mutate(false)}>再试一次</Button>
+                  <p className="mx-auto mt-1 max-w-sm break-words text-[12.5px] text-muted-foreground">{run.error}</p>
+                  <Button className="mt-4" size="sm" variant="primary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void run.run(false)}>再试一次</Button>
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed px-5 py-8 text-center">
-                  <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} onClick={() => run.mutate(false)}>开始拆解</Button>
+                  <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} onClick={() => void run.run(false)}>开始拆解</Button>
                 </div>
               )
             ) : (
-              <div className={cn('transition-opacity', tearing && 'pointer-events-none opacity-50')}>
-                <TeardownCards td={td} />
-              </div>
+              <>
+                {tearing && <JobProgress className="mb-3" message={run.message || '重新拆解中'} progress={run.progress} />}
+                {run.error && !tearing && <ErrorLine className="mb-3" text={`重新拆解失败：${run.error}`} />}
+                <div className={cn('transition-opacity', tearing && 'pointer-events-none opacity-50')}>
+                  <TeardownCards td={td} />
+                </div>
+              </>
             )}
 
             {td && (
@@ -133,7 +143,7 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
                 <div ref={ideasRef} className="scroll-mt-4">
                   <SectionTitle n={3} title="换皮选题" />
                   <IdeasSection
-                    busy={reskinning} error={reskin.error} result={last.data ?? null}
+                    busy={reskinning} error={reskin.error} result={last} progress={reskin.progress} message={reskin.message}
                     onRun={doReskin} onOpen={openIdea}
                     onAll={() => { onClose(); nav('/ideas') }}
                   />
@@ -148,7 +158,7 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
         <div className="flex items-center gap-3 border-t bg-surface/80 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
           <p className="hidden min-w-0 flex-1 text-[12.5px] text-muted-foreground sm:block">保留爽点结构，换掉人设、金手指外形和世界观，存进选题库。</p>
           <Button variant="primary" size="lg" className="flex-1 sm:flex-none" icon={<Lightbulb className="h-4 w-4" />} loading={reskinning} onClick={doReskin}>
-            {reskinning ? '正在想选题…' : last.data ? '再生成 3 个' : '生成 3 个换皮选题'}
+            {reskinning ? (reskin.message && reskin.message !== '排队中' ? `${reskin.message}…` : '正在想选题…') : last ? '再生成 3 个' : '生成 3 个换皮选题'}
           </Button>
         </div>
       )}
@@ -168,11 +178,32 @@ function SectionTitle({ n, title, extra }: { n: number; title: string; extra?: R
   )
 }
 
-function Thinking({ text, sub, rows = 3 }: { text: string; sub?: string; rows?: number }) {
+/** 后台任务进度：进度文字 + 进度条（来自 Job.progress / Job.message） */
+function JobProgress({ message, progress, className }: { message: string; progress: number; className?: string }) {
+  return (
+    <div className={cn('rounded-lg bg-primary-soft/60 px-3 py-2', className)}>
+      <div className="flex items-center gap-2 text-[12.5px] text-primary">
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+        <span className="min-w-0 flex-1 truncate">{message || '排队中'}</span>
+        <span className="num shrink-0 text-[11.5px] opacity-80">{Math.round(progress || 0)}%</span>
+      </div>
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-primary/10">
+        <div className="h-full rounded-full bg-primary/70 transition-[width] duration-500" style={{ width: `${Math.max(4, Math.min(100, progress || 0))}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function ErrorLine({ text, className }: { text: string; className?: string }) {
+  return <p className={cn('break-words rounded-lg bg-danger-soft/60 px-3 py-2 text-[12.5px] text-danger', className)}>{text}</p>
+}
+
+function Thinking({ text, sub, rows = 3, progress, message }: { text: string; sub?: string; rows?: number; progress?: number; message?: string }) {
   return (
     <div className="rounded-xl border bg-surface p-4">
       <div className="flex items-center gap-2 text-[13px] font-medium text-primary"><Loader2 className="h-4 w-4 animate-spin" />{text}</div>
       {sub && <p className="mt-1 pl-6 text-[12px] text-muted-foreground">{sub}</p>}
+      {progress !== undefined && <JobProgress className="mt-3" message={message || '排队中'} progress={progress} />}
       <div className="mt-4 space-y-2.5">
         <Skeleton className="h-16 rounded-lg" />
         <div className="grid gap-2.5 sm:grid-cols-2">{Array.from({ length: rows + 1 }).map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
@@ -253,10 +284,12 @@ function DeepSection({ itemId, deep }: { itemId: number; deep: DeepTeardown | nu
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
   const m = useDeepTeardown(itemId)
-  const busy = useIsMutatingKey(['teardown-deep', itemId])
+  const busy = m.busy
   const n = useMemo(() => bare(text), [text])
   const over = n > DEEP_LIMIT
-  const go = () => m.mutate(text, { onSuccess: () => setText('') })
+  // 任务提交成功就清空输入框（原文不保存）；进度和结果在下面显示，关掉面板也会继续
+  const go = async () => { if (await m.run(text)) setText('') }
+  useEffect(() => { if (busy) setOpen(true) }, [busy])
 
   return (
     <div className="mt-7">
@@ -294,10 +327,10 @@ function DeepSection({ itemId, deep }: { itemId: number; deep: DeepTeardown | nu
               <Info className="mt-[2px] h-3.5 w-3.5 shrink-0" />
               <span>NovelOS 不抓取番茄正文（平台禁止，正文字体也做了加密）。请粘贴你合法获得的文本；原文只用来计算和拆解，不保存。字数按去掉空白后计算。</span>
             </p>
-            {busy && <div className="flex items-center gap-2 rounded-lg bg-primary-soft/60 px-3 py-2 text-[12.5px] text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" />正在逐章拆解，字数多时要 1 分钟左右……</div>}
-            {m.error && !busy && <p className="rounded-lg bg-danger-soft/60 px-3 py-2 text-[12.5px] text-danger">{(m.error as any)?.message}</p>}
+            {busy && <JobProgress message={m.message ? `${m.message}（字数多时要 1 分钟左右，可以先关掉面板）` : '正在逐章拆解……'} progress={m.progress} />}
+            {m.error && !busy && <ErrorLine text={m.error} />}
             <div className="flex justify-end">
-              <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} loading={busy} disabled={!n || over} onClick={go}>开始深度拆解</Button>
+              <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} loading={busy} disabled={!n || over} onClick={() => void go()}>开始深度拆解</Button>
             </div>
           </div>
         )}
@@ -382,13 +415,15 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 
 // ---------------- 换皮选题 ----------------
 
-function IdeasSection({ busy, error, result, onRun, onOpen, onAll }: {
-  busy: boolean; error: unknown; result: ReskinResult | null; onRun: () => void; onOpen: (i: Idea) => void; onAll: () => void
+function IdeasSection({ busy, error, result, progress, message, onRun, onOpen, onAll }: {
+  busy: boolean; error: string | null; result: ReskinResult | null; progress: number; message: string
+  onRun: () => void; onOpen: (i: Idea) => void; onAll: () => void
 }) {
   if (busy) {
     return (
       <div className="space-y-2.5">
         <div className="flex items-center gap-2 text-[13px] font-medium text-primary"><Loader2 className="h-4 w-4 animate-spin" />正在换皮：保留结构，换人设、金手指外形和世界观……</div>
+        <JobProgress message={message ? `${message}（后台任务，可以先关掉面板）` : '排队中'} progress={progress} />
         {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[92px] rounded-xl" />)}
       </div>
     )
@@ -397,13 +432,14 @@ function IdeasSection({ busy, error, result, onRun, onOpen, onAll }: {
     return (
       <div className="rounded-xl border border-dashed px-5 py-6 text-center">
         <p className="text-[13px] text-muted-foreground">基于上面的拆解，出 3 个结构相近、皮完全不同的选题，自动存进选题库，可以直接采纳建书。</p>
-        {!!error && <p className="mx-auto mt-3 max-w-sm rounded-lg bg-danger-soft/60 px-3 py-2 text-[12.5px] text-danger">{(error as any)?.message || '生成失败'}</p>}
+        {!!error && <p className="mx-auto mt-3 max-w-sm break-words rounded-lg bg-danger-soft/60 px-3 py-2 text-[12.5px] text-danger">{error}</p>}
         <Button className="mt-4" variant="soft" icon={<Lightbulb className="h-4 w-4" />} onClick={onRun}>{error ? '再试一次' : '生成 3 个换皮选题'}</Button>
       </div>
     )
   }
   return (
     <div className="space-y-2.5">
+      {!!error && <ErrorLine text={`最近一次生成失败：${error}（下面是上一次的结果）`} />}
       {result.ideas.map((i) => <IdeaCard key={i.id} idea={i} onOpen={() => onOpen(i)} />)}
       <Warnings items={result.warnings.filter((w) => !result.ideas.some((i) => w.startsWith(`《${i.title}》`)))} />
       <div className="flex items-center justify-between pt-1 text-[12.5px] text-muted-foreground">

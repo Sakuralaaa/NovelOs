@@ -552,8 +552,21 @@ def adopt_variant(chapter_id: int, body: AdoptVariantIn) -> dict[str, Any]:
 
 
 @router.post("/chapters/{chapter_id}/commit")
-def commit_chapter(chapter_id: int) -> dict[str, Any]:
-    return chapter_out(writing.commit_chapter(chapter_id))
+async def commit_chapter(chapter_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """原子提交（生成摘要要调一次模型）。v0.7.1 起返回 Job，result = {chapter_id, number, chapter}；
+    章节不存在 404、正文为空 409 仍同步返回。"""
+    c = s.get(Chapter, chapter_id)
+    if c is None:
+        raise HTTPException(404, "章节不存在")
+    if c.status != "committed" and not c.content.strip():
+        raise HTTPException(409, "章节正文为空；多版本章节请先 adopt 一个版本")
+    return job_out(submit("chapter_commit", lambda ctx: _commit_job(chapter_id, ctx), book_id=c.book_id, lock_book=True))
+
+
+def _commit_job(chapter_id: int, ctx: Any) -> dict[str, Any]:
+    ctx.progress(10, "生成本章摘要并写入底账")
+    ch = writing.commit_chapter(chapter_id)
+    return {"chapter_id": ch.id, "number": ch.number, "chapter": chapter_out(ch, with_content=False)}
 
 
 @router.get("/books/{book_id}/foreshadows")

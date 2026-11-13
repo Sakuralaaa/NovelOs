@@ -230,7 +230,7 @@ def test_chapter_rewrite_and_foreshadows(client: TestClient) -> None:
     r = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next").json(), timeout=120)["result"]
     cid = r["chapter_id"]
     if not r["committed"]:
-        client.post(f"/api/chapters/{cid}/commit")
+        wait_job(client, client.post(f"/api/chapters/{cid}/commit").json())
     fos = {f["desc"]: f for f in client.get(f"/api/books/{bid}/foreshadows").json()}
     assert fos[first["desc"]]["status"] == "planted" and fos[first["desc"]]["planted_ch"] == 1
     assert sum(1 for f in fos.values() if f["desc"] == first["desc"]) == 1  # 没有重复登记
@@ -381,7 +381,7 @@ def test_foreshadow_bugfixes_string_beats_and_commit_fallback(client: TestClient
         ch.changes = {"new_entities": [], "state_changes": [], "foreshadow": [], "warnings": []}
         s.add(ch)
         s.commit()
-    c = client.post(f"/api/chapters/{r['chapter_id']}/commit").json()
+    c = wait_job(client, client.post(f"/api/chapters/{r['chapter_id']}/commit").json())["result"]["chapter"]
     assert c["status"] == "committed"
     fos = client.get(f"/api/books/{bid}/foreshadows").json()
     descs = {f["desc"]: f for f in fos}

@@ -276,14 +276,22 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
       nav(`/books/${bookId}/chapters`, { replace: true })
     },
   })
+  // v0.7.1：提交要调一次模型生成摘要，改为后台任务（避免代理超时）；完成后刷新章节、伏笔
+  const committing = !!useActiveJob(`commit:${id}`)
   const commit = useMutation({
-    mutationFn: async () => { await save(); return api.commitChapter(id) },
-    meta: { errorTitle: '提交失败' },
-    onSuccess: (c) => {
-      qc.setQueryData(qk.chapter(id), (old: Chapter | undefined) => ({ ...(old ?? c), ...c, content: old?.content ?? c.content }))
-      qc.invalidateQueries({ queryKey: qk.chapters(bookId) }); qc.invalidateQueries({ queryKey: qk.book(bookId) }); qc.invalidateQueries({ queryKey: qk.foreshadows(bookId) })
-      toast.success(`第 ${c.number} 章已提交入账`, { description: '人物状态、伏笔已写入底账' })
+    mutationFn: async () => {
+      await save()
+      return start(api.commitChapter(id), {
+        key: `commit:${id}`, label: '提交入账',
+        successMsg: (j) => `第 ${j.result?.number ?? ''} 章已提交入账`,
+        onSuccess: (j) => {
+          const c = j.result?.chapter as Chapter | undefined
+          if (c) qc.setQueryData(qk.chapter(id), (old: Chapter | undefined) => ({ ...(old ?? c), ...c, content: old?.content ?? c.content }))
+          qc.invalidateQueries({ queryKey: qk.chapters(bookId) }); qc.invalidateQueries({ queryKey: qk.book(bookId) }); qc.invalidateQueries({ queryKey: qk.foreshadows(bookId) })
+        },
+      })
     },
+    meta: { errorTitle: '提交失败' },
   })
   const adopt = useMutation({
     mutationFn: (vid: number) => api.adoptVariant(id, vid),
@@ -381,7 +389,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                 footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rmDraft.isPending} onClick={() => rmDraft.mutate()}>删除</Button></>} />
             </Dialog>
             <Tip content={hasVariants ? '先采纳一个版本' : ch.status === 'committed' ? '已提交，修改后可再次提交' : '确认本章，人物状态与伏笔写入底账'}>
-              <span><Button size="sm" variant={ch.status === 'committed' ? 'secondary' : 'primary'} loading={commit.isPending} disabled={busy || hasVariants} icon={<CheckCheck className="h-3.5 w-3.5" />} onClick={() => commit.mutate()}><span className="hidden sm:inline">提交</span></Button></span>
+              <span><Button size="sm" variant={ch.status === 'committed' ? 'secondary' : 'primary'} loading={commit.isPending || committing} disabled={busy || hasVariants || committing} icon={<CheckCheck className="h-3.5 w-3.5" />} onClick={() => commit.mutate()}><span className="hidden sm:inline">提交</span></Button></span>
             </Tip>
             <Tip content={panelOpen ? '收起面板' : '展开面板'}>
               <Button size="icon-sm" variant="ghost" className="hidden xl:inline-flex" onClick={() => { setPanelOpen(!panelOpen); localStorage.setItem('novelos-panel', panelOpen ? '0' : '1') }} aria-label="面板">

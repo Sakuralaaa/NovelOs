@@ -167,7 +167,7 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     assert after["content"] != adopted["content"]
     wait_job(client, client.post(f"/api/chapters/{ch4['id']}/humanize").json())
     wait_job(client, client.post(f"/api/chapters/{ch4['id']}/review").json())
-    committed = client.post(f"/api/chapters/{ch4['id']}/commit").json()
+    committed = wait_job(client, client.post(f"/api/chapters/{ch4['id']}/commit").json())["result"]["chapter"]
     assert committed["status"] == "committed"
 
     # 人工修改
