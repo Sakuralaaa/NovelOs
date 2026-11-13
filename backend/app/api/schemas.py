@@ -333,6 +333,11 @@ class StyleIn(BaseModel):
     tone: str = ""
 
 
+class TeardownDeepIn(BaseModel):
+    """v0.7：作者贴的试读原文（≤20000 字，超限 400）。"""
+    text: str
+
+
 # ------------------------------------------------------------------ 输出
 
 def job_out(j: Job) -> dict[str, Any]:
@@ -357,7 +362,7 @@ def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:
 
 
 def rank_item_out(r: RankItem) -> dict[str, Any]:
-    return {"book_id_ext": r.book_id_ext, "title": r.title, "author": r.author, "category": r.category, "rank": r.rank,
+    return {"id": r.id, "book_id_ext": r.book_id_ext, "title": r.title, "author": r.author, "category": r.category, "rank": r.rank,
             "read_count": r.read_count, "word_count": r.word_count, "abstract": r.abstract, "tags": list(r.tags or []),
             "gender": r.gender, "rank_diff": r.rank_diff}
 
@@ -380,7 +385,7 @@ def idea_out(i: Idea, trope_list: list[dict[str, Any]] | None = None) -> dict[st
             "expectations": list(i.expectations or []), "endgame": i.endgame, "arc": list(i.arc or []), "issue": str(sc.get("issue") or ""),
             "scores": {k: sc.get(k, 0) for k in ("heat", "novelty", "fit", "overall")}, "score_detail": dict(sc.get("detail") or {}), "chosen": i.chosen,
             "versions": len(i.versions or []), "last_instruction": str((i.versions or [{}])[-1].get("instruction") or "") if i.versions else "",
-            "trope_hits": _idea_tropes(i, trope_list)}
+            "trope_hits": _idea_tropes(i, trope_list), "source": i.source}
 
 
 def _idea_tropes(i: Idea, tl: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

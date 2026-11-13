@@ -493,6 +493,25 @@ def t_write_next_chapter(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
     return _proposal_result(c, p)
 
 
+def t_imitate_rank_book(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
+    """v0.7：拆解一本榜单书（只学结构）并出 3 个换皮选题，产出提案；采纳后存进选题库。"""
+    from app.services import imitate
+
+    rid = _int(a.get("rank_item_id")) or imitate.find_rank_item(str(a.get("title") or ""))
+    if not rid:
+        raise NotFound(f"最新榜单里没有找到《{a.get('title') or a.get('rank_item_id') or ''}》")
+    c.progress("拆解榜单书")
+    pv = imitate.reskin_preview(rid)
+    ideas = pv["ideas"]
+    warns = [f"《{x['title']}》：{w}" for x in ideas for w in x["source"]["warnings"]]
+    p = props.create(c.book_id, c.session_id, "reskin_ideas", f"仿《{pv['ref_title']}》出 {len(ideas)} 个换皮选题",
+                     "；".join(f"《{x['title']}》{x['logline'][:30]}" for x in ideas)[:400],
+                     {"rank_item_id": pv["rank_item_id"], "teardown_id": pv["teardown_id"], "ref_title": pv["ref_title"],
+                      "teardown": pv["teardown"], "ideas": ideas, "warnings": warns})
+    return _proposal_result(c, p, {"teardown": {k: pv["teardown"].get(k) for k in ("payoff_formula", "golden_finger", "transferable", "must_replace")},
+                                   "ideas": [{"title": x["title"], "logline": x["logline"], "warnings": x["source"]["warnings"]} for x in ideas]})
+
+
 # ================================================================== 注册表
 
 TOOLS: list[Tool] = [
@@ -542,6 +561,10 @@ TOOLS: list[Tool] = [
          {"prompt": S, "n": I, "title_mode": {**S, "enum": ["model", "overlay"]}}, [], t_generate_covers),
     Tool("write_next_chapter", "写下一章", "write", "按章细纲写下一章（长任务，采纳后执行；可写 1–3 个版本供挑选）。写完是草稿，作者提交才入账。",
          {"variants": I}, [], t_write_next_chapter),
+    Tool("imitate_rank_book", "拆解榜单书并出仿写选题", "write",
+         "拆解一本热榜书（只用书名/简介/标签/热度，只学结构：爽点公式、金手指兑现、人设模板、可迁移要素、必须换掉的元素），"
+         "再出 3 个换皮选题（带相似点自检），产出提案；采纳后存进选题库，不改当前这本书。用 rank_item_id 或书名指定。",
+         {"rank_item_id": I, "title": {**S, "description": "榜单书名（在最新榜单里查找）"}}, [], t_imitate_rank_book),
 ]
 BY_NAME = {t.name: t for t in TOOLS}
 

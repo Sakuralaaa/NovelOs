@@ -840,6 +840,73 @@ def mock_foreshadow_plan(meta: dict[str, Any]) -> str:
     return _j({"foreshadows": items})
 
 
+# ---------------------------------------------------------------- v0.7：榜单仿写
+
+def mock_teardown(meta: dict[str, Any]) -> str:
+    cat = str(meta.get("category") or "都市")
+    up = int(meta.get("rank_diff") or 0) > 0
+    kit = kit_for(cat, str(meta.get("gender") or "male"))
+    tags = [str(t) for t in meta.get("tags") or []][:2]
+    return _j({
+        "payoff_formula": "被轻视 → 金手指当场兑现 → 当众打脸 → 拿到更大的资源和更强的对手",
+        "golden_finger": {"type": f"{kit['power'][0]}类成长型金手指（推测）",
+                          "delivery": "第一章就兑现一次，之后每两三章给一次可见的数值或新用法"},
+        "protagonist_template": "底层起点、嘴硬心软、目标明确：先活下去，再把看不起自己的人踩下去",
+        "opening_hook": "开篇主角被逼到绝境，金手指在最难堪的时刻触发（推测）",
+        "target_readers": "爱看快节奏升级打脸的" + ("男频读者" if meta.get("gender") != "female" else "女频读者"),
+        "transferable": ["三章内完成第一次打脸", "金手指规则简单、可视化、能一级级解锁", "每个阶段换地图换对手层级",
+                         "名次在涨，说明开篇节奏被验证有效" if up else "长线稳定，说明升级梯度清楚"],
+        "must_replace": [f"书名里的「{str(meta.get('title') or '')[:4]}」", "原书金手指的名字和形态", "原书的世界观与地名", *[f"标签里的「{t}」组合" for t in tags]],
+    })
+
+
+def mock_teardown_deep(meta: dict[str, Any]) -> str:
+    n = int(meta.get("chapters") or 1)
+    pool = [("主角被当众轻视，处境被逼到墙角", "金手指首次触发，小小反击一次", "章末更强的对手登场"),
+            ("对手设局，主角被迫应战", "金手指升级，当众翻盘", "章末抛出一笔更大的赌注"),
+            ("旧账被翻出，主角站到风口浪尖", "用新能力把局面掰回来，众人改口", "章末揭开幕后另有其人")]
+    chs = [{"index": i, "conflict": pool[(i - 1) % 3][0], "payoff": pool[(i - 1) % 3][1], "hook": pool[(i - 1) % 3][2]} for i in range(1, n + 1)]
+    return _j({"chapters": chs, "rhythm": "开篇几百字内进冲突，第一章内兑现金手指，之后每章一次小爽点",
+               "learnable": ["冲突先行，背景放在冲突里交代", "每章结尾留一个更大的问题"]})
+
+
+RESKIN_SETS = [
+    ("灰港城", "夜班调度员", "货运调度台", "能看见每条航线三天内的风险"),
+    ("雾川县", "县城修表匠", "一块停走的旧怀表", "每修好一件旧物就能借用它主人一项本事"),
+    ("旧码头", "落榜的船坞学徒", "一张会自己补全的海图", "海图每补全一块就解锁一种新的航海术"),
+]
+RESKIN_SETS_F = [
+    ("沈家老宅", "被赶出门的账房女", "一本对不上的旧账", "能看见账目背后每个人欠下的人情"),
+    ("浣衣局", "替人洗衣的宫女", "一枚掉色的绣样", "绣样能复刻衣物主人最后一天的记忆"),
+    ("旧码头", "过气的戏班花旦", "一出没唱完的旧戏", "每唱完一折就能让台下一人说真话"),
+]
+
+
+def mock_reskin(meta: dict[str, Any]) -> str:
+    gender = meta.get("gender") or "male"
+    cat = str(meta.get("category") or ("都市高武" if gender == "male" else "现言甜宠"))
+    sets = RESKIN_SETS_F if gender == "female" else RESKIN_SETS
+    ref = str(meta.get("title") or "原书")
+    ideas = []
+    for place, who, item, power in sets[:int(meta.get("count") or 3)]:
+        ideas.append({
+            "title": f"{who}的{item[-2:]}能看穿一切" if len(item) >= 2 else f"{who}翻身记",
+            "logline": f"{who}在{place}被所有人看不起，{item}让他{power}，一步步把欠他的都拿回来。",
+            "selling_points": [f"开局即冲突：{who}被逼到绝境，第一章就反击", f"金手指新鲜：{power}", "每个阶段换地图、换对手、换赌注"],
+            "hook": f"第一章开头，{who}在{place}被当众刁难，{item}第一次起了反应。",
+            "expectations": ["金手指一级级解锁", "把看不起他的人一个个踩下去"],
+            "endgame": f"揭开{item}的来历，坐上{place}背后那张牌桌",
+            "arc": [f"在{place}站稳脚跟", "走出小地方，压服一州的行会", "卷入上层之争，正面交锋", "直面金手指背后的旧秩序"],
+            "genre": cat,
+            "kept": ["被轻视 → 当场兑现 → 打脸的爽点公式", "金手指可视化、一级级解锁", "三章内第一次打脸"],
+            "changed": [f"原书的金手指 → {item}（{power}）", f"原书的主角身份 → {who}", f"原书的世界 → {place}"],
+            "self_check": [{"aspect": "书名", "original": ref, "ours": "关键词全部换掉", "similar": False},
+                           {"aspect": "金手指", "original": "原书金手指", "ours": power, "similar": False},
+                           {"aspect": "开局场面", "original": "绝境触发", "ours": f"{place}当众刁难", "similar": False}],
+        })
+    return _j({"ideas": _strip_words(ideas, [str(x) for x in meta.get("banned_keywords") or []])})
+
+
 HANDLERS = {
     "ideation": mock_ideation,
     "idea_revise": mock_idea_revise,
@@ -864,6 +931,9 @@ HANDLERS = {
     "outline_sync": mock_outline_sync,
     "chapter_rewrite": mock_chapter_rewrite,
     "foreshadow_plan": mock_foreshadow_plan,
+    "teardown": mock_teardown,
+    "teardown_deep": mock_teardown_deep,
+    "reskin": mock_reskin,
 }
 
 

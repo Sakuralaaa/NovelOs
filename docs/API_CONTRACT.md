@@ -149,3 +149,27 @@ Package { book_id, titles: [{title, score}], blurb, tags[], cover_prompt, covers
 
 输出增补：Book 增加 `premise`、`versions`、`last_instruction`、`banned_tropes`；Idea / Card（列表接口）增加 `trope_hits[{name, hits[]}]`；OutlineNode 增加 `versions`、`last_instruction`；Chapter 增加 `history`、`last_history_label`；Foreshadow 增加 `tier`、`plan_plant_ch`、`plan_resolve_ch`、`note`、`source`，`status` 新增 `planned`。PATCH `/api/books/{id}` 可改 `premise`、`banned_tropes`。
 
+
+## v0.7 增补：榜单仿写（只学结构）
+
+同步接口（直接返回结果，不走 Job）。榜单条目 `RankItem` 输出增加 `id`（`GET /api/radar/latest` 的 items 里），下面的 `{id}` 即它。
+
+```
+Teardown { id, rank_item_id, book_id_ext, title, created_at, cached: bool,
+           teardown: { payoff_formula, golden_finger:{type, delivery}, protagonist_template, opening_hook, target_readers,
+                       transferable[], must_replace[], warnings[] } | null,
+           deep: { chapters[{index, title, words, dialogue_ratio, conflict, payoff, hook}], total_words, dialogue_ratio,
+                   first_conflict:{keyword, at_char, chapter}|null, first_cheat:{keyword, at_char, chapter}|null,
+                   rhythm, learnable[], overlap: int, warnings[] } | null }
+```
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/radar/items/{id}/teardown?refresh=` | 只用书名/简介/标签/品类/热度/名次变化拆解 → Teardown。按条目缓存（同一本书在别的快照拆过也复用，`cached=true`）；`refresh=true` 重拆 |
+| GET | `/api/radar/items/{id}/teardown` | 读缓存 → Teardown；还没拆过 404 |
+| POST | `/api/radar/items/{id}/deep` | `{text}` 试读原文，去空白后 ≤20000 字（超限或为空 400）→ Teardown（`deep` 已填）。字数/对白比例/首个冲突与金手指关键词位置由程序算（`at_char` 为去空白后第几字），每章冲突/爽点/钩子由模型补；原文不落库；模型输出与原文连续 8 字相同时 `warnings` 提醒 |
+| POST | `/api/radar/items/{id}/reskin` | 基于拆解出 3 个换皮选题并存为 Idea → `{rank_item_id, teardown_id, ref_title, idea_ids[], ideas: Idea[], warnings[]}`；建书沿用 `POST /api/ideas/{id}/adopt` |
+
+Idea 输出增加 `source`：普通选题为 `null`；仿写选题为 `{kind:"reskin", rank_item_id, ref_title, ref_book_id_ext, ref_category, kept[], changed[], self_check[{aspect, original, ours, similar}], overlap:{count, title, segments[]}, warnings[]}`。`warnings` 包括：与原书书名/简介连续 8 字相同、书名与原书连续 4 字相同、仍含「必须换掉的元素」、命中禁用套路、模型自检仍偏像。只提醒，不拦截。
+
+Agent 新增提案工具 `imitate_rank_book`（`{rank_item_id?, title?}`）：拆解并出 3 个换皮选题，提案 kind=`reskin_ideas`，采纳后存进选题库（不改当前书），撤回删除未建书的那几个选题。

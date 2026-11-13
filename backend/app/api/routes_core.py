@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TropesIn, WritingSettingsIn, channel_out, job_out, rank_item_out,
+    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TeardownDeepIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
@@ -21,7 +21,7 @@ from app.llm.crypto import decrypt, encrypt
 from app.llm.gateway import (
     IMAGE_MODE_KEY, ROLES, ROUTING_KEY, LLMError, LLMGateway, get_image_mode, get_routing, is_mock_mode,
 )
-from app.models.tables import Channel, Job, RadarSnapshot, TokenUsage
+from app.models.tables import Channel, Idea, Job, RadarSnapshot, TokenUsage
 from app.radar import service as radar
 from app.services.research import recent_logs
 from app.services.writing import WRITING_SETTINGS_KEY, writing_settings
@@ -276,3 +276,40 @@ def radar_config_get(s: Session = Depends(get_session)) -> dict[str, Any]:
 @router.put("/radar/config")
 def radar_config_put(body: RadarConfigIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     return radar.set_config(s, body.enabled, body.daily_hour)
+
+
+# ------------------------------------------------------------------ v0.7：榜单仿写（只学结构）
+
+@router.get("/radar/items/{item_id}/teardown")
+def radar_teardown_get(item_id: int) -> dict[str, Any]:
+    from app.services import imitate
+
+    return imitate.get_teardown(item_id)
+
+
+@router.post("/radar/items/{item_id}/teardown")
+def radar_teardown(item_id: int, refresh: bool = Query(False)) -> dict[str, Any]:
+    """拆解（按榜单条目缓存，refresh=true 重新拆）。"""
+    from app.services import imitate
+
+    return imitate.teardown(item_id, refresh=refresh)
+
+
+@router.post("/radar/items/{item_id}/deep")
+def radar_teardown_deep(item_id: int, body: TeardownDeepIn) -> dict[str, Any]:
+    """深度拆解：作者贴的试读原文 ≤20000 字（超限 400）；原文不落库。"""
+    from app.services import imitate
+
+    return imitate.deep(item_id, body.text)
+
+
+@router.post("/radar/items/{item_id}/reskin")
+def radar_reskin(item_id: int) -> dict[str, Any]:
+    """出 3 个换皮选题并保存为选题；建书走 POST /api/ideas/{id}/adopt。"""
+    from app.services import imitate, tropes
+
+    r = imitate.reskin(item_id)
+    with session_scope() as s:
+        tl = tropes.global_tropes(s)
+        ideas = [idea_out(i, tl) for i in (s.get(Idea, x) for x in r["idea_ids"]) if i is not None]
+    return {**r, "ideas": ideas}

@@ -35,6 +35,9 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "outline_sync": ("outline",),
     "chapter_rewrite": ("writing", "humanize"),
     "foreshadow_plan": ("outline",),
+    "teardown": (),
+    "teardown_deep": (),
+    "reskin": ("ideation",),
 }
 
 

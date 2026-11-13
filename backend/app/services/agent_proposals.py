@@ -41,6 +41,7 @@ KIND_LABEL = {
     "package": "包装",
     "covers": "生成封面",
     "write_chapter": "写下一章",
+    "reskin_ideas": "榜单仿写选题",
 }
 JOB_KINDS = ("covers", "write_chapter")
 
@@ -452,6 +453,35 @@ def _revert_covers(book_id: int, payload: dict[str, Any], result: dict[str, Any]
     return {"deleted": n}
 
 
+def _apply_reskin(book_id: int, payload: dict[str, Any], edited: dict[str, Any] | None) -> dict[str, Any]:
+    """v0.7：把换皮选题存进选题库（不改当前这本书）。"""
+    from app.services import imitate
+
+    ideas = [x for x in payload.get("ideas") or [] if isinstance(x, dict) and x.get("title")]
+    if not ideas:
+        raise ValueError("提案里没有选题")
+    return {"idea_ids": imitate.save_ideas(ideas)}
+
+
+def _revert_reskin(book_id: int, payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """撤回：删掉还没建书的那几个选题；已建书的保留。"""
+    from app.models.tables import Idea
+
+    removed, kept = [], []
+    with session_scope() as s:
+        for iid in result.get("idea_ids") or []:
+            i = s.get(Idea, int(iid))
+            if i is None:
+                continue
+            if i.chosen or i.book_id:
+                kept.append(i.id)
+                continue
+            s.delete(i)
+            removed.append(i.id)
+        s.commit()
+    return {"removed": removed, "kept": kept}
+
+
 _APPLY: dict[str, Callable[..., Any]] = {
     "book_info": _apply_book_info,
     "bible": _apply_bible,
@@ -464,6 +494,7 @@ _APPLY: dict[str, Callable[..., Any]] = {
     "package": _apply_package,
     "write_chapter": _apply_write,
     "covers": _apply_covers,
+    "reskin_ideas": _apply_reskin,
 }
 _REVERT: dict[str, Callable[..., Any]] = {
     "book_info": _revert_book_info,
@@ -477,6 +508,7 @@ _REVERT: dict[str, Callable[..., Any]] = {
     "package": _revert_package,
     "write_chapter": _revert_write,
     "covers": _revert_covers,
+    "reskin_ideas": _revert_reskin,
 }
 
 

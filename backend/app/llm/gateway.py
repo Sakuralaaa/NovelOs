@@ -59,6 +59,9 @@ TASK_ROLE: dict[str, str] = {
     "outline_sync": "planner",
     "chapter_rewrite": "writer",
     "foreshadow_plan": "planner",
+    "teardown": "planner",
+    "teardown_deep": "reviewer",
+    "reskin": "planner",
     "agent": "agent",
 }
 

@@ -86,6 +86,17 @@ class RankItem(SQLModel, table=True):
     gender: str = "male"
 
 
+class RankTeardown(SQLModel, table=True):
+    """v0.7 榜单仿写：一本榜单书的拆解（只学结构）。teardown 按简介等元信息拆；deep 按作者贴的试读原文拆。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rank_item_id: int = Field(index=True)
+    book_id_ext: str = ""
+    title: str = ""
+    teardown: Optional[dict[str, Any]] = _json_dict_nullable()
+    deep: Optional[dict[str, Any]] = _json_dict_nullable()
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Book(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str = "未命名作品"
@@ -121,6 +132,8 @@ class Idea(SQLModel, table=True):
     gender: str = "male"
     scores: Optional[dict[str, Any]] = _json_dict_nullable()
     versions: list[dict[str, Any]] = _json_list()  # 修改前的旧版本，最近的在最后
+    # v0.7：来源（榜单仿写时为 {kind:"reskin", rank_item_id, ref_title, kept[], changed[], self_check[], overlap, warnings[]}）
+    source: Optional[dict[str, Any]] = _json_dict_nullable()
     chosen: bool = False
     created_at: datetime = Field(default_factory=utcnow)
 
