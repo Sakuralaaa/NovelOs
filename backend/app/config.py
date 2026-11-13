@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     basic_user: str = "novelos"
     basic_password: str | None = None  # 旧版变量，等同于 NOVELOS_PASSWORD
     auth_disabled: bool = False  # 仅限本机开发/测试：关闭登录
+    api_key: str | None = None  # 额外的固定 API 密钥（须以 nvk_ 开头）；也可在“设置 → API 密钥”里生成
+    llm_trace: bool = True  # 在内存里保留最近的模型调用（提示词与输出），供调试提示词；重启清空
+    llm_trace_max: int = 200
     cookie_secure: bool | None = None  # 会话 Cookie 的 Secure 标记；None=按请求是否 HTTPS 自动判断
     static_dir: Path = Path("/app/static")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -73,7 +76,7 @@ class Settings(BaseSettings):
 
     lint: LintThresholds = LintThresholds()
 
-    @field_validator("cookie_secure", "password", "basic_password", mode="before")
+    @field_validator("cookie_secure", "password", "basic_password", "api_key", mode="before")
     @classmethod
     def _blank_is_none(cls, v):  # docker compose 会把未设置的变量传成空字符串
         return None if isinstance(v, str) and not v.strip() else v

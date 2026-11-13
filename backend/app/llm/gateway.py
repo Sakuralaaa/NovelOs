@@ -23,6 +23,7 @@ from app.config import get_settings
 from app.db import kv_get, session_scope
 from app.llm import mock
 from app.llm import protocols as proto
+from app.llm import trace
 from app.llm.crypto import decrypt
 from app.models.tables import Channel, TokenUsage
 
@@ -275,7 +276,11 @@ class LLMGateway:
         with session_scope() as s:
             targets = [route_target(s, route)] if route else resolve_targets(s, role)
         if not targets:
-            return mock.complete(task, messages, meta or {})
+            started = time.time()
+            out = mock.complete(task, messages, meta or {})
+            trace.record(task=task, role=role, model="mock", channel="mock", messages=messages, output=out,
+                         started=started, temperature=temperature)
+            return out
         errors: list[str] = []
         for t in targets:
             for attempt in range(self.settings.llm_retries + 1):
@@ -312,9 +317,18 @@ class LLMGateway:
         temperature: float,
         max_tokens: int | None,
     ) -> str:
-        data = self._post_chat(t, messages, temperature, max_tokens)
-        content, usage, _ = proto.parse_chat(t.api_format, data)
+        started = time.time()
+        try:
+            data = self._post_chat(t, messages, temperature, max_tokens)
+            content, usage, _ = proto.parse_chat(t.api_format, data)
+        except Exception as e:
+            trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output="",
+                         started=started, error=_friendly(e), temperature=temperature)
+            raise
         _record_usage(t, role, task, usage)
+        trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output=content,
+                     started=started, usage=usage, temperature=temperature,
+                     error=None if content.strip() else "模型返回空内容")
         if not content.strip():
             raise LLMError("模型返回空内容")
         return content
@@ -380,6 +394,7 @@ class LLMGateway:
         raise LLMError("所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:])))
 
     def _tools_once(self, t: Target, messages: list[dict[str, Any]], tools: list[dict[str, Any]], temperature: float) -> dict[str, Any]:
+        started = time.time()
         body: dict[str, Any] = {"model": t.model, "messages": proto.openai_tool_messages(messages), "tools": tools,
                                 "tool_choice": "auto", "temperature": temperature}
         with httpx.Client(timeout=self.settings.llm_timeout, transport=_keepalive_transport()) as c:
@@ -391,16 +406,23 @@ class LLMGateway:
         except ValueError as e:
             raise LLMError("返回的不是 JSON，检查 Base URL 和接口格式是否匹配") from e
         out = proto.parse_tool_response(data)
-        _record_usage(t, "agent", "agent", out.pop("usage", None))
+        usage = out.pop("usage", None)
+        _record_usage(t, "agent", "agent", usage)
+        trace.record(task="agent", role="agent", model=t.model, channel=t.name, messages=messages,
+                     output={"content": out["content"], "tool_calls": out["tool_calls"]}, started=started,
+                     usage=usage, temperature=temperature)
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")
         return out
 
     def _tools_text(self, t: Target, messages: list[dict[str, Any]], tools: list[dict[str, Any]], temperature: float) -> dict[str, Any]:
+        started = time.time()
         msgs = proto.text_tool_messages(messages, tools)
         data = self._post_chat(t, msgs, temperature, None)
         content, usage, _ = proto.parse_chat(t.api_format, data)
         _record_usage(t, "agent", "agent", usage)
+        trace.record(task="agent", role="agent", model=t.model, channel=t.name, messages=msgs, output=content,
+                     started=started, usage=usage, temperature=temperature)
         out = proto.parse_text_tool_calls(content, {f["function"]["name"] for f in tools})
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")

@@ -253,6 +253,10 @@ on('GET', '/auth/status', () => ({ enabled: true, authenticated: mockAuthed(), u
 on('POST', '/auth/login', (_m: any, body: any) => { if (body?.password !== 'novelos-demo') throw new HttpErr(401, '密码不正确'); sessionStorage.setItem('mock-auth', '1'); return { ok: true } })
 on('POST', '/auth/logout', () => { sessionStorage.setItem('mock-auth', '0'); return { ok: true } })
 on('POST', '/auth/password', () => ({ ok: true }))
+const mockKeys: any[] = []
+on('GET', '/auth/keys', () => ({ keys: mockKeys, env_key_enabled: false }))
+on('POST', '/auth/keys', (_m: any, b: any) => { const id = String(Math.floor(1e7 + Math.random() * 9e7)); const token = `nvk_${id}_demo${Math.random().toString(36).slice(2)}`; const k = { id, name: b?.name || '未命名', preview: `nvk_${id}_…${token.slice(-4)}`, created_at: Math.floor(Date.now() / 1000), last_used_at: null }; mockKeys.push(k); return { ...k, token } })
+on('DELETE', '/auth/keys/:id', (m: any) => { const i = mockKeys.findIndex((k) => k.id === m[1]); if (i >= 0) mockKeys.splice(i, 1); return { ok: true } })
 on('GET', '/settings/status', () => ({ mock_mode: db.channels.filter((c) => c.enabled).length === 0 }))
 const maskCh = (c: (typeof db.channels)[number]): Channel => ({ id: c.id, name: c.name, base_url: c.base_url, models: c.models, enabled: c.enabled, api_format: c.api_format ?? 'openai', api_key_masked: c.api_key ? `${c.api_key.slice(0, 3)}••••${c.api_key.slice(-4)}` : '' })
 on('GET', '/settings/channels', () => db.channels.map(maskCh))

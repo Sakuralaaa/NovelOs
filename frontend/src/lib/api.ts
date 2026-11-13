@@ -5,6 +5,7 @@ import type {
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
 } from './types'
 
+export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
 export interface AuthStatus { enabled: boolean; authenticated: boolean; username: string; managed_by_env: boolean; min_password_len: number }
 
 /** 502/504/524：通常是 Cloudflare / Nginx 等反向代理等不及后端（模型生成慢）先断开了，后端任务可能还在跑 */
@@ -65,6 +66,9 @@ export const api = {
   login: (password: string, remember: boolean) => post<{ ok: boolean }>('/auth/login', { password, remember }),
   logout: () => post<{ ok: boolean }>('/auth/logout'),
   changePassword: (current: string, next: string) => post<{ ok: boolean }>('/auth/password', { current, new: next }),
+  apiKeys: () => get<{ keys: ApiKey[]; env_key_enabled: boolean }>('/auth/keys'),
+  createApiKey: (name: string) => post<ApiKey & { token: string }>('/auth/keys', { name }),
+  revokeApiKey: (id: string) => del<{ ok: boolean }>(`/auth/keys/${id}`),
 
   jobs: (bookId?: number) => get<Job[]>(`/jobs${qs({ book_id: bookId })}`),
   job: (id: number) => get<Job>(`/jobs/${id}`),
@@ -230,6 +234,7 @@ export const api = {
 
 export const qk = {
   auth: ['auth'] as const,
+  apiKeys: ['auth', 'keys'] as const,
   status: ['status'] as const,
   channels: ['channels'] as const,
   routing: ['routing'] as const,

@@ -86,10 +86,72 @@ def _parse(text: str, stage: str) -> SkillPack:
     )
 
 
+# ---------- 线上覆盖：data/prompt_overrides/{prompts|rules}/<name>.md ----------
+# 用来在真实模型上调提示词而不用重新发版；删掉覆盖文件即恢复内置版本。
+KINDS = ("prompts", "rules")
+
+
+def _override_dir(kind: str) -> Path:
+    from app.config import get_settings
+
+    return get_settings().data_dir / "prompt_overrides" / kind
+
+
+def _check(kind: str, name: str) -> None:
+    if kind not in KINDS:
+        raise ValueError("kind 只能是 prompts 或 rules")
+    if name not in builtin_names(kind):
+        raise ValueError(f"没有这个{'提示词' if kind == 'prompts' else '规则包'}：{name}")
+
+
+def builtin_names(kind: str) -> list[str]:
+    return sorted(p.stem for p in (_ROOT / kind).glob("*.md"))
+
+
+def default_text(kind: str, name: str) -> str:
+    _check(kind, name)
+    return (_ROOT / kind / f"{name}.md").read_text(encoding="utf-8")
+
+
+def override_text(kind: str, name: str) -> str | None:
+    _check(kind, name)
+    p = _override_dir(kind) / f"{name}.md"
+    return p.read_text(encoding="utf-8") if p.is_file() else None
+
+
+def effective_text(kind: str, name: str) -> str:
+    o = override_text(kind, name)
+    return o if o is not None else default_text(kind, name)
+
+
+def set_override(kind: str, name: str, text: str) -> None:
+    _check(kind, name)
+    d = _override_dir(kind)
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / f".{name}.tmp"
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(d / f"{name}.md")
+    _clear_caches()
+
+
+def clear_override(kind: str, name: str) -> bool:
+    _check(kind, name)
+    p = _override_dir(kind) / f"{name}.md"
+    existed = p.is_file()
+    if existed:
+        p.unlink()
+    _clear_caches()
+    return existed
+
+
+def _clear_caches() -> None:
+    load_pack.cache_clear()
+    _template.cache_clear()
+
+
 @lru_cache
 def load_pack(stage: str) -> SkillPack:
-    path = _ROOT / "rules" / f"{stage}.md"
-    return _parse(path.read_text(encoding="utf-8"), stage)
+    return _parse(effective_text("rules", stage), stage)
 
 
 def all_packs() -> list[SkillPack]:
@@ -98,7 +160,7 @@ def all_packs() -> list[SkillPack]:
 
 @lru_cache
 def _template(name: str) -> Template:
-    return Template((_ROOT / "prompts" / f"{name}.md").read_text(encoding="utf-8"))
+    return Template(effective_text("prompts", name))
 
 
 def render(name: str, **values: object) -> str:

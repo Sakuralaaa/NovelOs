@@ -18,7 +18,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import routes_agent, routes_auth, routes_books, routes_core
+from app.api import routes_agent, routes_auth, routes_books, routes_core, routes_dev
+from app.apikeys import ApiKeyStore, token_from_headers
 from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
 from app.db import init_engine
@@ -53,17 +54,23 @@ def create_app() -> FastAPI:
 
     auth = AuthManager(settings.data_dir, settings.password or settings.basic_password, settings.basic_user)
     app.state.auth = auth
+    app.state.api_keys = ApiKeyStore(settings.data_dir, settings.api_key)
     app.state.settings = settings
 
     @app.middleware("http")
     async def security(request: Request, call_next):
         path = request.url.path
         protected = path.startswith(PROTECTED_PREFIXES) and path not in PUBLIC_PATHS
-        if protected and not settings.auth_disabled and not _authorized(request, auth):
+        api_token = token_from_headers(request.headers)
+        if api_token is not None and not request.app.state.api_keys.check(api_token):
+            if protected and not settings.auth_disabled:
+                return JSONResponse({"detail": "API 密钥无效或已删除"}, status_code=401)
+            api_token = None
+        if protected and not settings.auth_disabled and api_token is None and not _authorized(request, auth):
             return JSONResponse({"detail": "未登录或登录已过期"}, status_code=401)
         # 写操作校验来源，防跨站请求伪造（配合 SameSite=Lax Cookie）
         origin = request.headers.get("origin")
-        if protected and request.method not in ("GET", "HEAD", "OPTIONS") and origin and not settings.auth_disabled:
+        if protected and request.method not in ("GET", "HEAD", "OPTIONS") and origin and not settings.auth_disabled and api_token is None:
             parsed = urlsplit(origin)
             host = request.headers.get("x-forwarded-host", request.headers.get("host", "")).lower()
             if parsed.scheme not in ("http", "https") or parsed.netloc.lower() != host:
@@ -107,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_core.router)
     app.include_router(routes_books.router)
     app.include_router(routes_agent.router)
+    app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 
     _mount_spa(app, settings.static_dir)

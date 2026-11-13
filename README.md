@@ -67,6 +67,15 @@ mock 内容只用于演示，不要拿去发布。配好任意一个启用的渠
 - **多版本**：可一次写 2–3 个版本供挑选，也可在设置里开启“自动采纳最高分”。
 - **草稿不进底账**：章节在“提交”前只是草稿；提交时章节、事实、伏笔、摘要、新人物一次性写入。
 
+## 远程调用与调提示词（v0.8）
+
+- **API 密钥**：设置 → API 密钥 → 生成。请求头带 `Authorization: Bearer nvk_…`（或 `X-API-Key`）即可调用全部接口，适合脚本、命令行和外部 AI 助手。密钥只显示一次，服务端只存摘要；也可用环境变量 `NOVELOS_API_KEY` 预置一个。
+- **命令行**：`tools/novelos_cli.py`，只依赖 Python 标准库。`NOVELOS_URL=https://你的域名 NOVELOS_API_KEY=nvk_… python3 tools/novelos_cli.py get /books`；返回后台任务时加 `--wait` 自动等结果。
+- **提示词线上覆盖**：`GET/PUT/DELETE /api/prompts/{prompts|rules}/{name}`，覆盖文件存在 `data/prompt_overrides/`，立即生效、删除即恢复内置版本，不用重新发版。
+- **模型调用追踪**：`GET /api/debug/llm-calls`（列表）、`/api/debug/llm-calls/{id}`（完整提示词与输出），只保存在内存里最近 200 次，重启清空；`NOVELOS_LLM_TRACE=0` 关闭。
+
+详见 [docs/API_CONTRACT.md](docs/API_CONTRACT.md) 末尾「v0.8」一节。
+
 ## 榜单仿写（v0.7）
 
 在「热点雷达」的榜单里，每本书都有「仿写这本」按钮（表格行和卡片视图都有；平板、手机上常驻显示）。点开后是一个面板——平板/电脑上从右侧滑出，手机上是底部抽屉。**只学结构，不抄内容。**

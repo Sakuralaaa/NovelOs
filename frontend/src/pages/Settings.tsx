@@ -16,7 +16,7 @@ import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { useChannels } from '@/hooks/queries'
 import { useAuth } from '@/components/auth/AuthGate'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
-import { api, qk } from '@/lib/api'
+import { api, qk, type ApiKey } from '@/lib/api'
 import type { ApiFormat, Channel, ImageMode, RouteKey, Routing, Trope } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -60,6 +60,7 @@ export default function SettingsPage() {
         <TropesCard />
         <RadarCard />
         <AccountCard />
+        <ApiKeysCard />
         <Appearance />
       </div>
     </div>
@@ -490,6 +491,68 @@ function AccountCard() {
           </form>
         )}
       </CardBody>
+    </Card>
+  )
+}
+
+const fmtTime = (t: number | null) => (t ? new Date(t * 1000).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '从未使用')
+
+function ApiKeysCard() {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: qk.apiKeys, queryFn: api.apiKeys })
+  const [name, setName] = useState('')
+  const [created, setCreated] = useState<(ApiKey & { token: string }) | null>(null)
+  const [del, setDel] = useState<ApiKey | null>(null)
+  const create = useMutation({
+    mutationFn: () => api.createApiKey(name.trim()),
+    meta: { errorTitle: '创建失败' },
+    onSuccess: (k) => { setName(''); setCreated(k); qc.invalidateQueries({ queryKey: qk.apiKeys }) },
+  })
+  const rm = useMutation({
+    mutationFn: (id: string) => api.revokeApiKey(id),
+    meta: { errorTitle: '删除失败' },
+    onSuccess: () => { setDel(null); toast.success('密钥已删除，使用它的程序会立刻失去访问权'); qc.invalidateQueries({ queryKey: qk.apiKeys }) },
+  })
+  const copy = async (t: string) => {
+    try { await navigator.clipboard.writeText(t); toast.success('已复制') } catch { toast.info('请长按选中后手动复制') }
+  }
+  const keys = q.data?.keys ?? []
+  return (
+    <Card>
+      <CardHeader divider title="API 密钥" icon={<KeyRound className="h-4 w-4" />} />
+      <CardBody className="space-y-4 pt-5">
+        <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+          给命令行、脚本或外部 AI 助手用，能调用全部接口（等同登录）。请求头带 <code className="rounded bg-muted px-1">Authorization: Bearer nvk_…</code>。改登录密码不会让它失效，不用了请删除。
+        </p>
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={(e) => { e.preventDefault(); create.mutate() }}>
+          <Input className="sm:flex-1" placeholder="用途，例如：Hark 调试" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} />
+          <Button type="submit" variant="primary" loading={create.isPending} icon={<Plus className="h-3.5 w-3.5" />}>生成密钥</Button>
+        </form>
+        {q.isLoading ? <Skeleton className="h-12" /> : keys.length === 0 ? (
+          <div className="text-[13.5px] text-muted-foreground">{q.data?.env_key_enabled ? '已通过环境变量 NOVELOS_API_KEY 配置一个固定密钥。' : '还没有密钥。'}</div>
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {keys.map((k) => (
+              <li key={k.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14px] font-medium">{k.name}</div>
+                  <div className="truncate font-mono text-[12px] text-muted-foreground">{k.preview} · 创建 {fmtTime(k.created_at)} · 最近使用 {fmtTime(k.last_used_at)}</div>
+                </div>
+                <Button size="sm" variant="ghost" aria-label="删除密钥" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setDel(k)} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+      <Dialog open={!!created} onOpenChange={(o) => !o && setCreated(null)}>
+        <DialogContent title="密钥已生成" desc="只显示这一次，关掉后无法再查看。请现在复制保存。"
+          footer={<><Button variant="ghost" onClick={() => setCreated(null)}>我已保存</Button><Button variant="primary" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => created && copy(created.token)}>复制</Button></>}>
+          <div className="select-all break-all rounded-lg bg-muted px-3 py-2.5 font-mono text-[13px]">{created?.token}</div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!del} onOpenChange={(o) => !o && setDel(null)}>
+        <DialogContent title={`删除密钥「${del?.name}」？`} desc="使用它的程序会立刻无法访问。" footer={<><Button variant="ghost" onClick={() => setDel(null)}>取消</Button><Button variant="danger" loading={rm.isPending} onClick={() => del && rm.mutate(del.id)}>删除</Button></>} />
+      </Dialog>
     </Card>
   )
 }

@@ -192,3 +192,23 @@ Agent 新增提案工具 `imitate_rank_book`（`{rank_item_id?, title?}`）：�
 - 换皮选题改为逐个生成（每次调用只出 1 个，并把本批已出的选题告诉模型拉开差异）。第 1 个失败则任务失败（`Job.error` 为原因）；后面的失败只少出几个，`warnings` 里写明「第 N 个选题生成失败：…」和「模型只给了 N 个选题」。
 - Agent 工具 `imitate_rank_book` 不变（它本来就在 Agent 的后台任务里运行）。
 - 前端：请求返回 502 / 504 / 524 时统一提示「服务器等待模型超时（可能被 Cloudflare 等代理截断），任务可能仍在后台运行」；任务失败显示后端 `Job.error`。
+
+
+## v0.8 远程访问与调优
+
+鉴权：除 Cookie 与 Basic 外，新增 API 密钥。`Authorization: Bearer nvk_<id>_<secret>` 或 `X-API-Key: nvk_…`。带密钥的写请求不做 Origin 校验。无效密钥返回 401「API 密钥无效或已删除」。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | /api/auth/keys | `{keys:[{id,name,preview,created_at,last_used_at}], env_key_enabled}` |
+| POST | /api/auth/keys | body `{name}` → 同上字段 + `token`（只返回这一次） |
+| DELETE | /api/auth/keys/{id} | 删除 |
+| GET | /api/prompts | 全部提示词与规则包：`{items:[{kind,name,overridden,chars,used_by}], system_base}` |
+| GET | /api/prompts/{kind}/{name} | `{content(生效版本), default, overridden, used_by}`；kind 为 prompts 或 rules |
+| PUT | /api/prompts/{kind}/{name} | body `{content}`，写入 data/prompt_overrides 并立即生效 |
+| DELETE | /api/prompts/{kind}/{name} | 删除覆盖，恢复内置 |
+| GET | /api/debug/llm-calls?task=&limit=&after_id= | 最近模型调用摘要（新的在前） |
+| GET | /api/debug/llm-calls/{id} | 完整 messages、output、usage、耗时、错误 |
+| DELETE | /api/debug/llm-calls | 清空 |
+
+配置：`NOVELOS_API_KEY`（可选固定密钥，须 nvk_ 开头）、`NOVELOS_LLM_TRACE`（默认 1）、`NOVELOS_LLM_TRACE_MAX`（默认 200）。
