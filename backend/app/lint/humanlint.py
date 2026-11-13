@@ -27,6 +27,7 @@ from app.lint.craft_zh import (
 WEAK_ADVERB_PER_K_MAX = 3.0       # 缓缓/微微/轻轻/淡淡… 每千字合计上限（oh-story-claudecode 经验值）
 SUBJECT_START_MAX = 0.60          # 叙述句以“他/她/主角名”开头的占比上限（主语单调）
 SENT_CV_MIN = 0.40                # 句长变异系数下限：过低说明句长过于均匀（novel-ops 用句长方差 σ² 衡量同一现象）
+WATERFALL_SHORT_CHARS = 30       # 单句段短于这个字数才算瀑布流的一段
 WATERFALL_RUN_MAX = 4             # 连续单句成段（无对白）的段数上限（“单句段瀑布流”）
 
 _CJK_RUN = re.compile(r"[\u4e00-\u9fff]+")
@@ -284,7 +285,9 @@ def single_sentence_waterfall(text: str) -> tuple[float, int]:
     paras = paragraphs(text)
     if not paras:
         return 0.0, 0
-    flags = [(not _DIALOGUE.search(p)) and len([x for x in _SENT_END.findall(p) if _core_len(x) > 0]) <= 1 for p in paras]
+    # 只算「短」的单句段：一句 30 字以上的完整长句独占一段是正常网文排版（2026-11 真实样章误报），不算瀑布流
+    flags = [(not _DIALOGUE.search(p)) and len([x for x in _SENT_END.findall(p) if _core_len(x) > 0]) <= 1
+             and _core_len(p) < WATERFALL_SHORT_CHARS for p in paras]
     run = best = 0
     for f in flags:
         run = run + 1 if f else 0
