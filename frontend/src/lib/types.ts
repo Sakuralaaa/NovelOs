@@ -227,9 +227,13 @@ export interface ReviewIssue {
 export interface Review {
   scores: { hook: number; pacing: number; payoff: number; character: number; coherence: number; overall: number
     /** v0.6：连续性与物理逻辑、语义正确（旧审稿结果没有这两项） */
-    continuity?: number; semantics?: number }
+    continuity?: number; semantics?: number
+    /** v0.8.4：追读欲（番茄老读者视角） */
+    retention?: number }
   issues: ReviewIssue[]
   passed: boolean
+  /** v0.8.4：读者视角打分（0–10）与一句读后感 */
+  reader?: { score: number | null; verdict: string }
 }
 export interface Lint {
   ai_score: number

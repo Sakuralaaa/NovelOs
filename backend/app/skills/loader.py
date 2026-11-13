@@ -20,6 +20,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "scene_plan": ("chapter_plan",),
     "writing_scene": ("writing",),
     "review": ("review",),
+    "reader": (),
     "humanize": ("humanize",),
     "thicken": ("humanize", "writing"),
     "summary": (),

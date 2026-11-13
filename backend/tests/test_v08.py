@@ -138,3 +138,35 @@ def test_scene_plan_gets_book_context(client):
         node = OutlineNode(book_id=b["id"], level="chapter", order=1, title="t")
         txt = scene_plan_context(s, book, node)
     assert "天擎基因财阀" in txt and "设定底账" in txt
+
+
+def test_reader_review_merges(monkeypatch):
+    from app.services import review as rv
+
+    content = "叶承站在门口。陈大力又吐了一口血，青筋暴凸。测试官冷笑着走了。"
+
+    class GW:
+        def chat_json(self, task, system, user, meta=None, temperature=None):
+            if task == "reader":
+                return {"score": 4, "verdict": "主角太憋屈", "issues": [
+                    {"severity": "high", "quote": "测试官冷笑着走了。", "comment": "反派嘲讽完就走，主角没回"},
+                    {"severity": "mid", "quote": "不存在的句子啊啊", "comment": "x"}]}
+            return {"issues": []}
+
+    r, _ = rv.run_review(GW(), content, 2, "plan", "叶承", [], {}, "")
+    assert r["reader"]["score"] == 4 and r["passed"] is False
+    assert [i["dimension"] for i in r["issues"] if i["dimension"] == "retention"] == ["retention"]
+    assert r["scores"]["retention"] == 75
+
+
+def test_reader_failure_does_not_break_review():
+    from app.services import review as rv
+
+    class GW:
+        def chat_json(self, task, *a, **k):
+            if task == "reader":
+                raise RuntimeError("boom")
+            return {"issues": []}
+
+    r, _ = rv.run_review(GW(), "叶承站在门口，看着来人。", 1, "plan", "叶承", [], {}, "")
+    assert "reader" not in r and r["scores"]["retention"] == 100

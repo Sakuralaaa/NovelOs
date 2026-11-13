@@ -8,7 +8,7 @@ import type { Review, ReviewIssue } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { RadarChart } from './RadarChart'
 
-const DIMS: [keyof Review['scores'], string][] = [['hook', '追读钩子'], ['pacing', '节奏'], ['payoff', '爽点兑现'], ['character', '人物'], ['coherence', '连贯'], ['continuity', '连续性'], ['semantics', '语义']]
+const DIMS: [keyof Review['scores'], string][] = [['hook', '追读钩子'], ['pacing', '节奏'], ['payoff', '爽点兑现'], ['character', '人物'], ['coherence', '连贯'], ['continuity', '连续性'], ['semantics', '语义'], ['retention', '追读欲']]
 const DIM_LABEL: Record<string, string> = Object.fromEntries(DIMS.map(([k, l]) => [k, l]))
 const SEV = { high: { l: '严重', t: 'danger' }, mid: { l: '一般', t: 'warning' }, low: { l: '轻微', t: 'neutral' } } as const
 
@@ -33,6 +33,20 @@ export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote 
         </div>
         <Button size="icon-sm" variant="ghost" onClick={onReview} disabled={reviewing} aria-label="重新审稿"><RotateCw className={cn('h-3.5 w-3.5', reviewing && 'animate-spin')} /></Button>
       </div>
+      {review.reader && (
+        <div className="rounded-lg bg-subtle p-3 hairline">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs font-medium text-muted-foreground">番茄老读者</span>
+            {review.reader.score != null && (
+              <span className={cn('text-[15px] font-semibold', review.reader.score >= 7 ? 'text-success' : review.reader.score >= 6 ? 'text-warning' : 'text-danger')}>
+                {review.reader.score}/10
+              </span>
+            )}
+            <span className="text-[11px] text-muted-foreground">{review.reader.score != null && review.reader.score < 6 ? '大概率划走' : '会点下一章'}</span>
+          </div>
+          {review.reader.verdict && <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/80">{review.reader.verdict}</p>}
+        </div>
+      )}
       <RadarChart size={232} data={DIMS.filter(([k]) => review.scores[k] !== undefined).map(([k, l]) => ({ label: l, value: review.scores[k] ?? 0 }))} />
       <div>
         <div className="mb-2 flex items-center gap-1">

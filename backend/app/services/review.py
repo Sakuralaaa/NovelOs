@@ -10,14 +10,18 @@ from app.llm.gateway import LLMGateway
 from app.skills.loader import render, system_prompt
 
 # v0.6：新增 continuity（连续性与物理逻辑：道具/服装/站位朝向/角度/身体前后矛盾）与 semantics（语义写反、搭配错误）
-DIMENSIONS = ("hook", "pacing", "payoff", "character", "coherence", "continuity", "semantics")
+# v0.8.4：新增 retention（追读欲）——单独一次「番茄老读者」视角的审读，专门找让人想划走的地方
+DIMENSIONS = ("hook", "pacing", "payoff", "character", "coherence", "continuity", "semantics", "retention")
 SEVERITIES = ("high", "mid", "low")
 PENALTY = {"high": 25, "mid": 10, "low": 3}
-WEIGHTS = {"hook": 0.2, "pacing": 0.15, "payoff": 0.15, "character": 0.12, "coherence": 0.13, "continuity": 0.15, "semantics": 0.1}
+WEIGHTS = {"hook": 0.15, "pacing": 0.12, "payoff": 0.13, "character": 0.1, "coherence": 0.12, "continuity": 0.13,
+           "semantics": 0.1, "retention": 0.15}
 # 模型偶尔用别名，归一到正式维度
 DIM_ALIASES = {"physics": "continuity", "logic": "continuity", "props": "continuity", "consistency": "continuity",
-               "semantic": "semantics", "meaning": "semantics", "wording": "semantics"}
+               "semantic": "semantics", "meaning": "semantics", "wording": "semantics",
+               "reader": "retention", "drop": "retention", "engagement": "retention"}
 PASS_OVERALL = 70
+READER_PASS = 6  # 读者视角打分低于这个，章节不算通过
 
 _WS = re.compile(r"\s+")
 
@@ -132,10 +136,41 @@ def deterministic_issues(
     return out
 
 
-def build_review(issues: list[dict[str, str]]) -> dict[str, Any]:
+def build_review(issues: list[dict[str, str]], reader: dict[str, Any] | None = None) -> dict[str, Any]:
     scores = compute_scores(issues)
     passed = not any(i["severity"] == "high" for i in issues) and scores["overall"] >= PASS_OVERALL
-    return {"scores": scores, "issues": issues, "passed": passed}
+    out: dict[str, Any] = {"scores": scores, "issues": issues, "passed": passed}
+    if reader:
+        out["reader"] = reader
+        if isinstance(reader.get("score"), int) and reader["score"] < READER_PASS:
+            out["passed"] = False
+    return out
+
+
+def run_reader(gw: LLMGateway, content: str, number: int, chapter_plan: str, context: str,
+               meta: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    """番茄老读者视角：给追读意愿打分，标出想划走的句子。失败时返回 (None, [])，不影响主审稿。"""
+    try:
+        raw = gw.chat_json(
+            "reader", system_prompt("reader"),
+            render("reader", number=number, chapter_plan=chapter_plan, content=content,
+                   context=context or "（无：这是开篇）"),
+            meta={**(meta or {}), "content": content, "number": number}, temperature=0.3,
+        )
+    except Exception:  # noqa: BLE001
+        return None, []
+    if not isinstance(raw, dict):
+        return None, []
+    items = [{**it, "dimension": "retention"} for it in (raw.get("issues") or []) if isinstance(it, dict)]
+    issues, _ = validate_issues({"issues": items[:6]}, content)
+    score = raw.get("score")
+    try:
+        score = max(0, min(10, int(score)))
+    except (TypeError, ValueError):
+        score = None
+    if score is None and not issues:
+        return None, []
+    return {"score": score, "verdict": str(raw.get("verdict") or "")[:200]}, issues
 
 
 def run_review(
@@ -159,5 +194,6 @@ def run_review(
         temperature=0.2,
     )
     llm_issues, dropped = validate_issues(raw, content)
-    issues = deterministic_issues(content, protagonist, required_chars, number, cheat_terms) + llm_issues
-    return build_review(issues), dropped
+    reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta)
+    issues = deterministic_issues(content, protagonist, required_chars, number, cheat_terms) + llm_issues + reader_issues
+    return build_review(issues, reader), dropped
