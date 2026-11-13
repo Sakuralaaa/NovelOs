@@ -706,6 +706,12 @@ def _clean_rewrite(text: str) -> str:
     return body
 
 
+def normalize_paragraphs(text: str) -> str:
+    """统一段落格式：每段去掉首尾空白，段与段之间空一行（与生成正文一致）。"""
+    paras = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
+    return "\n\n".join(p for p in paras if p)
+
+
 def rewrite_chapter_job(chapter_id: int, instruction: str, route: str | None, scope: str, start: int | None, end: int | None,
                         ctx: JobContext) -> dict[str, Any]:
     """按作者要求改写全章或选中的文字。只生成改写稿，不落库；作者对比后采纳（apply_rewrite）或丢弃。"""
@@ -734,6 +740,8 @@ def rewrite_chapter_job(chapter_id: int, instruction: str, route: str | None, sc
         meta={**meta, "text": text, "instruction": instruction, "scope": scope}, temperature=0.8, route=route,
     )
     new = _clean_rewrite(out)
+    if scope != "selection" or "\n\n" in text:
+        new = normalize_paragraphs(new)
     if not new.strip():
         raise ValueError("模型没有给出改写稿")
     if scope != "selection" and len(new) < 0.3 * len(text) and not re.search(r"(删|缩|压|精简|短)", instruction):

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy,
+  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -359,6 +359,11 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <SaveIndicator state={saveState} at={savedAt} />
           </div>
           <div className="flex items-center gap-1">
+            <Tip content="整理段落：段与段之间统一空一行"><Button size="icon-sm" variant="ghost" disabled={busy || hasVariants || rewriting || !!diff} onClick={() => {
+              const fixed = content.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join('\n\n')
+              if (fixed === content) { toast.info('段落格式已经是整齐的'); return }
+              edit({ content: fixed }); toast.success('已整理段落', { description: '可随时手动再改' })
+            }} aria-label="整理段落"><Rows3 className="h-4 w-4" /></Button></Tip>
             <Tip content={serif ? '切换为黑体' : '切换为宋体'}><Button size="icon-sm" variant="ghost" onClick={() => { setSerif(!serif); localStorage.setItem('novelos-serif', serif ? '0' : '1') }} aria-label="字体"><Type className="h-4 w-4" /></Button></Tip>
             <Button size="sm" variant="ghost" loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onClick={runReview}><span className="hidden sm:inline">审稿</span></Button>
             <Button size="sm" variant="ghost" loading={!!humanizeJob} disabled={busy || hasVariants} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={() => runRewrite('humanize')}><span className="hidden sm:inline">人味修整</span></Button>

@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
 import { cn } from '@/lib/utils'
 
 export interface Range { start: number; end: number; kind: 'focus' | 'bare' | 'summary' }
@@ -20,22 +20,36 @@ export const HighlightEditor = forwardRef<EditorHandle, {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
 
-  useLayoutEffect(() => {
+  // 自动增高：测量时先把外层撑住，避免 textarea 瞬间塌成 0 高导致滚动位置被浏览器夹回顶部
+  // （手机/平板上整页滚动时尤其明显：改一个字就跳回开头）
+  const autosize = useCallback(() => {
     const el = ta.current
     if (!el) return
-    const top = scroller.current?.scrollTop
-    el.style.height = '0px'
+    const wrap = el.parentElement
+    const sc = scroller.current
+    const top = sc?.scrollTop
+    const winY = typeof window !== 'undefined' ? window.scrollY : 0
+    if (wrap) wrap.style.minHeight = `${el.offsetHeight}px`
+    el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
-    if (scroller.current && top !== undefined) scroller.current.scrollTop = top
-  }, [value, serif, scroller])
+    if (wrap) wrap.style.minHeight = ''
+    if (sc && top !== undefined && sc.scrollTop !== top) sc.scrollTop = top
+    if (typeof window !== 'undefined' && window.scrollY !== winY) window.scrollTo({ top: winY })
+  }, [scroller])
+
+  useLayoutEffect(() => { autosize() }, [value, serif, autosize])
 
   useLayoutEffect(() => {
     const el = ta.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => { el.style.height = '0px'; el.style.height = `${el.scrollHeight}px` })
+    let w = el.parentElement!.clientWidth
+    const ro = new ResizeObserver(() => {
+      const nw = el.parentElement!.clientWidth
+      if (nw !== w) { w = nw; autosize() }
+    })
     ro.observe(el.parentElement!)
     return () => ro.disconnect()
-  }, [])
+  }, [autosize])
 
   useImperativeHandle(ref, () => ({
     focus: () => ta.current?.focus(),

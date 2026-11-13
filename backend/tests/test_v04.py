@@ -388,3 +388,8 @@ def test_foreshadow_bugfixes_string_beats_and_commit_fallback(client: TestClient
     assert "柜台下压着的半张欠条" in descs and descs["柜台下压着的半张欠条"]["source"] == "outline"
     assert descs["柜台下压着的半张欠条"]["status"] == "planted" and "核对" in descs["柜台下压着的半张欠条"]["note"]
     assert any("变更声明漏了" in w for w in c["changes"]["warnings"])
+
+
+def test_normalize_paragraphs_blank_line():
+    from app.services.writing import normalize_paragraphs
+    assert normalize_paragraphs("甲段\n乙段\r\n\n\n  丙段  \n") == "甲段\n\n乙段\n\n丙段"
