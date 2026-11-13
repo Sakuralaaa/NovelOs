@@ -165,6 +165,50 @@ def _record_usage(target: Target, role: str, task: str, usage: dict[str, Any] | 
         log.exception("记录 token 用量失败")
 
 
+def _needs_stream(text: str) -> bool:
+    t = text.lower()
+    return "stream" in t and any(k in t for k in ("not support", "only support", "must be true", "required", "不支持"))
+
+
+def _post_stream(c: httpx.Client, t: Target, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    body = {**body, "stream": True}
+    if t.api_format == "openai":
+        body["stream_options"] = {"include_usage": True}
+    texts: list[str] = []
+    usage: dict[str, Any] = {}
+    with c.stream("POST", proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body) as r:
+        if r.status_code >= 400:
+            r.read()
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
+        for line in r.iter_lines():
+            if not line.startswith("data:"):
+                continue
+            payload = line[5:].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                ev = json.loads(payload)
+            except ValueError:
+                continue
+            if t.api_format == "openai":
+                for ch in ev.get("choices") or []:
+                    d = (ch.get("delta") or {}).get("content")
+                    if isinstance(d, str):
+                        texts.append(d)
+                if ev.get("usage"):
+                    usage = ev["usage"]
+            else:
+                typ = ev.get("type", "")
+                if typ == "response.output_text.delta" and isinstance(ev.get("delta"), str):
+                    texts.append(ev["delta"])
+                elif typ == "response.completed":
+                    usage = (ev.get("response") or {}).get("usage") or usage
+    text = "".join(texts)
+    if t.api_format == "openai":
+        return {"choices": [{"message": {"role": "assistant", "content": text}}], "usage": usage}
+    return {"output_text": text, "usage": usage}
+
+
 def _search_params(t: Target) -> dict[str, Any]:
     """部分服务商需要显式打开联网：通义千问 enable_search，智谱 web_search 工具。
 
@@ -301,6 +345,9 @@ class LLMGateway:
         path, body = proto.chat_request(t.api_format, t.model, messages, temperature, max_tokens, want_image)
         with httpx.Client(timeout=timeout or self.settings.llm_timeout, transport=_keepalive_transport()) as c:
             r = c.post(proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body)
+            if r.status_code == 400 and t.api_format in ("openai", "responses") and _needs_stream(r.text) and not want_image:
+                # 有的中转只支持流式（如「Non-stream chat request is currently not supported」），自动改用流式再拼回完整结果
+                return _post_stream(c, t, path, body)
         if r.status_code >= 400:
             raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
         try:

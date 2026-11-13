@@ -104,3 +104,37 @@ def llm_call(cid: int) -> dict:
 def clear_llm_calls() -> dict:
     trace.clear()
     return {"ok": True}
+
+
+class PingIn(BaseModel):
+    route: str = Field(description="channel_id:model")
+    prompt: str = Field(default="用一句话介绍你自己。", max_length=20_000)
+    system: str | None = Field(default=None, max_length=20_000)
+    max_tokens: int | None = Field(default=200, ge=1, le=8000)
+    temperature: float | None = 0.7
+
+
+@router.post("/debug/llm-ping")
+async def llm_ping(body: PingIn) -> dict:
+    """直接调用指定渠道的某个模型（不经路由与回退），用来比较模型或排查“模型不存在/不支持非流式”等问题。"""
+    import asyncio
+    import time
+
+    from app.db import session_scope
+    from app.llm import protocols as proto
+    from app.llm.gateway import LLMGateway, _friendly, route_target
+
+    with session_scope() as s:
+        t = route_target(s, body.route)
+    msgs = ([{"role": "system", "content": body.system}] if body.system else []) + [{"role": "user", "content": body.prompt}]
+    t0 = time.time()
+    try:
+        data = await asyncio.to_thread(LLMGateway()._post_chat, t, msgs, body.temperature, body.max_tokens)
+        content, usage, _ = proto.parse_chat(t.api_format, data)
+    except Exception as e:  # noqa: BLE001
+        trace.record(task="ping", role="ping", model=t.model, channel=t.name, messages=msgs, output="",
+                     started=t0, error=_friendly(e), temperature=body.temperature)
+        return {"ok": False, "model": t.model, "latency_ms": int((time.time() - t0) * 1000), "error": _friendly(e)}
+    trace.record(task="ping", role="ping", model=t.model, channel=t.name, messages=msgs, output=content,
+                 started=t0, usage=usage, temperature=body.temperature)
+    return {"ok": True, "model": t.model, "latency_ms": int((time.time() - t0) * 1000), "content": content, "usage": usage}

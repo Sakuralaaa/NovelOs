@@ -60,6 +60,14 @@ def _json_obj(raw: str) -> Any:
     return json.loads(t[a: b + 1] if a != -1 and b > a else t)
 
 
+def _prop_name(v: Any) -> str:
+    """模型常把账本里的「道具·xxx」整段抄回来，去掉前缀，避免同一道具被当成两件。"""
+    t = _s(v, 40)
+    while t.startswith(("道具·", "道具:", "道具：")):
+        t = t[3:].strip()
+    return t[:20]
+
+
 def _s(v: Any, n: int = 60) -> str:
     if isinstance(v, (list, tuple)):
         v = "、".join(str(x) for x in v if x)
@@ -88,9 +96,9 @@ def normalize_scene_state(data: Any) -> dict[str, Any]:
         })
     props = data.get("props") or data.get("items") or []
     for p in props if isinstance(props, list) else []:
-        if not isinstance(p, dict) or not _s(p.get("name")):
+        if not isinstance(p, dict) or not _prop_name(p.get("name")):
             continue
-        out["props"].append({"name": _s(p.get("name"), 20), "where": _s(p.get("where") or p.get("location")),
+        out["props"].append({"name": _prop_name(p.get("name")), "where": _s(p.get("where") or p.get("location")),
                              "state": _s(p.get("state"))})
     out["cast"], out["props"] = out["cast"][:MAX_CAST], out["props"][:MAX_PROPS]
     out["env"] = _s(data.get("env") or data.get("environment"), 120)

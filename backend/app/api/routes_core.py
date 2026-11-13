@@ -179,7 +179,8 @@ def routing_get(s: Session = Depends(get_session)) -> dict[str, str | None]:
 
 @router.put("/settings/routing")
 def routing_put(body: RoutingIn, s: Session = Depends(get_session)) -> dict[str, str | None]:
-    data = body.model_dump()
+    # 只更新请求里出现的字段，没传的保持原值（避免脚本只改一项时把其它路由清空）
+    data = body.model_dump(exclude_unset=True)
     image_mode = data.pop("image_mode", None)
     for role, v in data.items():
         if v is None or v == "":
@@ -190,7 +191,8 @@ def routing_put(body: RoutingIn, s: Session = Depends(get_session)) -> dict[str,
         cid = v.split(":", 1)[0]
         if not cid.isdigit() or s.get(Channel, int(cid)) is None:
             raise HTTPException(400, f"{role} 路由引用的渠道 {cid} 不存在")
-    kv_set(s, ROUTING_KEY, {r: data.get(r) for r in ROLES})
+    current = get_routing(s)
+    kv_set(s, ROUTING_KEY, {r: (data[r] if r in data else current.get(r)) for r in ROLES})
     if image_mode:
         kv_set(s, IMAGE_MODE_KEY, image_mode)
     return {**get_routing(s), "image_mode": get_image_mode(s)}

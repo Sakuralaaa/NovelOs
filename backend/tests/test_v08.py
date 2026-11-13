@@ -75,3 +75,52 @@ def test_prompt_override_and_trace(client):
     assert lst and lst[0]["task"] == "summary" and lst[0]["model"] == "mock"
     full = client.get(f"/api/debug/llm-calls/{lst[0]['id']}").json()
     assert full["messages"][0]["content"] == "你好"
+
+
+def test_routing_partial_update_keeps_others(client):
+    ch = client.post("/api/settings/channels", json={"name": "t", "base_url": "http://x/v1", "api_key": "k", "models": ["a", "b"]}).json()
+    cid = ch["id"]
+    client.put("/api/settings/routing", json={"planner": f"{cid}:a", "writer": f"{cid}:b"})
+    r = client.put("/api/settings/routing", json={"planner": f"{cid}:b"}).json()
+    assert r["planner"] == f"{cid}:b" and r["writer"] == f"{cid}:b"
+    r = client.put("/api/settings/routing", json={"writer": None}).json()
+    assert r["writer"] is None and r["planner"] == f"{cid}:b"
+    client.put("/api/settings/routing", json={"planner": None})
+    client.delete(f"/api/settings/channels/{cid}")
+
+
+def test_stream_fallback(monkeypatch):
+    import httpx
+
+    from app.llm import gateway as g
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json as _j
+        b = _j.loads(req.content)
+        if not b.get("stream"):
+            return httpx.Response(400, json={"error": {"message": "Non-stream chat request is currently not supported (11101)"}})
+        if req.url.path.endswith("/responses"):
+            sse = ('data: {"type":"response.output_text.delta","delta":"你"}\n\n'
+                   'data: {"type":"response.output_text.delta","delta":"好"}\n\n'
+                   'data: {"type":"response.completed","response":{"usage":{"input_tokens":3,"output_tokens":2}}}\n\n')
+        else:
+            sse = ('data: {"choices":[{"delta":{"content":"你"}}]}\n\n'
+                   'data: {"choices":[{"delta":{"content":"好"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n'
+                   "data: [DONE]\n\n")
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(g, "_keepalive_transport", lambda: httpx.MockTransport(handler))
+    for fmt in ("openai", "responses"):
+        t = g.Target(0, "t", "http://x/v1", "k", "m", fmt)
+        data = g.LLMGateway()._post_chat(t, [{"role": "user", "content": "hi"}], 0.5, 10)
+        from app.llm import protocols as proto
+        text, usage, _ = proto.parse_chat(fmt, data)
+        assert text == "你好" and usage["completion_tokens"] == 2
+
+
+def test_scene_state_prop_prefix_dedup():
+    from app.services.scene_state import merge_state, normalize_scene_state
+    a = normalize_scene_state({"props": [{"name": "牌匾", "where": "长案底座"}]})
+    b = normalize_scene_state({"props": [{"name": "道具·牌匾", "where": "叶承怀里"}]})
+    m = merge_state(a, b)
+    assert [p["name"] for p in m["props"]] == ["牌匾"] and m["props"][0]["where"] == "叶承怀里"
