@@ -1,5 +1,7 @@
 把下面的章细纲拆成 $min_scenes–$max_scenes 个场景节拍，供逐场景写作。
 
+$book_context
+
 <chapter_plan>
 $chapter_plan
 </chapter_plan>

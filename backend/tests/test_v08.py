@@ -124,3 +124,17 @@ def test_scene_state_prop_prefix_dedup():
     b = normalize_scene_state({"props": [{"name": "道具·牌匾", "where": "叶承怀里"}]})
     m = merge_state(a, b)
     assert [p["name"] for p in m["props"]] == ["牌匾"] and m["props"][0]["where"] == "叶承怀里"
+
+
+def test_scene_plan_gets_book_context(client):
+    from app.db import session_scope
+    from app.models.tables import OutlineNode
+    from app.services import common
+    from app.services.context import scene_plan_context
+    b = client.post("/api/books", json={"title": "底账测试", "genre": "都市高武", "premise": "测试"}).json()
+    client.post(f"/api/books/{b['id']}/cards", json={"type": "faction", "name": "天擎基因财阀", "summary": "垄断基因资源的财阀"})
+    with session_scope() as s:
+        book = common.get_book(s, b["id"])
+        node = OutlineNode(book_id=b["id"], level="chapter", order=1, title="t")
+        txt = scene_plan_context(s, book, node)
+    assert "天擎基因财阀" in txt and "设定底账" in txt

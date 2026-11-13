@@ -28,7 +28,7 @@ from app.models.tables import Book, Card, Chapter, Fact, Foreshadow, OutlineNode
 from app.services import common
 from app.services.changes import ChangeSet, check_against_ledger, match_foreshadow, parse_changes, split_output
 from app.services.common import Conflict, NotFound
-from app.services.context import ContextPack, build_context_pack
+from app.services.context import ContextPack, build_context_pack, scene_plan_context
 from app.services.outline import ensure_next_chapter_node, ensure_opening_beats, node_plan_text
 from app.services.scene_state import (
     STATE_SCHEMA_HINT, chapter_so_far, merge_state, parse_scene_state, prop_move_warnings, render_state, scene_budget_lines,
@@ -387,6 +387,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         meta = {**common.kit_meta(s, book), "number": number, "beats": beats, "title": book.title,
                 "pronoun": common.pronoun(book), "words": book.chapter_words}
         pool = _sensory_pool(s, book)
+        plan_ctx = scene_plan_context(s, book, node)
 
     # 0) 本章涉及的现实细节先联网核实（未配置搜索模型时跳过）
     plan += research_notes("chapter", plan, book_id, ctx, 5)
@@ -396,7 +397,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
     raw_scenes = get_gateway().chat_json(
         "scene_plan", system_prompt("scene_plan"),
         render("scene_plan", chapter_plan=plan, min_scenes=MIN_SCENES, max_scenes=MAX_SCENES,
-               opening_rules=scene_plan_rules(beats, number)),
+               opening_rules=scene_plan_rules(beats, number), book_context=plan_ctx),
         meta={**meta, "sensory_pool": pool},
     )
     scenes = normalize_scenes(raw_scenes, beats, pool, number)

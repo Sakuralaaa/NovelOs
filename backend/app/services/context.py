@@ -222,6 +222,26 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
     )
 
 
+def scene_plan_context(s: Session, book: Book, node: OutlineNode, limit: int = 2400) -> str:
+    """拆场景用的设定底账：已有势力/人物/地点的一句话、最近章节摘要、上一章结尾。
+    v0.8.1 实测：拆场景时不给设定，模型会凭空发明新势力（把「天擎财阀」写成「铁穹武备」）。"""
+    bid = book.id or 0
+    lines: list[str] = []
+    for c in common.cards(s, bid):
+        if c.type in ("faction", "character", "location", "item"):
+            lines.append(f"[{c.type}] {c.name}：{(c.summary or '')[:50]}")
+    out = ["【设定底账（势力、人物、地点只能用这里已有的；确需新配角，写清他属于哪个已有势力）】", *lines]
+    committed = common.committed_chapters(s, bid, before=node.order)
+    if committed:
+        out.append("【最近章节摘要】")
+        out += [f"第{c.number}章 {c.title}：{(c.summary or '')[:160]}" for c in committed[-3:]]
+        last = committed[-1]
+        if last.number == node.order - 1 and last.content:
+            out.append("【上一章结尾原文（第一个场景从这里接）】\n" + chapter_tail(last.content))
+    text = "\n".join(out)
+    return text[:limit]
+
+
 # ------------------------------------------------------------------ 状态 / 记忆 / 伏笔 / 写前核对
 
 def chapter_tail(content: str, budget: int = PREV_TAIL_CHARS) -> str:
