@@ -37,6 +37,8 @@ export type Routing = Record<RouteKey, string | null> & { image_mode?: ImageMode
 
 export type Gender = 'male' | 'female'
 export interface RankItem {
+  /** v0.7：榜单条目 id（拆解/仿写接口用） */
+  id?: number
   book_id_ext: string
   title: string
   author: string
@@ -112,6 +114,65 @@ export interface Idea {
   versions?: number
   last_instruction?: string
   trope_hits?: TropeHit[]
+  /** v0.7：普通选题为 null；榜单仿写选题带参考书与自检 */
+  source?: IdeaSource | null
+}
+
+export interface ReskinSelfCheck { aspect: string; original: string; ours: string; similar: boolean }
+export interface IdeaSource {
+  kind: 'reskin'
+  rank_item_id?: number | null
+  ref_title: string
+  ref_book_id_ext?: string
+  ref_category?: string
+  kept: string[]
+  changed: string[]
+  self_check: ReskinSelfCheck[]
+  overlap: { count: number; title?: number; segments: string[] }
+  warnings: string[]
+}
+
+// ---------- v0.7 榜单仿写 ----------
+export interface TeardownCore {
+  payoff_formula: string
+  golden_finger: { type: string; delivery: string }
+  protagonist_template: string
+  opening_hook: string
+  target_readers: string
+  transferable: string[]
+  must_replace: string[]
+  warnings: string[]
+}
+export interface KeywordHit { keyword: string; at_char: number; chapter: number }
+export interface DeepChapter { index: number; title: string; words: number; dialogue_ratio: number; conflict: string; payoff: string; hook: string }
+export interface DeepTeardown {
+  chapters: DeepChapter[]
+  total_words: number
+  dialogue_ratio: number
+  first_conflict: KeywordHit | null
+  first_cheat: KeywordHit | null
+  rhythm: string
+  learnable: string[]
+  overlap: number
+  warnings: string[]
+}
+export interface Teardown {
+  id: number
+  rank_item_id: number
+  book_id_ext?: string
+  title: string
+  created_at?: string
+  cached: boolean
+  teardown: TeardownCore | null
+  deep: DeepTeardown | null
+}
+export interface ReskinResult {
+  rank_item_id?: number
+  teardown_id?: number
+  ref_title: string
+  idea_ids: number[]
+  ideas: Idea[]
+  warnings: string[]
 }
 
 export type IdeaField = 'title' | 'genre' | 'logline' | 'selling_points' | 'hook' | 'expectations' | 'arc' | 'endgame'
@@ -316,7 +377,7 @@ export interface AgentMessage {
   label?: string; kind?: 'read' | 'write'
 }
 export type AgentProposalKind = 'book_info' | 'bible' | 'card_delete' | 'outline_nodes' | 'chapter_rewrite' | 'foreshadow_add'
-  | 'foreshadow_update' | 'foreshadow_delete' | 'package' | 'covers' | 'write_chapter'
+  | 'foreshadow_update' | 'foreshadow_delete' | 'package' | 'covers' | 'write_chapter' | 'reskin_ideas'
 export type AgentProposalStatus = 'pending' | 'applied' | 'rejected' | 'reverted' | 'running' | 'failed'
 export interface AgentProposal {
   id: number; book_id: number; session_id: number; message_id: number | null; kind: AgentProposalKind; kind_label: string

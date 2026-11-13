@@ -11,6 +11,7 @@ import { Select, type Opt } from '@/components/ui/select'
 import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { TropeAlert } from '@/components/common/AiAsk'
+import { ReskinSource } from '@/components/radar/ReskinSource'
 import { useChannels } from '@/hooks/queries'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
@@ -145,6 +146,8 @@ export default function IdeaDetail() {
       </div>
 
       <TropeAlert hits={idea.trope_hits} className="mt-5" busy={!!reviseJob} onReplace={locked ? undefined : detrope} />
+
+      {idea.source?.kind === 'reskin' && <ReskinSource src={idea.source} className="mt-5" />}
 
       {!locked && (
         <Card className="mt-6">

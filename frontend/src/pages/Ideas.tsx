@@ -147,7 +147,7 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <Link to={`/ideas/${i.id}`} className="block break-words text-[16px] font-semibold leading-snug tracking-tight hover:text-primary">{i.title}</Link>
-          <div className="mt-1 text-xs text-muted-foreground">{i.genre}</div>
+          <div className="mt-1 truncate text-xs text-muted-foreground">{i.genre}{i.source?.kind === 'reskin' && <span className="ml-1.5 text-primary/80">· 仿《{i.source.ref_title}》</span>}</div>
         </div>
         <ScoreRing value={i.scores.overall} size={50} label="综合" />
       </div>

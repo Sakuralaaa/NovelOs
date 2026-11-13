@@ -2,7 +2,7 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
-  OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Style, TrendTopic, WritingSettings,
+  OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, ReskinResult, Routing, Teardown, Style, TrendTopic, WritingSettings,
 } from './types'
 
 export interface AuthStatus { enabled: boolean; authenticated: boolean; username: string; managed_by_env: boolean; min_password_len: number }
@@ -87,6 +87,11 @@ export const api = {
   radarTrends: (gender?: Gender) => get<TrendTopic[]>(`/radar/trends${qs({ gender })}`),
   radarConfig: () => get<RadarConfig>('/radar/config'),
   saveRadarConfig: (b: RadarConfig) => put<RadarConfig>('/radar/config', b),
+  // v0.7：榜单仿写（同步接口）
+  teardown: (itemId: number) => get<Teardown>(`/radar/items/${itemId}/teardown`),
+  runTeardown: (itemId: number, refresh = false) => post<Teardown>(`/radar/items/${itemId}/teardown${qs({ refresh: refresh || undefined })}`),
+  deepTeardown: (itemId: number, text: string) => post<Teardown>(`/radar/items/${itemId}/deep`, { text }),
+  reskin: (itemId: number) => post<ReskinResult>(`/radar/items/${itemId}/reskin`),
 
   books: () => get<Book[]>('/books'),
   book: (id: number) => get<Book>(`/books/${id}`),
@@ -228,6 +233,8 @@ export const qk = {
   radarTrends: (gender?: string) => ['radar', 'trends', gender ?? ''] as const,
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
+  teardown: (itemId: number) => ['radar', 'teardown', itemId] as const,
+  reskin: (itemId: number) => ['radar', 'reskin', itemId] as const,
   books: ['books'] as const,
   book: (id: number) => ['book', id] as const,
   ideas: ['ideas'] as const,

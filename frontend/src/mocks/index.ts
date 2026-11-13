@@ -6,7 +6,7 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo, BibleItem, BibleOp, BibleProposal, BookInfo,
   ForeshadowPlanItem, Impact, OutlineSyncItem, Trope, TropeHit,
   Book, Card, Channel, Chapter, ChapterVariant, Foreshadow, Idea, Job, Lint, OutlineNode, Package,
-  RadarConfig, RadarSnapshot, Review, Routing, Style,
+  RadarConfig, RadarSnapshot, Review, Routing, Style, Teardown,
 } from '@/lib/types'
 import { analyzeText } from '@/lib/textAnalysis'
 import { countWords } from '@/lib/utils'
@@ -287,6 +287,73 @@ on('GET', '/radar/trends', () => [...MALE_CATS, ...FEMALE_CATS].map((cat, i) => 
   const its = db.items.filter((x) => x.category === cat)
   return { category: cat, heat: Math.round(its.reduce((n, x) => n + x.read_count, 0) / 1e5) + ((i * 13) % 30), books: its.length, rising: (i * 5) % 4, sample_titles: its.slice(0, 3).map((x) => x.title) }
 }).sort((a, b) => b.heat - a.heat))
+// v0.7 榜单仿写
+const teardowns = new Map<number, Teardown>()
+const rankOf = (id: string) => must(db.items.find((x) => x.id === +id), '榜单条目')
+function mkTeardown(it: (typeof db.items)[number]): Teardown {
+  const male = it.gender === 'male'
+  return {
+    id: nid(), rank_item_id: it.id!, book_id_ext: it.book_id_ext, title: it.title, created_at: now(), cached: false, deep: null,
+    teardown: {
+      payoff_formula: male ? '底层受辱 → 金手指觉醒 → 当众打脸 → 资源翻倍 → 更大的舞台' : '被辜负 → 清醒反击 → 身份反转 → 被偏爱 → 双向奔赴',
+      golden_finger: { type: male ? '系统 / 面板' : '重生记忆', delivery: male ? '第 1 章结尾露出，第 2 章第一次兑现，每 3 章一次小升级' : '开篇即重生，前 3 章用信息差连续反杀' },
+      protagonist_template: male ? '隐忍型小人物，嘴硬心软，有明确的守护对象' : '清醒独立的女主，前世吃过亏，这一世不再委屈自己',
+      opening_hook: male ? '开局即绝境：被当众羞辱 + 倒计时危机' : '婚礼当天重生回十年前',
+      target_readers: male ? '18–35 岁男性，喜欢快节奏升级与打脸' : '20–35 岁女性，喜欢情绪价值与成长逆袭',
+      transferable: ['前 300 字给出冲突', '金手指第 1 章露出、第 2 章兑现', '每章结尾留一个具体的悬念'],
+      must_replace: ['书名里的核心意象', '金手指的具体外形与名字', '主角身份与职业', '世界观设定'],
+      warnings: it.rank % 4 === 1 ? ['拆解结果与简介有 1 处连续 8 字相同，已提醒'] : [],
+    },
+  }
+}
+on('GET', '/radar/items/:id/teardown', (m) => must(teardowns.get(+m[1]), '这本书还没有拆解'))
+on('POST', '/radar/items/:id/teardown', (m, _b, u) => {
+  const it = rankOf(m[1]); const old = teardowns.get(it.id!)
+  if (old && u.searchParams.get('refresh') !== 'true') return { ...old, cached: true }
+  const t = { ...mkTeardown(it), deep: old?.deep ?? null }; teardowns.set(it.id!, t); return t
+})
+on('POST', '/radar/items/:id/deep', (m, b) => {
+  const it = rankOf(m[1]); const t = teardowns.get(it.id!) ?? mkTeardown(it)
+  const text = String(b.text ?? ''); const n = text.replace(/\s/g, '').length
+  if (!n) throw new HttpErr(400, '请粘贴试读原文')
+  if (n > 20000) throw new HttpErr(400, `原文超过 20000 字（现在 ${n} 字），请删减后再试`)
+  const parts = text.split(/\n(?=第[一二三四五六七八九十百\d]+章)/).filter((x) => x.trim())
+  const chapters = parts.map((p, i) => {
+    const w = p.replace(/\s/g, '').length; const dl = (p.match(/“[^”]*”/g) ?? []).join('').length
+    return { index: i + 1, title: (p.split('\n')[0] || '').slice(0, 20), words: w, dialogue_ratio: w ? +(dl / w).toFixed(2) : 0,
+      conflict: ['被当众退婚', '债主上门', '比试被设局'][i % 3], payoff: ['系统觉醒，当场反杀', '一招逼退对手', '拿回本该属于自己的东西'][i % 3], hook: ['神秘人留下一句话', '更大的敌人现身', '金手指出现新提示'][i % 3] }
+  })
+  const deep = { chapters, total_words: n, dialogue_ratio: 0.31, first_conflict: { keyword: '退婚', at_char: 186, chapter: 1 }, first_cheat: { keyword: '系统', at_char: 1420, chapter: 1 },
+    rhythm: '每章 1 个小冲突 + 1 个小爽点，第 3 章出现第一个大反转；对白占三成，推进快。', learnable: ['冲突在前 200 字内出现', '金手指露出后立刻给一次小兑现', '章末钩子都落在具体的人或物上'], overlap: 0, warnings: [] }
+  const out = { ...t, deep, cached: false }; teardowns.set(it.id!, out); return out
+})
+on('POST', '/radar/items/:id/reskin', (m) => {
+  const it = rankOf(m[1]); const t = teardowns.get(it.id!) ?? mkTeardown(it); teardowns.set(it.id!, t)
+  const seeds = [
+    { title: '我在废土当判官', logline: '核冬天第十年，一个被流放的书记员发现自己判下的每一桩案子都会成真。', genre: '废土 · 规则' },
+    { title: '潮汐守夜人', logline: '海上城邦每晚涨潮，灯塔学徒能看见潮水里沉着的旧日记忆。', genre: '海洋奇幻' },
+    { title: '县城修钟匠', logline: '九十年代的小县城，修钟匠的徒弟能把一座钟拨回三分钟。', genre: '年代 · 异能' },
+  ]
+  const ideas: Idea[] = seeds.map((x, k) => ({
+    id: nid(), book_id: null, title: x.title, logline: x.logline, genre: x.genre, hook: '开篇三百字内主角就被逼到绝境，然后能力第一次兑现。',
+    selling_points: ['结构同款的快节奏爽点', '全新的世界观和金手指外形'], expectations: ['主角会不会被反噬'], arc: ['立足', '扩张', '对决'], endgame: '查清能力的来源',
+    scores: { heat: 78 - k * 4, novelty: 80 - k * 6, fit: 74 - k * 3, overall: 77 - k * 4 }, chosen: false,
+    source: {
+      kind: 'reskin', rank_item_id: it.id, ref_title: it.title, ref_book_id_ext: it.book_id_ext, ref_category: it.category,
+      kept: t.teardown!.transferable, changed: ['主角身份：' + x.title.slice(-3), '金手指外形', '世界观：' + x.genre],
+      self_check: [
+        { aspect: '主角身份', original: t.teardown!.protagonist_template.slice(0, 16), ours: x.logline.slice(0, 16), similar: false },
+        { aspect: '金手指', original: t.teardown!.golden_finger.type, ours: x.logline.slice(-14), similar: k === 1 },
+        { aspect: '开篇钩子', original: t.teardown!.opening_hook, ours: '被逼到绝境后能力第一次兑现', similar: false },
+        { aspect: '世界观', original: it.category, ours: x.genre, similar: false },
+      ],
+      overlap: { count: k === 1 ? 1 : 0, title: 0, segments: k === 1 ? ['一个普通人意外获得'] : [] },
+      warnings: k === 1 ? ['与原书简介连续 8 字相同：「一个普通人意外获得」', '模型自检仍偏像：金手指'] : [],
+    },
+  }))
+  db.ideas.unshift(...ideas)
+  return { rank_item_id: it.id, teardown_id: t.id, ref_title: it.title, idea_ids: ideas.map((x) => x.id), ideas, warnings: ideas.flatMap((x) => x.source!.warnings.map((w) => `《${x.title}》：${w}`)) }
+})
 on('GET', '/radar/config', () => db.radarConfig)
 on('PUT', '/radar/config', (_m, b) => (db.radarConfig = { ...db.radarConfig, ...b }))
 

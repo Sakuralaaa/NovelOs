@@ -49,7 +49,7 @@ export function makeRankItems(): RankItem[] {
       tags: Array.from(new Set([pick(tags), pick(tags), pick(tags)])),
       gender,
     }))
-  return [...mk('male', MALE_TITLES, MALE_CATS, TAGS_M), ...mk('female', FEMALE_TITLES, FEMALE_CATS, TAGS_F)]
+  return [...mk('male', MALE_TITLES, MALE_CATS, TAGS_M), ...mk('female', FEMALE_TITLES, FEMALE_CATS, TAGS_F)].map((x, i) => ({ ...x, id: i + 1 }))
 }
 
 // ---------- 演示书正文段落 ----------

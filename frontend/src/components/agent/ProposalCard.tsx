@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, ArrowRight, Check, CheckCircle2, FileText, ImagePlus, Layers, ListTree, LayoutDashboard, Loader2, Package as PackageIcon,
+  AlertTriangle, ArrowRight, Check, CheckCircle2, Feather, FileText, ImagePlus, Layers, ListTree, LayoutDashboard, Loader2, Package as PackageIcon,
   PenLine, Pencil, RotateCcw, Trash2, Undo2, Waypoints, X, XCircle,
 } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +23,7 @@ import { cardTypeLabel, cn } from '@/lib/utils'
 const KIND_ICON: Record<string, typeof Layers> = {
   book_info: LayoutDashboard, bible: Layers, card_delete: Layers, outline_nodes: ListTree, chapter_rewrite: FileText,
   foreshadow_add: Waypoints, foreshadow_update: Waypoints, foreshadow_delete: Waypoints, package: PackageIcon, covers: ImagePlus, write_chapter: PenLine,
+  reskin_ideas: Feather,
 }
 const STATUS: Record<AgentProposal['status'], { label: string; tone: 'neutral' | 'primary' | 'success' | 'warning' | 'danger' }> = {
   pending: { label: '待采纳', tone: 'primary' }, applied: { label: '已采纳', tone: 'success' }, rejected: { label: '已拒绝', tone: 'neutral' },
@@ -43,6 +44,7 @@ function linkFor(p: AgentProposal): { to: string; label: string } | null {
     case 'write_chapter': return p.result?.chapter_id ? { to: `${b}/chapters/${p.result.chapter_id}`, label: '去看新章节' } : { to: `${b}/chapters`, label: '去章节' }
     case 'foreshadow_add': case 'foreshadow_update': case 'foreshadow_delete': return { to: `${b}/foreshadows`, label: '去伏笔' }
     case 'package': case 'covers': return { to: `${b}/package`, label: '去包装发布' }
+    case 'reskin_ideas': return { to: '/ideas', label: '去选题库' }
   }
   return null
 }
@@ -291,6 +293,8 @@ function Preview({ p, editing, draft, setDraft }: { p: AgentProposal; editing: b
           {(p.result?.covers?.length ?? 0) > 0 && <div className="flex gap-2 overflow-x-auto pb-1">{(p.result?.covers as string[]).map((u: string) => <img key={u} src={u} alt="封面" className="h-32 w-24 shrink-0 rounded-md object-cover hairline" />)}</div>}
         </div>
       )
+    case 'reskin_ideas':
+      return <ReskinPreview p={p} />
     case 'write_chapter':
       return <p className="text-[12.5px] text-muted-foreground">第 {pl.number} 章{pl.variants > 1 ? ` · 写 ${pl.variants} 个版本供挑选` : ''}。写完是草稿，在章节页提交才入账。</p>
   }
@@ -329,6 +333,41 @@ function ChapterPreview({ pl }: { pl: Record<string, any> }) {
       )}
       <button className="text-[12px] text-primary hover:underline" onClick={() => setOpen((o) => !o)}>{open ? '收起改写稿' : '展开改写稿全文'}</button>
       {open && <Textarea readOnly value={pl.after} rows={10} className="bg-subtle font-serif text-[13px]" />}
+    </div>
+  )
+}
+
+function ReskinPreview({ p }: { p: AgentProposal }) {
+  const pl = p.payload
+  const ideas: any[] = pl.ideas ?? []
+  const ids: number[] = p.status === 'applied' ? (p.result?.idea_ids ?? []) : []
+  return (
+    <div className="space-y-2">
+      {pl.ref_title && <p className="text-[12px] text-muted-foreground">参考《{pl.ref_title}》的结构，换掉人设、金手指外形和世界观</p>}
+      {pl.teardown?.payoff_formula && <p className="rounded-lg bg-primary-soft/50 px-3 py-2 text-[12.5px]"><span className="text-primary">爽点公式 · </span>{pl.teardown.payoff_formula}</p>}
+      <ol className="space-y-1.5">
+        {ideas.map((x, i) => {
+          const warns: string[] = x.source?.warnings ?? []
+          const body = (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="num text-[12px] text-muted-foreground">{i + 1}</span>
+                <span className="font-medium">{x.title}</span>
+                {warns.length > 0 ? <Badge tone="warning" title={warns.join('\n')}>{warns.length} 条提醒</Badge> : <Badge tone="success">自检通过</Badge>}
+              </div>
+              {x.logline && <p className="mt-0.5 line-clamp-2 text-[12.5px] text-foreground/70">{x.logline}</p>}
+            </>
+          )
+          return (
+            <li key={i}>
+              {ids[i]
+                ? <Link to={`/ideas/${ids[i]}`} className="block rounded-lg bg-subtle px-3 py-2 transition hover:bg-muted">{body}</Link>
+                : <div className="rounded-lg bg-subtle px-3 py-2">{body}</div>}
+            </li>
+          )
+        })}
+      </ol>
+      {p.status === 'pending' && <p className="text-[12px] text-muted-foreground">采纳后存进选题库（不改当前这本书）；撤回会删掉还没建书的那几个。</p>}
     </div>
   )
 }

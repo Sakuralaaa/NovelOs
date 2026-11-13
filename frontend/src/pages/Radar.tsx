@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ArrowDown, ArrowUp, LayoutGrid, Lightbulb, RefreshCw, Rows3 } from '@/components/icons'
+import { ArrowDown, ArrowUp, Feather, LayoutGrid, Lightbulb, RefreshCw, Rows3 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { Segmented } from '@/components/ui/tabs'
 import { Tip } from '@/components/ui/tooltip'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
+import { ImitatePanel } from '@/components/radar/ImitatePanel'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { Gender, RankItem, TrendTopic } from '@/lib/types'
@@ -25,6 +26,7 @@ export default function RadarPage() {
   const [category, setCategory] = useState<string>('')
   const [view, setView] = useState<'table' | 'grid'>('table')
   const [limit, setLimit] = useState(PAGE)
+  const [imitate, setImitate] = useState<RankItem | null>(null)
   const nav = useNavigate()
   const qc = useQueryClient()
   const { start } = useJobs()
@@ -107,10 +109,10 @@ export default function RadarPage() {
         ) : !shown.length ? (
           <EmptyState className="m-5 border-0" kind="radar" title="还没有榜单数据" action={<Button variant="primary" loading={!!job} onClick={refresh}>刷新榜单</Button>} />
         ) : view === 'table' ? (
-          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} />
+          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={setImitate} />
         ) : (
           <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
-            {shown.map((i, k) => <RankCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1} onIdea={() => toIdeas(i.category, i.gender)} />)}
+            {shown.map((i, k) => <RankCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1} onIdea={() => toIdeas(i.category, i.gender)} onImitate={() => setImitate(i)} />)}
           </div>
         )}
         {filtered.length > shown.length && (
@@ -120,6 +122,7 @@ export default function RadarPage() {
         )}
       </Card>
 
+      <ImitatePanel item={imitate} onClose={() => setImitate(null)} />
     </div>
   )
 }
@@ -198,7 +201,7 @@ function TrendSection({ data, loading, error, onRetry, onPick, onFilter, activeC
   )
 }
 
-function RankTable({ items, byBoard, onIdea }: { items: RankItem[]; byBoard: boolean; onIdea: (i: RankItem) => void }) {
+function RankTable({ items, byBoard, onIdea, onImitate }: { items: RankItem[]; byBoard: boolean; onIdea: (i: RankItem) => void; onImitate: (i: RankItem) => void }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[780px] text-[13.5px]">
@@ -206,12 +209,12 @@ function RankTable({ items, byBoard, onIdea }: { items: RankItem[]; byBoard: boo
           <tr className="border-b bg-subtle/40 text-left text-[12px] text-muted-foreground">
             <th className="h-10 w-16 pl-5 font-medium">排名</th>
             <th className="h-10 font-medium">书名</th>
-            <th className="h-10 w-[150px] font-medium">作者</th>
+            <th className="h-10 w-[120px] font-medium">作者</th>
             <th className="h-10 w-[110px] font-medium">题材</th>
-            <th className="h-10 w-[96px] text-right font-medium">在读</th>
-            <th className="h-10 w-[96px] text-right font-medium">字数</th>
+            <th className="h-10 w-[84px] text-right font-medium">在读</th>
+            <th className="hidden h-10 w-[96px] text-right font-medium xl:table-cell">字数</th>
             <th className="h-10 w-[64px] text-right font-medium">变化</th>
-            <th className="h-10 w-[96px] pr-5" />
+            <th className="h-10 w-[176px] pr-5" />
           </tr>
         </thead>
         <tbody>
@@ -221,13 +224,16 @@ function RankTable({ items, byBoard, onIdea }: { items: RankItem[]; byBoard: boo
               <td className="max-w-0 pr-4">
                 <Tip content={i.abstract || null}><span className="block truncate font-medium">{i.title}</span></Tip>
               </td>
-              <td className="max-w-[150px] truncate pr-3 text-muted-foreground">{i.author}</td>
+              <td className="max-w-[120px] truncate pr-3 text-muted-foreground">{i.author}</td>
               <td><Badge>{i.category}</Badge></td>
               <td className="num text-right">{fmtNum(i.read_count)}</td>
-              <td className="num text-right text-muted-foreground">{fmtNum(i.word_count)}</td>
+              <td className="num hidden text-right text-muted-foreground xl:table-cell">{fmtNum(i.word_count)}</td>
               <td className="text-right text-[12.5px]"><Diff v={i.rank_diff} /></td>
               <td className="pr-5 text-right">
-                <Button size="xs" variant="soft" className="opacity-0 transition group-hover:opacity-100 focus:opacity-100" onClick={() => onIdea(i)}>出选题</Button>
+                <div className="flex justify-end gap-1.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  <Button size="xs" variant="ghost" onClick={() => onIdea(i)}>出选题</Button>
+                  <Button size="xs" variant="soft" icon={<Feather className="h-3.5 w-3.5" />} onClick={() => onImitate(i)}>仿写这本</Button>
+                </div>
               </td>
             </tr>
           ))}
@@ -247,7 +253,7 @@ function RankNo({ n }: { n: number }) {
   )
 }
 
-function RankCard({ item: i, n, onIdea }: { item: RankItem; n: number; onIdea: () => void }) {
+function RankCard({ item: i, n, onIdea, onImitate }: { item: RankItem; n: number; onIdea: () => void; onImitate: () => void }) {
   return (
     <div className="card-hover group flex h-[176px] flex-col rounded-xl border bg-surface p-4">
       <div className="flex items-start gap-3">
@@ -260,8 +266,11 @@ function RankCard({ item: i, n, onIdea }: { item: RankItem; n: number; onIdea: (
       </div>
       <p className="mt-3 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{i.abstract}</p>
       <div className="mt-auto flex items-center justify-between pt-3 text-[12.5px] text-muted-foreground">
-        <span className="num">在读 {fmtNum(i.read_count)} · {fmtNum(i.word_count)} 字</span>
-        <Button size="xs" variant="soft" onClick={onIdea}>出选题</Button>
+        <span className="num truncate">在读 {fmtNum(i.read_count)} · {fmtNum(i.word_count)} 字</span>
+        <span className="flex shrink-0 gap-1">
+          <Button size="xs" variant="ghost" onClick={onIdea}>出选题</Button>
+          <Button size="xs" variant="soft" icon={<Feather className="h-3.5 w-3.5" />} onClick={onImitate}>仿写这本</Button>
+        </span>
       </div>
     </div>
   )
