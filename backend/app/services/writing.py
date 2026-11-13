@@ -29,7 +29,11 @@ from app.services import common
 from app.services.changes import ChangeSet, check_against_ledger, match_foreshadow, parse_changes, split_output
 from app.services.common import Conflict, NotFound
 from app.services.context import ContextPack, build_context_pack
-from app.services.outline import ensure_next_chapter_node, node_plan_text
+from app.services.outline import ensure_next_chapter_node, ensure_opening_beats, node_plan_text
+from app.services.scene_state import (
+    STATE_SCHEMA_HINT, chapter_so_far, merge_state, parse_scene_state, prop_move_warnings, render_state, scene_budget_lines,
+    scene_rules, split_scene_output,
+)
 from app.services.review import run_review
 from app.skills.loader import render, system_prompt
 
@@ -64,13 +68,15 @@ def writing_settings(s: Session) -> dict[str, Any]:
 
 def lint_for(s: Session, book_id: int, content: str, number: int, exclude_chapter_id: int | None = None) -> LintResult:
     others = [c.content for c in common.committed_chapters(s, book_id) if c.id != exclude_chapter_id]
-    names = [c.name for c in common.cards(s, book_id)]
-    return lint_chapter(content, get_settings().lint, others, names, number)
+    cards = common.cards(s, book_id)
+    names = [c.name for c in cards]
+    cps = {c.name: common.voice_of(c)["catchphrases"] for c in cards if c.type == "character" and (c.data or {}).get("catchphrases")}
+    return lint_chapter(content, get_settings().lint, others, names, number, catchphrases=cps)
 
 
 # ------------------------------------------------------------------ 场景节拍
 
-def normalize_scenes(raw: Any, beats: dict[str, Any], sensory_pool: list[str]) -> list[dict[str, Any]]:
+def normalize_scenes(raw: Any, beats: dict[str, Any], sensory_pool: list[str], number: int | None = None) -> list[dict[str, Any]]:
     items = raw.get("scenes") if isinstance(raw, dict) else raw
     scenes: list[dict[str, Any]] = []
     for it in items if isinstance(items, list) else []:
@@ -90,6 +96,10 @@ def normalize_scenes(raw: Any, beats: dict[str, Any], sensory_pool: list[str]) -
             sc["payoff_phase"] = it["payoff_phase"]
         if it.get("exit_hook"):
             sc["exit_hook"] = str(it["exit_hook"])[:120]
+        if it.get("relations"):
+            sc["relations"] = str(it["relations"])[:120]
+        if it.get("cheat"):
+            sc["cheat"] = str(it["cheat"])[:160]
         scenes.append(sc)
     scenes = scenes[:MAX_SCENES]
     while len(scenes) < MIN_SCENES:
@@ -102,6 +112,28 @@ def normalize_scenes(raw: Any, beats: dict[str, Any], sensory_pool: list[str]) -
     # 末场景承接章结果
     if beats.get("outcome") in OUTCOMES:
         scenes[-1]["outcome"] = beats["outcome"]
+    return enforce_scene_rules(scenes, beats, number)
+
+
+def enforce_scene_rules(scenes: list[dict[str, Any]], beats: dict[str, Any], number: int | None) -> list[dict[str, Any]]:
+    """v0.6 程序兜底：
+    - 第 1–3 章：第一个场景带 opening（前三行冲突/异常）；
+    - 细纲有 cheat_beat（第 1 章必有）而没有任何场景认领 → 挂到兑现场景（没有就挂第 2 个场景）；
+    - 章末钩子只由最后一个场景承担：去掉它的 exit_hook，换成 main_hook = 细纲 hook_end，避免场景钩 + 章末钩叠成三个。
+    """
+    if not scenes:
+        return scenes
+    n = int(number or beats.get("number") or 0)
+    if n and n <= 3 and beats.get("opening_hook"):
+        scenes[0].setdefault("opening", str(beats["opening_hook"])[:160])
+    cb = str(beats.get("cheat_beat") or "").strip()
+    if cb and not any(sc.get("cheat") for sc in scenes):
+        target = next((sc for sc in scenes if sc.get("payoff_phase") == "delivery"), scenes[min(1, len(scenes) - 1)])
+        target["cheat"] = cb[:160]
+    last = scenes[-1]
+    last.pop("exit_hook", None)
+    if beats.get("hook_end"):
+        last["main_hook"] = str(beats["hook_end"])[:160]
     return scenes
 
 
@@ -115,42 +147,91 @@ def _sensory_pool(s: Session, book: Book) -> list[str]:
     return pool
 
 
+def scene_plan_rules(beats: dict[str, Any], number: int) -> str:
+    """拆场景时的程序附加要求（按章号与细纲拼）。"""
+    lines: list[str] = []
+    if number <= 3:
+        lines.append(f"第一个场景的第一拍就是冲突或异常：{beats.get('opening_hook') or beats.get('conflict') or ''}。不要用环境描写开场。")
+    if beats.get("cheat_beat"):
+        lines.append(f"金手指/卖点必须在某个场景露出可感知的苗头（优先放在兑现场景），在那个场景的 JSON 里写 \"cheat\"：{beats['cheat_beat']}")
+    lines.append("群众/配角反应镜头全章不超过 3 个，只放在兑现和余韵场景。")
+    lines.append("只有最后一个场景承接章末钩子；其它场景的 exit_hook 只是推动下一场的小悬念。")
+    lines.append("有新人物出场或关系容易误读时，在 relations 里写清他和视点人物的关系与称呼依据（如：被清退的前学员，还没入门，叫“叶馆主”不叫“师父”）。")
+    return "\n".join(f"- {x}" for x in lines)
+
+
 # ------------------------------------------------------------------ 生成一版
+
+def build_scene_user(
+    pack: ContextPack, number: int, node_title: str, plan: str, sc: dict[str, Any], i: int, total: int, per: int,
+    texts: list[str], state: dict[str, Any] | None, beats: dict[str, Any],
+) -> str:
+    """组一个场景的 user 提示词：动态上下文 + 本章已写正文 + 状态账本 + 剩余额度 + 场景硬规则。纯函数，便于测试。"""
+    last = i == total
+    output_instruction = (
+        f"正文写完后另起一行写 {STATE_MARKER_TEXT}，给出本场景结束时的状态 JSON：{STATE_SCHEMA_HINT}\n"
+        "只写在场或刚离场的人物与本场出现过的道具；位置、朝向、手持物、穿着、身体都按正文最后一刻填写。"
+    )
+    if last:
+        output_instruction += "\n这是本章最后一个场景：状态 JSON 之后再另起一行写 ---CHANGES---，给出覆盖全章的变更声明 JSON。"
+    else:
+        output_instruction += "\n不要写 ---CHANGES---。"
+    state_title = "上一场景结束时的状态账本（本场景开头必须与此一致；道具只能被正文里写出来的动作移动）" if texts else \
+        "上一章结束时的状态账本（本章第一个场景从这里接）"
+    budget = scene_budget_lines(texts, sc.get("characters") or [], pack.voices)
+    rules = scene_rules(number, i, total, sc, beats, pack.protagonist)
+    return pack.suffix + "\n\n" + render(
+        "writing_scene", number=number, chapter_title=node_title, scene_index=i, scene_total=total,
+        scene_words=per, chapter_plan=plan, scene=json.dumps(sc, ensure_ascii=False),
+        chapter_so_far=chapter_so_far(texts), state_block=render_state(state, state_title),
+        budget="\n".join(f"- {x}" for x in budget) or "- 无", scene_rules="\n".join(f"- {x}" for x in rules),
+        output_instruction=output_instruction,
+    )
+
+
+STATE_MARKER_TEXT = "---STATE---"
+
 
 def _write_variant(
     pack: ContextPack, meta: dict[str, Any], node_title: str, number: int, plan: str,
     scenes: list[dict[str, Any]], chapter_words: int, variant: int, ctx: JobContext, pct: tuple[int, int],
-) -> tuple[str, str | None]:
+) -> dict[str, Any]:
+    """逐场景生成一版正文。每个场景都看到：本章已写正文、上一场景结束时的状态账本、口头禅/群众镜头/强化词剩余额度。
+
+    返回 {content, raw_changes, scene_states, end_state, warnings}。
+    """
     gw = get_gateway()
     total = len(scenes)
     per = max(300, chapter_words // total)
+    beats = meta.get("beats") or {}
     texts: list[str] = []
     raw_changes: str | None = None
+    state: dict[str, Any] | None = pack.opening_state
+    states: list[dict[str, Any]] = []
+    warns: list[str] = []
     for i, sc in enumerate(scenes, 1):
         ctx.progress(pct[0] + (pct[1] - pct[0]) * (i - 1) // total, f"第{number}章 版本{variant + 1}：写第 {i}/{total} 个场景")
         last = i == total
-        changes_instruction = (
-            "这是本章最后一个场景。正文写完后另起一行写 ---CHANGES---，再给出覆盖全章的变更声明 JSON。"
-            if last else "不要写 ---CHANGES---。"
-        )
-        prev_tail = texts[-1][-200:] if texts else "（本章开头）"
-        user = pack.suffix + "\n\n" + render(
-            "writing_scene", number=number, chapter_title=node_title, scene_index=i, scene_total=total,
-            scene_words=per, chapter_plan=plan, scene=json.dumps(sc, ensure_ascii=False),
-            previous_tail=prev_tail, changes_instruction=changes_instruction,
-        )
+        user = build_scene_user(pack, number, node_title, plan, sc, i, total, per, texts, state, beats)
         out = gw.chat(
             "writing_scene",
             [{"role": "system", "content": pack.prefix}, {"role": "user", "content": user}],
             meta={**meta, "scene": sc, "scene_index": i, "scene_total": total, "scene_words": per,
-                  "variant": variant, "include_changes": last},
+                  "variant": variant, "include_changes": last, "prev_state": state},
             temperature=0.9,
         )
-        body, raw = split_output(out)
+        body, raw_state, raw = split_scene_output(out)
         if last:
             raw_changes = raw
-        texts.append(_clean_scene(body))
-    return "\n\n".join(texts), raw_changes
+        body = _clean_scene(body)
+        new_state, w = parse_scene_state(raw_state)
+        warns += [f"第 {i} 场：{x}" for x in w]
+        warns += prop_move_warnings(state, new_state, body, i)
+        state = merge_state(state, new_state)
+        states.append(state)
+        texts.append(body)
+    return {"content": "\n\n".join(texts), "raw_changes": raw_changes, "scene_states": states,
+            "end_state": state, "warnings": warns}
 
 
 def _clean_scene(text: str) -> str:
@@ -163,7 +244,7 @@ def _evaluate(
     exclude_chapter_id: int | None,
 ) -> tuple[dict[str, Any], LintResult, int]:
     review, dropped = run_review(get_gateway(), content, number, plan, pack.protagonist, pack.required_chars, meta,
-                                 context=pack.state_text)
+                                 context=pack.state_text, cheat_terms=pack.cheat_terms)
     lint = lint_for(s, book.id or 0, content, number, exclude_chapter_id)
     return review, lint, dropped
 
@@ -183,14 +264,17 @@ def patch_rewrite(content: str, review: dict[str, Any] | None, lint: LintResult,
     for h in lint.banned_hits[:15]:
         problems.append(f"- AI 腔：{h['word']}（{h['count']} 处）")
     for w in lint.warnings:
-        if w.startswith(("章末用总结", "弱化副词")):
+        if w.startswith(("章末用总结", "弱化副词", "群众/配角反应镜头")):
             problems.append(f"- {w}")
+    # v0.6 手艺类：逐句点名（重复强化词、陈词比喻、量词搭配、口头禅超频），模型只改这些句子
+    for t in lint.fix_targets[:20]:
+        problems.append(f"- [{t['kind']}] 「{t['quote']}」：{t['hint']}")
     if not problems:
         return content, 0
     raw = get_gateway().chat_json(
         "humanize", system_prompt("humanize"),
         render("humanize", problems="\n".join(problems), content=content),
-        meta={**meta, "content": content}, temperature=0.5,
+        meta={**meta, "content": content, "fix_quotes": [t["quote"] for t in lint.fix_targets[:20]]}, temperature=0.5,
     )
     patches = raw.get("patches") if isinstance(raw, dict) else None
     applied = 0
@@ -291,6 +375,13 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         book = common.get_book(s, book_id)
         node = s.get(OutlineNode, node_id)
         assert node is not None
+        cheat = next(iter(common.cards(s, book_id, "cheat")), None)
+        fixed = ensure_opening_beats(dict(node.beats or {}), node.order, cheat, book.tagline or "")
+        if fixed != (node.beats or {}):
+            node.beats = fixed
+            s.add(node)
+            s.commit()
+            s.refresh(node)
         number, plan = node.order, node_plan_text(node)
         beats = dict(node.beats or {})
         meta = {**common.kit_meta(s, book), "number": number, "beats": beats, "title": book.title,
@@ -304,10 +395,11 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
     ctx.progress(8, f"第{number}章：拆分场景节拍")
     raw_scenes = get_gateway().chat_json(
         "scene_plan", system_prompt("scene_plan"),
-        render("scene_plan", chapter_plan=plan, min_scenes=MIN_SCENES, max_scenes=MAX_SCENES),
+        render("scene_plan", chapter_plan=plan, min_scenes=MIN_SCENES, max_scenes=MAX_SCENES,
+               opening_rules=scene_plan_rules(beats, number)),
         meta={**meta, "sensory_pool": pool},
     )
-    scenes = normalize_scenes(raw_scenes, beats, pool)
+    scenes = normalize_scenes(raw_scenes, beats, pool, number)
     with session_scope() as s:
         node = s.get(OutlineNode, node_id)
         assert node is not None
@@ -326,7 +418,8 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
     vlist: list[dict[str, Any]] = []
     for v in range(n_var):
         lo = 12 + v * span
-        content, raw_changes = _write_variant(pack, meta, title, number, plan, scenes, chapter_words, v, ctx, (lo, lo + span - 5))
+        wv = _write_variant(pack, meta, title, number, plan, scenes, chapter_words, v, ctx, (lo, lo + span - 5))
+        content, raw_changes = wv["content"], wv["raw_changes"]
         ctx.progress(lo + span - 5, f"第{number}章 版本{v + 1}：校验变更、审稿、人味 lint")
         cs, warns = parse_changes(raw_changes)
         with session_scope() as s:
@@ -338,7 +431,8 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         vlist.append({
             "id": v + 1, "content": content, "words": count_words(content), "lint": lint.to_dict(),
             "review_overall": review["scores"]["overall"], "review": review, "changes": cs.model_dump(),
-            "warnings": warns + warns2, "dropped_issues": dropped,
+            "warnings": warns + warns2 + wv["warnings"], "dropped_issues": dropped,
+            "scene_states": wv["scene_states"], "end_state": wv["end_state"],
         })
 
     # 3) 建章（草稿）
@@ -392,6 +486,8 @@ def _apply_variant(ch: Chapter, v: dict[str, Any]) -> None:
     ch.review = v.get("review")
     ch.lint = v.get("lint")
     ch.changes = {**(v.get("changes") or {}), "warnings": v.get("warnings") or []}
+    if v.get("end_state"):
+        ch.changes["end_state"] = v["end_state"]  # 下一章第一个场景从这份账本接
     ch.status = "reviewing"
     ch.updated_at = utcnow()
 
@@ -465,6 +561,7 @@ def commit_chapter(chapter_id: int) -> Chapter:
         bid = book.id or 0
         raw = dict(ch.changes or {})
         warns = list(raw.pop("warnings", []) or [])
+        end_state = raw.pop("end_state", None)
         cs = ChangeSet.model_validate(raw) if raw else ChangeSet()
         card_by_name = {c.name: c for c in common.cards(s, bid)}
         opens = {f.id or 0: f.desc for f in common.open_foreshadows(s, bid)}
@@ -530,6 +627,8 @@ def commit_chapter(chapter_id: int) -> Chapter:
             ch.summary = summary
             ch.status = "committed"
             ch.changes = {**cs.model_dump(), "warnings": warns}
+            if end_state:
+                ch.changes["end_state"] = end_state
             ch.updated_at = utcnow()
             s.add(ch)
             if ch.outline_node_id:

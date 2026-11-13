@@ -8,7 +8,8 @@ import type { Review, ReviewIssue } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { RadarChart } from './RadarChart'
 
-const DIMS: [keyof Review['scores'], string][] = [['hook', '追读钩子'], ['pacing', '节奏'], ['payoff', '爽点兑现'], ['character', '人物'], ['coherence', '连贯']]
+const DIMS: [keyof Review['scores'], string][] = [['hook', '追读钩子'], ['pacing', '节奏'], ['payoff', '爽点兑现'], ['character', '人物'], ['coherence', '连贯'], ['continuity', '连续性'], ['semantics', '语义']]
+const DIM_LABEL: Record<string, string> = Object.fromEntries(DIMS.map(([k, l]) => [k, l]))
 const SEV = { high: { l: '严重', t: 'danger' }, mid: { l: '一般', t: 'warning' }, low: { l: '轻微', t: 'neutral' } } as const
 
 export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote }: {
@@ -32,7 +33,7 @@ export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote 
         </div>
         <Button size="icon-sm" variant="ghost" onClick={onReview} disabled={reviewing} aria-label="重新审稿"><RotateCw className={cn('h-3.5 w-3.5', reviewing && 'animate-spin')} /></Button>
       </div>
-      <RadarChart size={232} data={DIMS.map(([k, l]) => ({ label: l, value: review.scores[k] ?? 0 }))} />
+      <RadarChart size={232} data={DIMS.filter(([k]) => review.scores[k] !== undefined).map(([k, l]) => ({ label: l, value: review.scores[k] ?? 0 }))} />
       <div>
         <div className="mb-2 flex items-center gap-1">
           {(['all', 'high', 'mid', 'low'] as const).map((s) => (
@@ -46,7 +47,7 @@ export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote 
             <button key={k} onClick={() => onQuote(i.quote)} className={cn('w-full rounded-lg p-3 text-left transition hairline hover:bg-subtle', activeQuote === i.quote && 'bg-warning-soft/60 ring-1 ring-warning/40')}>
               <div className="flex items-center gap-1.5">
                 <Badge tone={SEV[i.severity].t} className="h-5 text-[11px]">{SEV[i.severity].l}</Badge>
-                <span className="text-xs font-medium text-muted-foreground">{i.dimension}</span>
+                <span className="text-xs font-medium text-muted-foreground">{DIM_LABEL[i.dimension] ?? i.dimension}</span>
               </div>
               {i.quote && <div className="mt-2 line-clamp-2 border-l-2 border-warning/60 pl-2 font-serif text-[12.5px] leading-relaxed text-foreground/80">{i.quote}</div>}
               <div className="mt-1.5 flex gap-1 text-[12.5px] leading-relaxed"><CornerDownRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />{i.comment}</div>

@@ -1,7 +1,7 @@
 ---
 stage: chapter_plan
 title: 章细纲与场景节拍规则
-version: 0.2
+version: 0.6
 sources:
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - xiaofeng-928/chinese-longnovel-skill | MIT | adapted
@@ -11,11 +11,19 @@ sources:
   - Tomsawyerhu/Chinese-WebNovel-Skill | 无协议 | idea-only
   - lingfengQAQ/webnovel-writer（爽点三段式铺垫/兑现/微反转）| GPL-3.0 | idea-only
   - socratopia.app 网络小说创作课（期待、压抑、释放三拍）| 文章 | idea-only
+  - wangwen666.com/post/204 2026-06-04（番茄冲突 ≤500 字、金手指 ≤1000 字；主角不能一直窝囊，要有反击苗头）| 文章 | idea-only
+  - maliangwriter.com 黄金三章检查 2026-08-01（入局/加压/承诺）| 文章 | idea-only
 ---
 # 章细纲与场景节拍规则
 
 ## 章细纲字段
 number、title、goal（本章戏剧问题）、conflict、outcome（yes / no / yes-but / no-and）、payoff（爽点，写成“主语 + 动词 + 宾语 + 对方损失”）、characters[]（必须出场的角色）、location、foreshadow[]（{action: plant/advance/resolve, id, desc}）、hook_end（章末钩子，写到画面）、words。
+
+## v0.6 开篇硬字段（程序兜底补齐）
+- opening_hook（第 1–3 章必填）：正文前三行就发生的冲突或异常，写成画面，不写“气氛压抑”。
+- cheat_beat（第 1 章必填）：金手指/核心卖点在本章露出的具体苗头：谁做了什么，主角感到什么可感知的反馈。卖点是“收徒涨修为”，第 1 章就要有人递上拜师/补录表并让主角感到一次“涨”的苗头，不能整章只打脸不露卖点。
+- 场景拆分时：第一个场景从 opening_hook 起；cheat_beat 落到兑现场景；群众反应镜头全章 ≤3；只有最后一个场景承接 hook_end，章末只留一个主钩。
+- 新人物或容易误读的关系，在场景 relations 里写清关系和称呼依据。
 
 ## 动笔前阻断五问（答不出就改细纲，不许写）
 1. 对手这一章造成了什么看得见的伤害或损失？

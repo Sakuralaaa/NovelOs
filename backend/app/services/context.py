@@ -35,8 +35,8 @@ DEAD_KEY_RX = re.compile(r"(生死|状态|存活|身体|处境)")
 
 # 黄金三章：入局 → 加压 → 承诺（参考 maliangwriter.com 黄金三章检查、番茄开篇硬指标；文字自写）
 GOLDEN_TASKS = {
-    1: "【黄金三章·第1章：入局】前 300 字内让主角在做事并撞上一个具体异常或危险；只交代当下行动需要的设定；"
-       "章末钩子要让读者问“他接下来怎么办”。",
+    1: "【黄金三章·第1章：入局】前三行就进入冲突或异常，前 300 字内主角在做事并撞上它；金手指/核心卖点本章必须露一次"
+       "读者能感知的苗头（见细纲 cheat_beat）；只交代当下行动需要的设定；章末钩子要让读者问“他接下来怎么办”。",
     2: "【黄金三章·第2章：加压】阻力升级，规则露出：金手指第一次使用时写清怎么用、付出什么、哪里用不了；"
        "主角必须主动做一次选择，不要重复第1章的惊讶。",
     3: "【黄金三章·第3章：承诺】给出第一次小胜并结算收益（资源、认可、资格至少一项），同时把短期冲突接到长期目标上；"
@@ -55,6 +55,9 @@ class ContextPack:
     all_names: list[str] = field(default_factory=list)
     state_text: str = ""  # 人物当前状态 + 上一章结尾，供审稿核对连贯性
     preflight: list[str] = field(default_factory=list)  # 写前核对发现的问题
+    # v0.6
+    opening_state: dict[str, Any] | None = None  # 上一章结束时的场景状态账本（站位/手持物/服装/身体）
+    cheat_terms: list[str] = field(default_factory=list)  # 金手指关键词（第 1 章检查是否露面）
 
     def summary(self) -> dict[str, Any]:
         return {"cards": [c.name for c in self.relevant_cards], "prefix_chars": len(self.prefix), "suffix_chars": len(self.suffix)}
@@ -139,8 +142,9 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
         if c.type == "character":
             v = common.voice_of(c)
             voices[c.name] = v
+            cp = "、".join(v["catchphrases"])
             line += (
-                f"\n  说话方式：{v['voice'] or '未设定'}；口头禅：{'、'.join(v['catchphrases']) or '无'}；"
+                f"\n  说话方式：{v['voice'] or '未设定'}；口头禅：{(cp + '（每章最多 1–2 次，靠句式和用词体现腔调，不靠口头禅刷存在）') if cp else '无'}；"
                 f"小动作：{'、'.join(v['habits']) or '无'}；神态：{v['demeanor'] or '未设定'}"
             )
             d = c.data or {}
@@ -192,6 +196,17 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
         parts.append("【写前核对（程序发现，写作时按这里处理）】\n" + "\n".join(f"- {x}" for x in pre))
 
     required = [c for c in (beats.get("characters") or []) if isinstance(c, str)]
+    opening_state = None
+    if committed and committed[-1].number == node.order - 1 and isinstance(committed[-1].changes, dict):
+        es = committed[-1].changes.get("end_state")
+        opening_state = es if isinstance(es, dict) else None
+    cheat_terms: list[str] = []
+    for c in all_cards:
+        if c.type == "cheat":
+            cheat_terms.append(c.name)
+            kw = (c.data or {}).get("keywords")
+            if isinstance(kw, list):
+                cheat_terms.extend(str(k) for k in kw if k)
     return ContextPack(
         prefix=prefix,
         suffix="\n\n".join(parts),
@@ -202,6 +217,8 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
         all_names=[c.name for c in all_cards],
         state_text="\n\n".join(x for x in (state_text, f"【上一章结尾】\n{tail}" if tail else "") if x),
         preflight=pre,
+        opening_state=opening_state,
+        cheat_terms=cheat_terms,
     )
 
 
@@ -340,6 +357,10 @@ def chapter_task_lines(beats: dict[str, Any], number: int) -> list[str]:
         lines.append(f"读者期待：{beats['expectation']}（本章要么推进它，要么兑现它，不能让它静止）")
     if beats.get("info_gap"):
         lines.append(f"信息差：{beats['info_gap']}（读者知道、角色不知道，用它蓄爽感，不要让角色提前知道）")
+    if number <= 3 and beats.get("opening_hook"):
+        lines.append(f"开篇三行：{beats['opening_hook']}（前三段内必须出现，不先铺环境）")
+    if beats.get("cheat_beat"):
+        lines.append(f"卖点露出：{beats['cheat_beat']}")
     if beats.get("hook_end"):
         ht = beats.get("hook_type")
         lines.append(f"章末钩子：{beats['hook_end']}" + (f"（类型：{ht}）" if ht else "") + "。断在变化发生的那一刻，不写总结句。")

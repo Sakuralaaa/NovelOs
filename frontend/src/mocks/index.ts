@@ -57,12 +57,19 @@ function mkLint(content: string): Lint {
     short_sentence_ratio: +a.short_sentence_ratio.toFixed(3),
     bare_dialogue_ratio: +a.bare_dialogue_ratio.toFixed(3),
     summary_ratio: +a.summary_ratio.toFixed(3),
+    intensifiers: [{ word: '死死', count: (content.match(/死死/g) || []).length, allow: 2, over: (content.match(/死死/g) || []).length > 2 }].filter((x) => x.count),
+    cliche_similes: /灌了铅/.test(content) ? [{ word: '空气像灌了铅', count: 1 }] : [],
+    measure_errors: [],
+    crowd_shots: 0,
+    dialogue_tics: [],
+    catchphrases: [],
+    fix_targets: [],
   }
 }
 
 function mkReview(seed: number, content: string): Review {
   const base = 68 + (seed % 5) * 4
-  const scores = { hook: base + 6, pacing: base - 4, payoff: base + 2, character: base - 8, coherence: base + 10, overall: base }
+  const scores = { hook: base + 6, pacing: base - 4, payoff: base + 2, character: base - 8, coherence: base + 10, continuity: base + 4, semantics: base + 8, overall: base }
   const pick = (s: string) => (content.includes(s) ? s : content.split('\n')[2] || '')
   return {
     scores,

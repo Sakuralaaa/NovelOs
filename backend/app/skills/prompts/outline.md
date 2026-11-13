@@ -12,6 +12,7 @@ $book_context
      "payoff_type":"打脸|扮猪吃虎|越级反杀|打脸权威|反派翻车|甜蜜超预期|真相揭示|收获升级|危机化解|关系突破",
      "payoff_level":"small|combo|milestone","strand":["quest|fire|constellation"],"emotion":"up|down|flat",
      "expectation":"本章挂起或兑现的读者期待","info_gap":"读者知道而角色不知道的事（可空）","time":"本章故事内时间",
+     "opening_hook":"第1–3章必填：正文前三行就发生的冲突或异常（写成画面）","cheat_beat":"第1章必填：金手指/核心卖点在本章露出的具体苗头",
      "characters":[],"location":"","foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":"","tier":"short|mid|long"}],
      "hook_end":"","hook_type":"危机突降|悬念反转|挑衅叫板|倒计时|信息缺口|选择悬置|后果预示|决定|发现|误判|代价","must_avoid":[]}]}]}
-每弧 4–6 章；前三章按黄金三章“入局 → 加压 → 承诺”设计，钩子一章比一章更贴近主角；相邻章节的爽点模式与钩子类型不要重复。
+每弧 4–6 章；前三章按黄金三章“入局 → 加压 → 承诺”设计，第 1 章必须让核心卖点露出可感知的苗头（cheat_beat），钩子一章比一章更贴近主角；相邻章节的爽点模式与钩子类型不要重复。

@@ -162,7 +162,9 @@ export interface ReviewIssue {
   comment: string
 }
 export interface Review {
-  scores: { hook: number; pacing: number; payoff: number; character: number; coherence: number; overall: number }
+  scores: { hook: number; pacing: number; payoff: number; character: number; coherence: number; overall: number
+    /** v0.6：连续性与物理逻辑、语义正确（旧审稿结果没有这两项） */
+    continuity?: number; semantics?: number }
   issues: ReviewIssue[]
   passed: boolean
 }
@@ -177,6 +179,14 @@ export interface Lint {
   short_sentence_ratio?: number
   bare_dialogue_ratio?: number
   summary_ratio?: number
+  /** v0.6 手艺类：重复强化词、陈词比喻、量词搭配、群众镜头、对白口癖、口头禅、定点修改清单 */
+  intensifiers?: { word: string; count: number; allow: number; over: boolean }[]
+  cliche_similes?: { word: string; count: number }[]
+  measure_errors?: { word: string; match: string; hint: string; quote: string }[]
+  crowd_shots?: number
+  dialogue_tics?: { word: string; count: number; over: boolean }[]
+  catchphrases?: { who: string; word: string; count: number; over: boolean }[]
+  fix_targets?: { kind: string; word: string; quote: string; hint: string }[]
 }
 export interface ChangeSet {
   new_entities: any[]

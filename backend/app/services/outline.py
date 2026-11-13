@@ -69,6 +69,7 @@ CHAPTER_SCHEMA = (
     '"payoff_type":"打脸|扮猪吃虎|越级反杀|打脸权威|反派翻车|甜蜜超预期|真相揭示|收获升级|危机化解|关系突破",'
     '"payoff_level":"small|combo|milestone","strand":["quest|fire|constellation"],"emotion":"up|down|flat",'
     '"expectation":"本章挂起或兑现的读者期待","info_gap":"读者知道而角色不知道的事（可空）","time":"本章故事内时间",'
+    '"opening_hook":"第1–3章必填：正文前三行就出现的冲突或异常（写成画面）","cheat_beat":"第1章必填：金手指/核心卖点在本章露出的具体苗头（谁、做了什么、出现什么可感知的反馈）",'
     '"characters":[],"location":"","foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":"","tier":"short|mid|long"}],'
     '"hook_end":"","hook_type":"危机突降|悬念反转|挑衅叫板|倒计时|信息缺口|选择悬置|后果预示|决定|发现|误判|代价","must_avoid":[]}]}'
 )
@@ -123,7 +124,7 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
     st = _strands(raw.get("strand") or raw.get("strands"))
     if st:
         out["strand"] = st
-    for k in ("expectation", "info_gap", "time"):
+    for k in ("expectation", "info_gap", "time", "opening_hook", "cheat_beat"):
         if raw.get(k):
             out[k] = str(raw[k])[:200]
     avoid = raw.get("must_avoid")
@@ -132,6 +133,27 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
     elif isinstance(avoid, str) and avoid.strip():
         out["must_avoid"] = [avoid.strip()[:80]]
     return out
+
+
+def ensure_opening_beats(beats: dict[str, Any], number: int, cheat: Any | None = None, tagline: str = "") -> dict[str, Any]:
+    """开篇硬约束（v0.6，程序兜底）：第 1–3 章必须有 opening_hook；第 1 章必须有 cheat_beat（金手指/卖点苗头）。
+
+    模型漏写时从本章冲突与设定库的金手指卡补上，保证场景拆分和正文提示词里一定有这两项。
+    cheat：设定库 type=cheat 的卡（有 name/summary/data）；没有时退回书的一句话卖点。
+    """
+    b = dict(beats or {})
+    if number <= 3 and not str(b.get("opening_hook") or "").strip():
+        core = b.get("conflict") or b.get("goal") or ""
+        b["opening_hook"] = f"开篇三行内让冲突落到主角身上：{core}"[:200]
+    if number == 1 and not str(b.get("cheat_beat") or "").strip():
+        if cheat is not None:
+            d = getattr(cheat, "data", None) or {}
+            how = d.get("input") or getattr(cheat, "summary", "") or ""
+            b["cheat_beat"] = (f"让「{cheat.name}」露一次可感知的苗头：{how}。写成主角能感到的具体反馈（数字、提示、身体感受或一次小收益），"
+                               "不解释原理")[:200]
+        elif tagline:
+            b["cheat_beat"] = f"让核心卖点露一次可感知的苗头：{tagline}"[:200]
+    return b
 
 
 # ------------------------------------------------------------------ 节奏审计（纯代码）
@@ -262,9 +284,11 @@ def max_chapter_number(s: Session, book_id: int) -> int:
 def _add_chapters(s: Session, book: Book, arc: OutlineNode, chapters: list[dict[str, Any]]) -> list[OutlineNode]:
     n = max_chapter_number(s, book.id or 0)
     out = []
+    cheat = next(iter(common.cards(s, book.id or 0, "cheat")), None)
     for raw in chapters:
         n += 1
         beats = normalize_beats(raw if isinstance(raw, dict) else {}, n, book.chapter_words)
+        beats = ensure_opening_beats(beats, n, cheat, book.tagline or "")
         node = OutlineNode(
             book_id=book.id or 0, parent_id=arc.id, level="chapter", order=n, title=beats["title"],
             summary=f"{beats['goal']}；{beats['conflict']}".strip("；"), beats=beats, status="planned",

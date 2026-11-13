@@ -520,10 +520,27 @@ def mock_writing_scene(meta: dict[str, Any]) -> str:
         j += 1
         paras.append(tpl.format(p=p, a=a, pro=pro, pro2="他", act=take(acts, 2 + j), look=rng.choice(GENERIC_LOOKS),
                                 la=a_lines[(k + j) % len(a_lines)], lp=take(lps, j), env=take(envs, j)))
+    if scene.get("cheat"):
+        m = re.search(r"「([^」]+)」", str(scene["cheat"]))
+        cname = m.group(1) if m else "那股劲"
+        paras.append(f"指根下一阵发烫，{cname}又动了一下，像有人往骨头缝里添了一勺热油。{p}没声张，心里把这一笔记下：成了。")
     paras.append(_fill(OUTCOME_LINES.get(scene.get("outcome") or "yes", OUTCOME_LINES["yes"]), {"p": p, "pro": pro}))
     if idx == total:
         paras.append(f"{beats.get('hook_end', '门外传来一阵急促的脚步声')}。")
     text = "\n\n".join(paras)
+
+    # v0.6 场景结束状态账本：沿用上一场的道具位置，主角与对手按本场写到的位置更新
+    prev = meta.get("prev_state") or {}
+    item = meta.get("item") or "那样东西"
+    props = list(prev.get("props") or []) or [{"name": item, "where": f"{p}怀里", "state": "完好"}]
+    state = {
+        "cast": [{"name": p, "position": f"{loc}里，门边", "facing": f"面朝{a}", "holding": [f"{item}（怀里）"],
+                  "wearing": "旧外套", "body": {"no-and": "后脑挨了一下，发晕", "yes-but": "手背划了道口子"}.get(scene.get("outcome") or "", "无伤")},
+                 {"name": a, "position": f"{loc}里，桌边", "facing": f"面朝{p}", "holding": [], "wearing": "", "body": ""}],
+        "props": props,
+        "env": sensory,
+    }
+    text += "\n\n---STATE---\n" + _j(state)
 
     if meta.get("include_changes"):
         changes: dict[str, Any] = {"new_entities": [], "state_changes": [], "foreshadow": []}
@@ -557,6 +574,23 @@ def mock_review(meta: dict[str, Any]) -> str:
         if any(m in s for m in ("经过一番", "很快", "于是", "随后")):
             issues.append({"severity": "mid", "dimension": "pacing", "quote": s, "comment": "概述一句带过，读者看不到场面，展开成可见的动作与对白"})
             break
+    # v0.6：连续性与物理逻辑 / 语义正确（mock 用关键词近似；真实模型按审稿提示词逐条比对前后文）
+    for s in sents:
+        if "没有上限" in s or "无上限" in s:
+            issues.append({"severity": "mid", "dimension": "semantics", "quote": s,
+                           "comment": "意思写反：这里要贬低主角，应写“到顶了/上限已定”，不是“没有上限”"})
+            break
+    prop_rx = re.compile(r"合同|笔|鞋|门|灯|东西|单据|外套")
+    seen_props: dict[str, str] = {}
+    for s in sents:
+        m = prop_rx.search(s)
+        if not m:
+            continue
+        if m.group(0) in seen_props and seen_props[m.group(0)] != s:
+            issues.append({"severity": "low", "dimension": "continuity", "quote": s,
+                           "comment": f"前文「{seen_props[m.group(0)][:20]}」，此处再次写到「{m.group(0)}」：核对它的位置、持有人和外观是否与前文一致"})
+            break
+        seen_props[m.group(0)] = s
     if sents:
         issues.append({"severity": "low", "dimension": "hook", "quote": sents[-1], "comment": "章末钩子可以再落到一个具体动作上"})
     # 故意编造一条不在正文里的 quote：程序应当丢弃
@@ -568,9 +602,13 @@ def mock_humanize(meta: dict[str, Any]) -> str:
     content = meta.get("content") or ""
     patches: list[dict[str, str]] = []
     seen: set[str] = set()
-    for s in _sentences(content):
+    first = [q for q in (meta.get("fix_quotes") or []) if q in content]
+    for s in [*first, *_sentences(content)]:
         new = s
         for k, v in sorted(PLAIN_REPLACEMENTS.items(), key=lambda kv: -len(kv[0])):
+            new = new.replace(k, v)
+        new = re.sub(r"一柄(?=[^，。！？]{0,8}(?:铁砣|秤砣|石头|石块|铁块))", "一块", new)
+        for k, v in (("空气像灌了铅", "堂屋里没人出声"), ("死死", ""), ("硬生生", ""), ("狠狠", "")):
             new = new.replace(k, v)
         if "嘴角" in s and "冷笑" in s:
             who = meta.get("protagonist") or "他"
@@ -580,7 +618,7 @@ def mock_humanize(meta: dict[str, Any]) -> str:
         if new != s and s not in seen:
             seen.add(s)
             patches.append({"quote": s, "replacement": new})
-        if len(patches) >= 8:
+        if len(patches) >= 12:
             break
     return _j({"patches": patches})
 

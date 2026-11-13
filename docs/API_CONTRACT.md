@@ -79,6 +79,10 @@ Chapter { id, book_id, number, title, content, words, status: "draft"|"reviewing
           review: Review|null, lint: Lint|null, updated_at }
 Review { scores: {hook, pacing, payoff, character, coherence, overall}, issues: [{severity:"high"|"mid"|"low", dimension, quote, comment}], passed: bool }
 Lint { ai_score: number, dialogue_ratio: number, repeated_ngrams: [{text,count}], banned_hits: [{word,count}], warnings: string[] }
+（v0.6 附加，可选）Lint 另含 intensifiers: [{word,count,allow,over}], cliche_similes: [{word,count}], measure_errors: [{word,match,hint,quote}],
+crowd_shots: number, dialogue_tics: [{word,count,over}], catchphrases: [{who,word,count,over}], fix_targets: [{kind,word,quote,hint}]；
+Review.scores 另含 continuity（连续性与物理逻辑）、semantics（语义正确）；issue.dimension 可取这两个值。
+Chapter.changes 可含 end_state: {cast:[{name,position,facing,holding[],wearing,body}], props:[{name,where,state}], env}（本章结束时的场景状态账本）。
 ChangeSet { new_entities[], state_changes[], foreshadow: [{action:"plant"|"advance"|"resolve", id|null, desc}] }
 ```
 - `GET /api/books/{id}/chapters` → Chapter[]（不含 content）

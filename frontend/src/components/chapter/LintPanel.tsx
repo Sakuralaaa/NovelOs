@@ -91,6 +91,7 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
           {lint.warnings.map((w, i) => <div key={i} className="flex gap-2 rounded-lg bg-warning-soft px-3 py-2 text-[12.5px] leading-relaxed text-foreground/85"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />{w}</div>)}
         </div>
       )}
+      {lint && <CraftSection lint={lint} />}
       {lint && lint.repeated_ngrams.length > 0 && (
         <div>
           <h4 className="mb-2 text-[13px] font-semibold">重复片段</h4>
@@ -106,3 +107,34 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
     </div>
   )
 }
+
+/** v0.6：重复强化词 / 陈词比喻 / 量词搭配 / 群众镜头 / 口头禅。点“人味修整”会逐句定点修这些问题。 */
+function CraftSection({ lint }: { lint: Lint }) {
+  const intens = (lint.intensifiers ?? []).filter((d) => d.over)
+  const cliches = lint.cliche_similes ?? []
+  const measures = lint.measure_errors ?? []
+  const tics = [...(lint.dialogue_tics ?? []).filter((d) => d.over).map((d) => ({ label: `「${d.word}」`, count: d.count })),
+    ...(lint.catchphrases ?? []).filter((d) => d.over).map((d) => ({ label: `${d.who}「${d.word}」`, count: d.count }))]
+  const crowd = lint.crowd_shots ?? 0
+  if (lint.intensifiers === undefined) return null
+  const empty = !intens.length && !cliches.length && !measures.length && !tics.length && crowd <= 3
+  const chip = 'inline-flex items-center gap-1 rounded-md bg-warning-soft px-2 py-0.5 text-[12px] text-foreground/85'
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-[13px] font-semibold">重复与搭配</h4>
+        {!!lint.fix_targets?.length && <Tip content="点“人味修整”会只改这些被点名的句子"><span className="cursor-help text-[11px] text-muted-foreground">{lint.fix_targets.length} 处可定点修</span></Tip>}
+      </div>
+      {empty ? <p className="text-xs text-success">强化词、比喻、量词、口头禅都在正常范围 👍</p> : (
+        <div className="space-y-2 text-[12.5px]">
+          {intens.length > 0 && <div><div className="mb-1 text-[11.5px] text-muted-foreground">重复强化词（每词上限 {intens[0].allow} 次）</div><div className="flex flex-wrap gap-1.5">{intens.map((d) => <span key={d.word} className={chip}>{d.word}<span className="num opacity-70">×{d.count}</span></span>)}</div></div>}
+          {cliches.length > 0 && <div><div className="mb-1 text-[11.5px] text-muted-foreground">陈词比喻</div><div className="flex flex-wrap gap-1.5">{cliches.map((d) => <span key={d.word} className={chip}>{d.word}<span className="num opacity-70">×{d.count}</span></span>)}</div></div>}
+          {tics.length > 0 && <div><div className="mb-1 text-[11.5px] text-muted-foreground">口头禅超频（每章 1–2 次）</div><div className="flex flex-wrap gap-1.5">{tics.map((d) => <span key={d.label} className={chip}>{d.label}<span className="num opacity-70">×{d.count}</span></span>)}</div></div>}
+          {measures.map((m, i) => <div key={i} className="rounded-md bg-danger-soft px-2.5 py-1.5 text-foreground/85">量词：「{m.match}」— {m.hint}</div>)}
+          {crowd > 3 && <div className="rounded-md bg-subtle px-2.5 py-1.5 text-foreground/85">群众/配角反应镜头 <span className="num">{crowd}</span> 处，建议不超过 3 处</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+

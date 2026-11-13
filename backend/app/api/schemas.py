@@ -416,13 +416,16 @@ def node_out(n: OutlineNode) -> dict[str, Any]:
 
 
 LINT_KEYS = ("ai_score", "dialogue_ratio", "repeated_ngrams", "banned_hits", "warnings",
-             "avg_sentence_len", "short_sentence_ratio", "bare_dialogue_ratio", "summary_ratio")
+             "avg_sentence_len", "short_sentence_ratio", "bare_dialogue_ratio", "summary_ratio",
+             # v0.6 手艺类
+             "intensifiers", "cliche_similes", "measure_errors", "crowd_shots", "dialogue_tics", "catchphrases", "fix_targets")
 
 
 def lint_out(l: dict[str, Any] | None) -> dict[str, Any] | None:
     if not l:
         return None
-    defaults: dict[str, Any] = {"repeated_ngrams": [], "banned_hits": [], "warnings": []}
+    defaults: dict[str, Any] = {"repeated_ngrams": [], "banned_hits": [], "warnings": [], "intensifiers": [], "cliche_similes": [],
+                                "measure_errors": [], "dialogue_tics": [], "catchphrases": [], "fix_targets": []}
     return {k: l.get(k, defaults.get(k, 0)) for k in LINT_KEYS}
 
 

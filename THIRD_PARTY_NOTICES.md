@@ -77,6 +77,20 @@ SOFTWARE.
 - AGPL-3.0：Hurricane0698/novelwriter（续写时只注入当前章相关设定；生成结果先是草稿，确认后才进底账）、inkos、NovelForge 等。
 - 有商用限制、未使用：orange2ai/renwei-writing。
 
+## 写作质量 v0.6：参考来源（详见 docs/research/writing-prompts-2026.md）
+
+| 来源 | 协议 | 用在哪里 | 方式 |
+|---|---|---|---|
+| zenstory-ai / worldwonderer/oh-story-claudecode（story-deslop banned-words.md） | MIT | “语境敏感词按扎堆程度判、替换不复用”的思路 → 重复强化词按章内频次计数（`backend/app/lint/craft_zh.py`） | 思路；词条与阈值自写 |
+| evelynyaxueke/anti-ai-writing-kit-zh（Copyright (c) 2026 Evelyn Ke） | MIT | 正向默认值优先于禁词表；机械扫描后仍需语义检查 | 思路 |
+| tance-mang/chinese-webnovel-skills（continuity-check、ai-detector） | MIT | 审稿 continuity 维度的检查方向；比喻密度、重复等量化思路 | 思路 |
+| fuxiangxu/novel-ops（character-state、语言指纹） | MIT | 逐章状态追踪下沉为逐场景状态账本；口头禅额度 | 思路 |
+| Narcooo/inkos | AGPL-3.0 | 物资连续性审查、物理状态事实抽取 | 仅思路，未复制代码或文本 |
+| lingfengQAQ/webnovel-writer | GPL-3.0 | 写前组装上下文、写后抽状态回写的闭环 | 仅思路，未复制代码或文本 |
+| Anthropic《Prompting best practices》 | 文档 | 正向指令 + 原因 + 正反例、输入在前指令在后、标签分隔、完成前自查 | 思路 |
+| r/WritingWithAI 社区帖（“regressing to the mean”） | 社区帖 | 未解决线索作为显式状态逐场传递、用可操作的廉价指标 | 思路 |
+| 番茄作家课堂（2026-02-21）、网文666（2026-06-04）、马良写作（2026-08-01） | 文章 | 首页见山、冲突 ≤500 字、金手指 ≤1000 字、入局/加压/承诺 | 思路 |
+
 ## 三、运行时依赖
 FastAPI（MIT）、Starlette（BSD-3）、SQLModel（MIT）、SQLAlchemy（MIT）、Pydantic（MIT）、pydantic-settings（MIT）、
 httpx（BSD-3）、cryptography（Apache-2.0 / BSD）、Pillow（MIT-CMU）、uvicorn（BSD-3）。Docker 镜像内的文泉驿微米黑字体为 GPLv3 + 字体例外 / Apache-2.0 双许可。
