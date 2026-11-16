@@ -151,7 +151,8 @@ export default function RadarPage() {
           <div className="grid grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-2 md:gap-4 md:p-5">
             {shown.map((i, k) => (
               <ShelfCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1}
-                onOpen={() => setDetail(i)} onAnalyze={() => setImitate(i, 'teardown')} onImitate={() => toWizard(i)} />
+                onOpen={() => setDetail(i)} onAnalyze={() => setImitate(i, 'teardown')} onImitate={() => toWizard(i)}
+                onTeardown={() => nav(`/teardown?ext=${encodeURIComponent(i.book_id_ext)}`)} />
             ))}
           </div>
         )}

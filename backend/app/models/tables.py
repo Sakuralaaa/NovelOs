@@ -138,6 +138,10 @@ class Book(SQLModel, table=True):
     platform_style: str = "fanqie"
     # v0.9 书测：{variants:[{style,title,subtitle,hook,cover_prompt}], created_at, model, adopted:int|None}
     book_test: Optional[dict[str, Any]] = _json_dict_nullable()
+    # v0.9.3 审批模式：auto / review；空串表示没显式设置过（对外按 agent_auto_apply 映射，章节 AI 维持旧行为）
+    approval_mode: str = ""
+    # v0.10 同人：{source_id, source_title, fidelity, direction, extra_source_ids, notes, copyright_ack_at, attached_at}；None 表示原创书
+    fanfic: Optional[dict[str, Any]] = _json_dict_nullable()
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -170,6 +174,10 @@ class Card(SQLModel, table=True):
     summary: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
     data: Optional[dict[str, Any]] = _json_dict_nullable()
     known_by: list[str] = _json_list()
+    # v0.9.3：弃用条目不进任何生成上下文；ref_enabled=false 时不能被 @ 引用；soul 为角色灵魂五维（仅 character）
+    status: str = "active"
+    ref_enabled: bool = True
+    soul: Optional[dict[str, Any]] = _json_dict_nullable()
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -216,6 +224,8 @@ class Chapter(SQLModel, table=True):
     outline_node_id: Optional[int] = None
     history: list[dict[str, Any]] = _json_list()  # 改写/精修前的旧正文 [{content, title, label, at}]，用于撤回
     aigc: Optional[dict[str, Any]] = _json_dict_nullable()  # v0.9.1 朱雀 AIGC 检测结果（content_hash 判断是否过期）
+    # v0.10 同人章节检查：{"ooc": {...,content_hash}, "overlap": {...,content_hash}}
+    fanfic_meta: Optional[dict[str, Any]] = _json_dict_nullable()
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -312,4 +322,70 @@ class AgentProposal(SQLModel, table=True):
     error: str = ""
     job_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.9.3
+
+class LlmUsage(SQLModel, table=True):
+    """每次模型调用（含 mock）一条的持久用量记录；trace 只在内存，这张表给成本提示和本书用量用。"""
+    __tablename__ = "llm_usage"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    route: str = Field(default="", index=True)  # 角色：planner / writer / reviewer / agent …
+    model: str = ""
+    book_id: Optional[int] = Field(default=None, index=True)
+    kind: str = ""  # 所在任务的 Job.kind；不在任务里为 task 名
+    task: str = ""
+    in_tokens: int = 0
+    out_tokens: int = 0
+    ms: int = 0
+    estimated: bool = False  # 渠道没回 usage，按字数估算
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Teardown(SQLModel, table=True):
+    """v0.9.3 拆书工作台：一次拆书的产物。原文不入库，只存产物与原文 8 字片段的指纹（crc32，用于去重比对）。"""
+    __tablename__ = "teardown_project"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = ""
+    source: str = "paste"  # rank_book / paste / txt
+    book_id_ext: Optional[str] = None
+    chars: int = 0
+    result: Optional[dict[str, Any]] = _json_dict_nullable()
+    warnings: list[str] = _json_list()
+    fingerprint: list[int] = _json_list()
+    names: list[str] = _json_list()  # 去专名用的原书专名（书名、作者、人名等），不对外
+    model: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class FanficSource(SQLModel, table=True):
+    """v0.10 同人原著资料：从作者导入的原著提炼出的设定卡。原文不入库，只存卡与所取片段的 8 字指纹（crc32）。"""
+    __tablename__ = "fanfic_source"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = ""
+    source: str = "paste"  # paste / txt
+    chars: int = 0  # 实际取用（提炼 + 指纹）的字数
+    total_chars: int = 0  # 导入原文总字数
+    depth: str = "standard"  # quick / standard / deep：提炼轮数
+    focus: list[str] = _json_list()  # 作者指定的重点（角色名/剧情关键词），取材时优先
+    cards: Optional[dict[str, Any]] = _json_dict_nullable()  # {characters, world, factions, timeline, scenes}
+    warnings: list[str] = _json_list()
+    fingerprint: list[int] = _json_list()
+    model: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.9.4
+
+class JobCheckpoint(SQLModel, table=True):
+    """v0.9.4 任务断点：多步任务（写章：拆场景→逐场景写→审稿→摘要）每完成一步写一次，进程重启后可从最后完成的步骤续跑。"""
+    __tablename__ = "job_checkpoint"
+    job_id: int = Field(primary_key=True)
+    kind: str = ""
+    book_id: Optional[int] = Field(default=None, index=True)
+    stage: str = ""  # 最后完成的步骤名，如 scenes / scene:1:3 / variant:1 / chapter / refined / patched / committed
+    state: Optional[dict[str, Any]] = _json_dict_nullable()
+    resumes: int = 0  # 已续跑次数
     updated_at: datetime = Field(default_factory=utcnow)

@@ -24,6 +24,7 @@ from app.db import kv_get, session_scope
 from app.llm import mock
 from app.llm import protocols as proto
 from app.llm import trace
+from app.llm import usage as usage_log
 from app.llm.crypto import decrypt
 from app.models.tables import Channel, TokenUsage
 
@@ -68,6 +69,9 @@ TASK_ROLE: dict[str, str] = {
     "book_test": "planner",
     "radar_book_ai": "planner",  # v0.9.1 榜单单书灵感（书名/封面词/简介）
     "polish_voice": "writer",  # v0.9.1 语感重塑
+    "field_ai": "planner",  # v0.9.3 字段级 AI
+    "character_soul": "planner",  # v0.9.3 角色灵魂五维
+    "teardown_project": "reviewer",  # v0.9.3 拆书工作台
     "agent": "agent",
 }
 
@@ -329,6 +333,8 @@ class LLMGateway:
             out = mock.complete(task, messages, meta or {})
             trace.record(task=task, role=role, model="mock", channel="mock", messages=messages, output=out,
                          started=started, temperature=temperature)
+            usage_log.record(task=task, route=role, model="mock", messages=messages, output=out,
+                             ms=int((time.time() - started) * 1000))
             return out
         errors: list[str] = []
         for t in targets:
@@ -381,6 +387,8 @@ class LLMGateway:
         trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output=content,
                      started=started, usage=usage, temperature=temperature,
                      error=None if content.strip() else "模型返回空内容")
+        usage_log.record(task=task, route=role, model=f"{t.name}/{t.model}", messages=messages, output=content,
+                         ms=int((time.time() - started) * 1000), usage=usage)
         if not content.strip():
             raise LLMError("模型返回空内容")
         return content
@@ -429,7 +437,12 @@ class LLMGateway:
                 routing = get_routing(s)
                 targets = resolve_targets(s, "agent" if _parse_route(routing.get("agent")) else "planner")
         if not targets:
-            return mock.agent_step(messages, tools, meta or {})
+            started = time.time()
+            res = mock.agent_step(messages, tools, meta or {})
+            usage_log.record(task="agent", route="agent", model="mock", messages=messages,
+                             output=str(res.get("content") or "") + str(res.get("tool_calls") or ""),
+                             ms=int((time.time() - started) * 1000))
+            return res
         errors: list[str] = []
         for t in targets:
             for attempt in range(self.settings.llm_retries + 1):
@@ -463,6 +476,8 @@ class LLMGateway:
         trace.record(task="agent", role="agent", model=t.model, channel=t.name, messages=messages,
                      output={"content": out["content"], "tool_calls": out["tool_calls"]}, started=started,
                      usage=usage, temperature=temperature)
+        usage_log.record(task="agent", route="agent", model=f"{t.name}/{t.model}", messages=messages,
+                         output=out["content"] + str(out["tool_calls"]), ms=int((time.time() - started) * 1000), usage=usage)
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")
         return out
@@ -475,6 +490,8 @@ class LLMGateway:
         _record_usage(t, "agent", "agent", usage)
         trace.record(task="agent", role="agent", model=t.model, channel=t.name, messages=msgs, output=content,
                      started=started, usage=usage, temperature=temperature)
+        usage_log.record(task="agent", route="agent", model=f"{t.name}/{t.model}", messages=msgs, output=content,
+                         ms=int((time.time() - started) * 1000), usage=usage)
         out = proto.parse_text_tool_calls(content, {f["function"]["name"] for f in tools})
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")

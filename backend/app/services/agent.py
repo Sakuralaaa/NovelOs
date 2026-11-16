@@ -253,6 +253,13 @@ def build_messages(book_id: int, session_id: int) -> list[dict[str, Any]]:
             limit = TOOL_CONTENT_CHARS if i > last_user else OLD_TOOL_CONTENT_CHARS
             text = r.content if len(r.content) <= limit else r.content[:limit] + "…（已截断）"
             out.append({"role": "tool", "tool_call_id": r.tool_call_id, "name": r.name, "content": text})
+    if rows and rows[last_user].role == "user" and "@" in (rows[last_user].content or "").replace("＠", "@"):
+        from app.services.refs import refs_block  # v0.9.3：作者消息里 @ 到的设定条目完整放进系统提示
+
+        with session_scope() as s:
+            rb = refs_block(s, book_id, rows[last_user].content)
+        if rb:
+            out[0]["content"] += "\n\n" + rb
     return out
 
 

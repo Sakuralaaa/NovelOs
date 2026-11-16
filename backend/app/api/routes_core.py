@@ -12,19 +12,21 @@ from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    AigcDetectIn, ChannelIn, RadarReportConfigIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
+    BookWritingSettingsIn, AigcDetectIn, ChannelIn, RadarReportConfigIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
-from app.jobs.manager import submit
+from app.jobs.manager import NotResumable, resume as resume_job, resume_info, submit
 from app.llm.crypto import decrypt, encrypt
 from app.llm.gateway import (
     IMAGE_MODE_KEY, ROLES, ROUTING_KEY, LLMError, LLMGateway, get_image_mode, get_routing, is_mock_mode,
 )
-from app.models.tables import Channel, Idea, Job, RadarSnapshot, TokenUsage
+from app.models.tables import Book, Channel, Idea, Job, RadarSnapshot, TokenUsage
 from app.radar import service as radar
 from app.services.research import recent_logs
-from app.services.writing import WRITING_SETTINGS_KEY, writing_settings
+from app.services.writing import (
+    BOOK_SWITCHES, WRITING_SETTINGS_KEY, book_writing_key, book_writing_overrides, effective_writing_settings, writing_settings,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -54,7 +56,21 @@ def get_job(job_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     j = s.get(Job, job_id)
     if j is None:
         raise HTTPException(404, "任务不存在")
-    return job_out(j)
+    return {**job_out(j), **resume_info(j)}  # v0.9.4：resumable / checkpoint
+
+
+@router.post("/jobs/{job_id}/resume")
+async def resume_job_route(job_id: int) -> dict[str, Any]:
+    """v0.9.4：从断点续跑（同一个 Job id，状态回到 queued）。只有 interrupted / failed 且有断点、kind 支持续跑的任务可以；否则 409。"""
+    try:
+        j = resume_job(job_id)
+    except LookupError:
+        raise HTTPException(404, "任务不存在") from None
+    except NotResumable as e:
+        raise HTTPException(409, str(e)) from None
+    with session_scope() as s:
+        cur = s.get(Job, job_id)
+        return {**job_out(cur or j), **resume_info(cur or j)}
 
 
 @router.get("/jobs/{job_id}/events")
@@ -72,7 +88,7 @@ async def job_events(job_id: int) -> StreamingResponse:
             if payload != last:
                 yield f"data: {payload}\n\n"
                 last = payload
-            if data["status"] in ("succeeded", "failed"):
+            if data["status"] in ("succeeded", "failed", "interrupted"):
                 return
             await asyncio.sleep(1)
 
@@ -215,6 +231,29 @@ def writing_put(body: WritingSettingsIn, s: Session = Depends(get_session)) -> d
     cur.update({k: v for k, v in body.model_dump().items() if v is not None})
     kv_set(s, WRITING_SETTINGS_KEY, cur)
     return writing_settings(s)
+
+
+@router.get("/books/{book_id}/writing-settings")
+def book_writing_get(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.9.4 书级写作开关：overrides（本书设置，null=跟随全局）、effective（实际生效值）、global（全局）。"""
+    if s.get(Book, book_id) is None:
+        raise HTTPException(404, "作品不存在")
+    eff = effective_writing_settings(s, book_id)
+    glob = writing_settings(s)
+    return {"book_id": book_id, "overrides": book_writing_overrides(s, book_id),
+            "effective": {k: eff[k] for k in BOOK_SWITCHES}, "global": {k: glob[k] for k in BOOK_SWITCHES}}
+
+
+@router.put("/books/{book_id}/writing-settings")
+def book_writing_put(book_id: int, body: BookWritingSettingsIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    if s.get(Book, book_id) is None:
+        raise HTTPException(404, "作品不存在")
+    cur = book_writing_overrides(s, book_id)
+    for k in body.model_fields_set:
+        if k in BOOK_SWITCHES:
+            cur[k] = getattr(body, k)
+    kv_set(s, book_writing_key(book_id), cur)
+    return book_writing_get(book_id, s)
 
 
 @router.get("/settings/zhuque")

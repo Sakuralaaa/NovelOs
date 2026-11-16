@@ -13,7 +13,7 @@ from app.api.schemas import (
     AiAsk, BibleApplyIn, ChapterAigcIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
     ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
     AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
-    IdeaFusionIn, IdeaOrganizeIn, IdeaRevise, IdeaSeedIn, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
+    IdeaFusionIn, IdeaOrganizeIn, IdeaRevise, IdeaSeedIn, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, merge_soul, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
 from app.config import get_settings
@@ -47,12 +47,18 @@ def list_books(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
 @router.post("/books")
 def create_book(body: BookCreate, s: Session = Depends(get_session)) -> dict[str, Any]:
     st = get_settings()
+    if body.fanfic is not None:  # v0.10 同人建书：先校验版权确认与原著资料，不通过不建书
+        from app.services import fanfic as ff_svc
+
+        ff_svc.validate_spec(s, body.fanfic.model_dump(), body.copyright_ack)
     b = Book(title=body.title or "未命名作品", genre=body.genre, gender=body.gender, premise=body.premise or "",
              status="idea", target_words=st.default_target_words, chapter_words=st.default_chapter_words,
              platform_style=body.platform_style)
     s.add(b)
     s.commit()
     s.refresh(b)
+    if body.fanfic is not None:
+        ff_svc.attach(s, b, body.fanfic.model_dump(), body.copyright_ack)
     return book_out(s, b)
 
 
@@ -69,6 +75,11 @@ def patch_book(book_id: int, body: BookPatch, s: Session = Depends(get_session))
         data["title"] = str(data["title"]).strip().strip("《》")[:40] or b.title
     if "banned_tropes" in data:
         data["banned_tropes"] = tropes.clean(data["banned_tropes"])
+    # v0.9.3：approval_mode 与 agent_auto_apply 始终一致（同时传时以 approval_mode 为准）
+    if "approval_mode" in data:
+        data["agent_auto_apply"] = data["approval_mode"] == "auto"
+    elif "agent_auto_apply" in data:
+        data["approval_mode"] = "auto" if data["agent_auto_apply"] else "review"
     if any(k in data and data[k] != getattr(b, k) for k in book_edit.INFO_FIELDS):
         book_edit.push_version(b, "手动修改")  # 书名/简介/核心设定的旧版本，可撤回
     for k, v in data.items():
@@ -362,16 +373,18 @@ def bible_restore(book_id: int, snapshot_id: int, s: Session = Depends(get_sessi
 
 
 @router.get("/books/{book_id}/cards")
-def list_cards(book_id: int, type: str | None = None, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def list_cards(book_id: int, type: str | None = None, include_deprecated: bool = False,
+               s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     b = _book(s, book_id)
     tl = tropes.tropes_for(s, b)
-    return [card_out(c, tl) for c in common.cards(s, book_id, type or None)]
+    return [card_out(c, tl) for c in common.cards(s, book_id, type or None, include_deprecated=include_deprecated)]
 
 
 @router.post("/books/{book_id}/cards")
 def create_card(book_id: int, body: CardIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     _book(s, book_id)
-    c = Card(book_id=book_id, **body.model_dump())
+    c = Card(book_id=book_id, **body.model_dump(exclude={"soul"}))
+    c.soul = merge_soul(None, body.soul) if c.type == "character" else None
     s.add(c)
     s.commit()
     s.refresh(c)
@@ -393,9 +406,11 @@ def update_card(card_id: int, body: CardUpdate, s: Session = Depends(get_session
     c = s.get(Card, card_id)
     if c is None:
         raise HTTPException(404, "卡片不存在")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    for k, v in body.model_dump(exclude_unset=True, exclude={"soul"}).items():
         if v is not None:
             setattr(c, k, v)
+    if body.soul is not None and c.type == "character":
+        c.soul = merge_soul(c.soul, body.soul)
     c.updated_at = utcnow()
     s.add(c)
     s.commit()
@@ -562,7 +577,9 @@ def delete_chapter(chapter_id: int, s: Session = Depends(get_session)) -> dict[s
 async def write_next(book_id: int, body: WriteNextIn | None = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
     _book(s, book_id)
     variants = body.variants if body else None
-    return job_out(submit("chapter_write_next", lambda ctx: writing.write_next(book_id, ctx, variants), book_id=book_id, lock_book=True))
+    instruction = body.instruction if body else ""
+    return job_out(submit("chapter_write_next", lambda ctx: writing.write_next(book_id, ctx, variants, instruction=instruction),
+                          book_id=book_id, lock_book=True))
 
 
 @router.post("/books/{book_id}/chapters/write-batch")

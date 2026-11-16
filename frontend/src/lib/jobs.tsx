@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api, qk } from './api'
+import { api, apiV094, qk } from './api'
 import type { Job } from './types'
 import { jobLabel } from './utils'
 
@@ -16,7 +16,12 @@ export interface TrackedJob {
   error?: string | null
   startedAt: number
   doneAt?: number
+  /** v0.9.4：中断且可续跑 */
+  resumable?: boolean
 }
+
+/** v0.9.4：interrupted 也是终态（轮询 / SSE 到此结束），可点「继续」续跑 */
+export const isJobDone = (s: Job['status'] | undefined) => s === 'succeeded' || s === 'failed' || s === 'interrupted'
 
 interface StartOpts {
   label?: string
@@ -83,10 +88,13 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     synced.current = true
     api.jobs().then((list) => {
       const running = list.filter((j) => j.status === 'running' || j.status === 'queued')
-      if (!running.length) return
+      // v0.9.4：服务重启后中断、可续跑的任务也放进托盘，方便点「继续」
+      const interrupted = list.filter((j) => j.status === 'interrupted' && j.resumable !== false).slice(0, 5)
+      if (!running.length && !interrupted.length) return
       setJobs((js) => {
         const ids = new Set(js.map((j) => j.id))
-        return [...js, ...running.filter((j) => !ids.has(j.id)).map(toTracked)]
+        return [...js, ...running.filter((j) => !ids.has(j.id)).map(toTracked),
+          ...interrupted.filter((j) => !ids.has(j.id)).map((j) => ({ ...toTracked(j), doneAt: Date.now() }))]
       })
     }).catch(() => {})
   }, [])
@@ -97,7 +105,7 @@ export function JobsProvider({ children }: { children: ReactNode }) {
       callbacks.set(job.id, o)
       setJobs((js) => [...js.filter((j) => j.id !== job.id), { ...toTracked(job), label: o.label ?? jobLabel(job.kind), key: o.key }])
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      if (job.status === 'succeeded' || job.status === 'failed') finish(job, qc)
+      if (isJobDone(job.status)) finish(job, qc)
       return job
     } catch (e: any) {
       toast.error(o.label ? `${o.label}启动失败` : '任务启动失败', { description: e?.message })
@@ -117,15 +125,22 @@ export function JobsProvider({ children }: { children: ReactNode }) {
 function toTracked(job: Job): TrackedJob {
   return {
     id: job.id, label: jobLabel(job.kind), bookId: job.book_id, status: job.status,
-    progress: job.progress, message: job.message, error: job.error, startedAt: Date.now(),
+    progress: job.progress, message: job.message, error: job.error, startedAt: Date.now(), resumable: job.resumable,
   }
 }
 
 function finish(job: Job, qc: ReturnType<typeof useQueryClient>) {
   const cur = jobs.find((j) => j.id === job.id)
   if (cur?.doneAt) return
-  setJobs((js) => js.map((j) => (j.id === job.id ? { ...j, status: job.status, progress: job.status === 'succeeded' ? 100 : j.progress, message: job.message, error: job.error, doneAt: Date.now() } : j)))
+  setJobs((js) => js.map((j) => (j.id === job.id ? { ...j, status: job.status, progress: job.status === 'succeeded' ? 100 : j.progress, message: job.message, error: job.error, resumable: job.resumable, doneAt: Date.now() } : j)))
   const o = callbacks.get(job.id) ?? {}
+  const label0 = cur?.label ?? jobLabel(job.kind)
+  if (job.status === 'interrupted') {
+    // 保留回调与托盘条目：续跑成功后照常触发 onSuccess
+    qc.invalidateQueries({ queryKey: ['jobs'] })
+    toast.warning(`${label0}已中断`, { description: job.resumable === false ? (job.message || '这个任务不支持续跑') : '服务重启打断了任务，可在任务托盘点「继续」从断点接着跑' })
+    return
+  }
   callbacks.delete(job.id)
   // 生成类任务影响面广，直接让当前可见的数据全部重新拉取
   qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'job' })
@@ -148,7 +163,7 @@ function Watcher({ id }: { id: number }) {
   const { data, error } = useJobPolling(id)
   useEffect(() => {
     if (!data) return
-    if (data.status === 'succeeded' || data.status === 'failed') finish(data, qc)
+    if (isJobDone(data.status)) finish(data, qc)
     else setJobs((js) => js.map((j) => (j.id === id ? { ...j, status: data.status, progress: data.progress, message: data.message } : j)))
   }, [data, id, qc])
   useEffect(() => {
@@ -161,4 +176,34 @@ export function useJobs() {
   const c = useContext(Ctx)
   if (!c) throw new Error('JobsProvider missing')
   return c
+}
+
+/** v0.9.4：续跑中断的任务（POST /jobs/{id}/resume）；409 提示不可续跑 */
+export function useResumeJob() {
+  const qc = useQueryClient()
+  return useCallback(async (id: number, label?: string) => {
+    try {
+      const job = await apiV094.resumeJob(id)
+      // 先覆盖缓存里的 interrupted，否则 Watcher 会立即再判一次终态
+      qc.setQueryData(qk.job(id), job)
+      setJobs((js) => {
+        const has = js.some((j) => j.id === id)
+        const next = { status: job.status, progress: job.progress, message: job.message, error: null, resumable: job.resumable, doneAt: undefined }
+        return has ? js.map((j) => (j.id === id ? { ...j, ...next } : j)) : [...js, { ...toTracked(job), label: label ?? jobLabel(job.kind) }]
+      })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      toast.success('已继续', { description: job.message || '从断点接着跑' })
+      return job
+    } catch (e: any) {
+      if (e?.status === 409) {
+        setJobs((js) => js.map((j) => (j.id === id ? { ...j, resumable: false } : j)))
+        toast.error('这个任务不能续跑', { description: e?.message || '状态不对、不支持续跑或没有断点，请重新发起' })
+      } else if (e?.status === 404) {
+        dismissJob(id)
+        toast.error('任务不存在了')
+      } else toast.error('继续失败', { description: e?.message })
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      return null
+    }
+  }, [qc])
 }

@@ -241,7 +241,8 @@ def test_channels_routing_and_masking(client: TestClient) -> None:
 
 def test_writing_settings_auto_adopt(client: TestClient) -> None:
     w = client.get("/api/settings/writing").json()
-    assert w == {"auto_adopt_best": False, "auto_commit": True, "default_variants": 1}
+    assert w == {"auto_adopt_best": False, "auto_commit": True, "default_variants": 1,
+                 "fix_mid_before_commit": True, "auto_rereview": True}  # v0.9.4 新开关
     w = client.put("/api/settings/writing", json={"auto_adopt_best": True}).json()
     assert w["auto_adopt_best"] is True
     book = client.post("/api/books", json={"genre": "悬疑灵异", "gender": "male", "premise": "能听见死者最后十秒的声音"}).json()

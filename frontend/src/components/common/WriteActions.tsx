@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import * as P from '@radix-ui/react-popover'
 import { ChevronDown, Layers3, PenLine } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { CostButton } from '@/components/cost/CostButton'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Segmented } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
@@ -13,7 +14,11 @@ type V = 1 | 2 | 3
 const LS = 'novelos-variants'
 
 /** 写下一章（可选 1/2/3 个版本） */
-export function WriteNextButton({ bookId, size = 'md', className, navigateOnDone = true }: { bookId: number; size?: 'sm' | 'md' | 'lg'; className?: string; navigateOnDone?: boolean }) {
+export function WriteNextButton({ bookId, size = 'md', className, buttonClassName, label = '写下一章', navigateOnDone = true }: {
+  bookId: number; size?: 'sm' | 'md' | 'lg'; className?: string; navigateOnDone?: boolean
+  /** v0.9.3：工具栏里用的紧凑样式（如触控高度）与短文案 */
+  buttonClassName?: string; label?: string
+}) {
   const [variants, setVariants] = useState<V>(() => (Number(localStorage.getItem(LS)) as V) || 1)
   const { start } = useJobs()
   const job = useActiveJob(`write-next:${bookId}`)
@@ -25,6 +30,7 @@ export function WriteNextButton({ bookId, size = 'md', className, navigateOnDone
       key: `write-next:${bookId}`,
       label: variants > 1 ? `写下一章（${variants} 个版本）` : '写下一章',
       successMsg: (j) => {
+        if (j.result?.awaiting_adopt && j.result?.approval_mode === 'review') return variants > 1 ? `新章节已生成 ${variants} 个版本（逐条审批），对比后采纳` : '新章节已生成待采纳稿（逐条审批），看过后点「采纳此版」'
         if (variants > 1) return `新章节已生成 ${variants} 个版本，挑一个吧`
         const rp = j.result?.review_patches as { applied?: number[]; skipped?: unknown[] } | undefined
         const a = rp?.applied?.length ?? 0, k = rp?.skipped?.length ?? 0
@@ -34,12 +40,13 @@ export function WriteNextButton({ bookId, size = 'md', className, navigateOnDone
     })
   return (
     <div className={cn('inline-flex', className)}>
-      <Button variant="primary" size={size} loading={!!job} disabled={!!batch} icon={<PenLine className="h-4 w-4" />} onClick={go} className="rounded-r-none">
-        {job ? `写作中 ${Math.round(job.progress)}%` : variants > 1 ? `写下一章 ×${variants}版` : '写下一章'}
-      </Button>
+      <CostButton target={{ kind: 'chapter_write', bookId }} label={variants > 1 ? `写下一章（${variants} 个版本）` : '写下一章'} confirmLabel="开始写"
+        variant="primary" size={size} loading={!!job} disabled={!!batch} icon={<PenLine className="h-4 w-4" />} onRun={go} className={cn('rounded-r-none', buttonClassName)}>
+        {job ? `写作中 ${Math.round(job.progress)}%` : variants > 1 ? `${label} ×${variants}版` : label}
+      </CostButton>
       <P.Root>
         <P.Trigger asChild>
-          <Button variant="primary" size={size} disabled={!!job || !!batch} className="rounded-l-none border-l border-white/20 px-2" aria-label="版本数设置">
+          <Button variant="primary" size={size} disabled={!!job || !!batch} className={cn('rounded-l-none border-l border-white/20 px-2', buttonClassName)} aria-label="版本数设置">
             <ChevronDown className="h-4 w-4" />
           </Button>
         </P.Trigger>

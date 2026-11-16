@@ -100,6 +100,23 @@ import {
   WarningIcon,
   XCircleIcon,
   XIcon,
+  ClockIcon,
+  CoinsIcon,
+  CpuIcon,
+  AtIcon,
+  HeartIcon,
+  SkullIcon,
+  BandaidsIcon,
+  ScalesIcon,
+  ChartLineIcon,
+  ScissorsIcon,
+  ArchiveIcon,
+  TargetIcon,
+  ListChecksIcon,
+  GaugeIcon,
+  ProhibitIcon,
+  ChartBarIcon,
+  HourglassIcon,
 } from '@phosphor-icons/react'
 
 export type IconCmp = PhIcon
@@ -214,3 +231,22 @@ export const Chats = wrap(ChatsCircleIcon, 'Chats')
 export const Send = wrap(PaperPlaneTiltIcon, 'Send')
 export const StopSquare = wrap(StopIcon, 'StopSquare')
 export const Wrench = wrap(WrenchIcon, 'Wrench')
+
+// v0.9.3
+export const Clock = wrap(ClockIcon, 'Clock')
+export const Coins = wrap(CoinsIcon, 'Coins')
+export const Cpu = wrap(CpuIcon, 'Cpu')
+export const At = wrap(AtIcon, 'At')
+export const Heart = wrap(HeartIcon, 'Heart')
+export const Skull = wrap(SkullIcon, 'Skull')
+export const Bandaids = wrap(BandaidsIcon, 'Bandaids')
+export const Scales = wrap(ScalesIcon, 'Scales')
+export const ChartLine = wrap(ChartLineIcon, 'ChartLine')
+export const Scissors = wrap(ScissorsIcon, 'Scissors')
+export const Archive = wrap(ArchiveIcon, 'Archive')
+export const Target = wrap(TargetIcon, 'Target')
+export const ListChecks = wrap(ListChecksIcon, 'ListChecks')
+export const Gauge = wrap(GaugeIcon, 'Gauge')
+export const Prohibit = wrap(ProhibitIcon, 'Prohibit')
+export const ChartBar = wrap(ChartBarIcon, 'ChartBar')
+export const Hourglass = wrap(HourglassIcon, 'Hourglass')

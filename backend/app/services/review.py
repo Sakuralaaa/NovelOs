@@ -127,6 +127,9 @@ def apply_patches(content: str, patches: list[dict[str, Any]], indices: list[int
         if p.get("applied"):
             skipped.append({"index": i, "reason": "已经应用过"})
             continue
+        if p.get("stale"):
+            skipped.append({"index": i, "reason": "补丁来自上一轮审稿，已过期"})
+            continue
         orig = str(p.get("original") or "")
         if not orig or orig not in content:
             skipped.append({"index": i, "reason": "原文里找不到这段（可能已被改过或被前一个补丁改动）"})
@@ -255,8 +258,10 @@ def run_review(
     meta: dict[str, Any] | None = None,
     context: str = "",
     cheat_terms: list[str] | None = None,
+    extra_issues: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], int]:
-    """返回（Review dict, 被丢弃的无证据 issue 数）。context：人物当前状态 + 上一章结尾，供连贯性核对。"""
+    """返回（Review dict, 被丢弃的无证据 issue 数）。context：人物当前状态 + 上一章结尾，供连贯性核对。
+    extra_issues：v0.9.4 程序规则产出的问题（数值一致性 lint 等），quote 取自正文，与确定性检查一起计分。"""
     raw = gw.chat_json(
         "review",
         system_prompt("review"),
@@ -268,6 +273,11 @@ def run_review(
     llm_issues, dropped = validate_issues(raw, content, keep_src=True)
     reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta)
     det = deterministic_issues(content, protagonist, required_chars, number, cheat_terms)
+    for it in extra_issues or []:
+        if isinstance(it, dict) and it.get("quote") and quote_in_text(str(it["quote"]), content):
+            dim = DIM_ALIASES.get(str(it.get("dimension")), str(it.get("dimension")))
+            det.append({**it, "severity": it.get("severity") if it.get("severity") in SEVERITIES else "mid",
+                        "dimension": dim if dim in DIMENSIONS else "continuity"})
     issues = det + llm_issues + reader_issues
     src_map = {int(x["_src"]): len(det) + k for k, x in enumerate(llm_issues)}
     for x in llm_issues:
@@ -276,3 +286,21 @@ def run_review(
     review = build_review(issues, reader)
     review["patches"] = patches
     return review, dropped
+
+
+# ------------------------------------------------------------------ v0.9.4 提交前修中等问题
+
+PRE_COMMIT_FIX_DIMENSIONS = ("continuity", "retention")
+
+
+def pre_commit_targets(review: dict[str, Any] | None, content: str) -> tuple[list[int], list[int]]:
+    """最后一轮审稿里 continuity / retention（含番茄老读者审读）类 mid 问题。
+    返回（问题下标, 能直接用的补丁下标）。问题的 quote 必须还在正文里；补丁要没应用过且对应这些问题。"""
+    rv = review or {}
+    issues = rv.get("issues") or []
+    idx = [k for k, it in enumerate(issues) if it.get("severity") == "mid" and it.get("dimension") in PRE_COMMIT_FIX_DIMENSIONS
+           and quote_in_text(str(it.get("quote") or ""), content)]
+    want = set(idx)
+    pats = [int(p["index"]) for p in rv.get("patches") or [] if not p.get("applied") and p.get("issue_ref") is not None
+            and int(p["issue_ref"]) in want and str(p.get("original") or "") in content]
+    return idx, pats

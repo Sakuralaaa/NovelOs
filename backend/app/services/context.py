@@ -19,6 +19,7 @@ from app.services import common
 from app.services.outline import (
     FORESHADOW_ALERT_AGE, FORESHADOW_WARN_AGE, chapter_beats_list, foreshadow_age_label, rhythm_ledger,
 )
+from app.services.refs import refs_block, soul_line
 from app.skills.loader import system_prompt
 
 RECENT_SUMMARIES = 3
@@ -113,7 +114,7 @@ def relevant_cards(all_cards: list[Card], beats: dict[str, Any], protagonist: Ca
     return out
 
 
-def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack:
+def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: str = "") -> ContextPack:
     bid = book.id or 0
     beats = node.beats or {}
     all_cards = common.cards(s, bid)
@@ -151,6 +152,9 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
                 f"\n  说话方式：{v['voice'] or '未设定'}；口头禅：{(cp + '（每章最多 1–2 次，靠句式和用词体现腔调，不靠口头禅刷存在）') if cp else '无'}；"
                 f"小动作：{'、'.join(v['habits']) or '无'}；神态：{v['demeanor'] or '未设定'}"
             )
+            sl = soul_line(c)
+            if sl:
+                line += f"\n  灵魂五维（动机与底线，决定他这场怎么选、怎么说）：{sl}"
             d = c.data or {}
             if d.get("knows") or d.get("unknown") or d.get("misbelief"):
                 line += f"\n  此刻知道：{d.get('knows', [])}；不知道：{d.get('unknown', [])}；误解：{d.get('misbelief', [])}"
@@ -199,6 +203,12 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
     if ahead:
         parts.append(ahead)
 
+    if instruction.strip():
+        parts.append("【作者对本章的额外要求】\n" + instruction.strip())
+    rb = refs_block(s, bid, _plan_text(beats), node.title or "", node.summary or "", instruction)
+    if rb:
+        parts.append(rb)
+
     pre = preflight_check(beats, all_cards, facts, opens, node.order)
     if pre:
         parts.append("【写前核对（程序发现，写作时按这里处理）】\n" + "\n".join(f"- {x}" for x in pre))
@@ -246,8 +256,9 @@ def scene_plan_context(s: Session, book: Book, node: OutlineNode, limit: int = 2
         last = committed[-1]
         if last.number == node.order - 1 and last.content:
             out.append("【上一章结尾原文（第一个场景从这里接）】\n" + chapter_tail(last.content))
-    text = "\n".join(out)
-    return text[:limit]
+    text = "\n".join(out)[:limit]
+    rb = refs_block(s, bid, _plan_text(node.beats or {}), node.title or "", node.summary or "")
+    return text + ("\n" + rb if rb else "")
 
 
 def next_outlines_block(s: Session, book_id: int, order: int, n: int = NEXT_OUTLINES,

@@ -25,6 +25,9 @@ const PackagePage = lazy(() => import('@/pages/book/Package'))
 const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
+const TeardownPage = lazy(() => import('@/pages/Teardown'))
+const FanficPage = lazy(() => import('@/pages/Fanfic'))
+const FanficNewPage = lazy(() => import('@/pages/FanficNew'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 const qc = new QueryClient({
@@ -69,6 +72,11 @@ export function App() {
                 <Route path="books/:bookId/foreshadows" element={<S><Foreshadows /></S>} />
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
+                <Route path="teardown" element={<S><TeardownPage /></S>} />
+                <Route path="teardown/:id" element={<S><TeardownPage /></S>} />
+                <Route path="fanfic" element={<S><FanficPage /></S>} />
+                <Route path="fanfic/new" element={<S><FanficNewPage /></S>} />
+                <Route path="fanfic/:id" element={<S><FanficPage /></S>} />
                 <Route path="aigc" element={<S><AigcDetectPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />

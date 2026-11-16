@@ -15,7 +15,8 @@ export function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const loc = useLocation()
   // 写作页面默认收起主侧栏，给正文留出空间（不影响用户在其他页面的偏好）
-  const onWriting = /\/books\/\d+\/chapters/.test(loc.pathname)
+  // v0.9.3 拆书工作台（/teardown 与 /teardown/:id）同样收起侧栏，三栏全屏
+  const onWriting = /\/books\/\d+\/chapters/.test(loc.pathname) || /^\/teardown(\/|$)/.test(loc.pathname)
   const [writingExpanded, setWritingExpanded] = useState(false)
   const effCollapsed = onWriting ? !writingExpanded : collapsed
   const toggle = () => (onWriting ? setWritingExpanded((x) => !x) : setCollapsed((c) => !c))

@@ -71,6 +71,15 @@ class WritingSettingsIn(BaseModel):
     auto_adopt_best: bool | None = None
     auto_commit: bool | None = None
     default_variants: int | None = Field(default=None, ge=1, le=3)
+    # v0.9.4
+    fix_mid_before_commit: bool | None = None  # 提交前自动修 continuity/retention 类 mid 问题（默认开）
+    auto_rereview: bool | None = None  # 自动应用审稿补丁后重审一次（默认开）
+
+
+class BookWritingSettingsIn(BaseModel):
+    """v0.9.4 书级开关：true/false 覆盖全局；null 跟随全局。未出现的字段不改。"""
+    fix_mid_before_commit: bool | None = None
+    auto_rereview: bool | None = None
 
 
 class RadarBookAiIn(BaseModel):
@@ -166,12 +175,24 @@ class ImitateExtractIn(BaseModel):
 PlatformStyle = Literal["fanqie", "qidian", "generic"]
 
 
+class FanficSpec(BaseModel):
+    """v0.10 同人书设置（建书时 fanfic 字段 / POST /books/{id}/fanfic 共用）。"""
+    source_id: int
+    fidelity: Literal["strict", "moderate", "loose"] = "moderate"
+    direction: Literal["canon_fill", "if_line", "transmigration", "rebirth", "system", "au_modern", "au_ancient", "side_pov",
+                       "cp", "villain_redemption", "epilogue", "crossover"] = "canon_fill"
+    extra_source_ids: list[int] = Field(default_factory=list, max_length=9)
+    notes: str = Field(default="", max_length=1000)
+
+
 class BookCreate(BaseModel):
     title: str | None = None
     genre: str = ""
     gender: Gender = "male"
     premise: str | None = None
     platform_style: PlatformStyle = "fanqie"
+    fanfic: FanficSpec | None = None  # v0.10 同人建书；给了就必须 copyright_ack=true
+    copyright_ack: bool = False
 
 
 class BookPatch(BaseModel):
@@ -186,6 +207,7 @@ class BookPatch(BaseModel):
     banned_tropes: list[dict[str, Any]] | None = None
     agent_auto_apply: bool | None = None
     platform_style: PlatformStyle | None = None
+    approval_mode: Literal["auto", "review"] | None = None  # v0.9.3
 
 
 class IdeasGenerate(BaseModel):
@@ -221,12 +243,28 @@ class IdeaUpdate(BaseModel):
 CardType = Literal["world", "cheat", "power", "faction", "character", "item", "location"]
 
 
+SOUL_KEYS = ("desire", "fear", "wound", "belief", "voice")
+SOUL_LABEL = {"desire": "欲望", "fear": "恐惧", "wound": "伤痕", "belief": "信念", "voice": "说话方式"}
+
+
+class SoulIn(BaseModel):
+    """v0.9.3 角色灵魂五维；每项可选，传空串清空。"""
+    desire: str | None = Field(default=None, max_length=500)
+    fear: str | None = Field(default=None, max_length=500)
+    wound: str | None = Field(default=None, max_length=500)
+    belief: str | None = Field(default=None, max_length=500)
+    voice: str | None = Field(default=None, max_length=500)
+
+
 class CardIn(BaseModel):
     type: CardType
     name: str = Field(min_length=1)
     summary: str = ""
     data: dict[str, Any] = {}
     known_by: list[str] = []
+    status: Literal["active", "deprecated"] = "active"
+    ref_enabled: bool = True
+    soul: SoulIn | None = None
 
 
 class CardSuggest(BaseModel):
@@ -243,6 +281,26 @@ class CardUpdate(BaseModel):
     summary: str | None = None
     data: dict[str, Any] | None = None
     known_by: list[str] | None = None
+    status: Literal["active", "deprecated"] | None = None
+    ref_enabled: bool | None = None
+    soul: SoulIn | None = None
+
+
+def merge_soul(old: dict[str, Any] | None, patch: SoulIn | dict[str, Any] | None) -> dict[str, str] | None:
+    """按键合并五维：只改传了的键；空串清空；全空返回 None。"""
+    cur = {k: str((old or {}).get(k) or "") for k in SOUL_KEYS}
+    if patch is not None:
+        p = patch.model_dump(exclude_unset=True) if isinstance(patch, BaseModel) else dict(patch)
+        for k in SOUL_KEYS:
+            if k in p and p[k] is not None:
+                cur[k] = str(p[k]).strip()
+    return cur if any(cur.values()) else None
+
+
+def soul_out(c: Card) -> dict[str, str] | None:
+    if c.type != "character":
+        return None
+    return {k: str((c.soul or {}).get(k) or "") for k in SOUL_KEYS}
 
 
 class OutlineUpdate(BaseModel):
@@ -392,6 +450,7 @@ class ChapterUpdate(BaseModel):
 
 class WriteNextIn(BaseModel):
     variants: int = Field(default=1, ge=1, le=3)
+    instruction: str = Field(default="", max_length=1000)  # v0.9.3：本章额外要求，可含 @条目名
 
 
 class WriteBatchIn(BaseModel):
@@ -492,7 +551,10 @@ def book_out(s: Session, b: Book) -> dict[str, Any]:
         "banned_tropes": list(b.banned_tropes or []), "agent_auto_apply": bool(b.agent_auto_apply),
         "platform_style": b.platform_style if b.platform_style in ("fanqie", "qidian", "generic") else "fanqie",
         "has_book_test": bool((b.book_test or {}).get("variants")),
+        "approval_mode": common.approval_mode(b), "approval_mode_explicit": b.approval_mode in ("auto", "review"),
+        "fanfic": b.fanfic or None,  # v0.10 同人设置；原创书为 null
     }
+
 
 
 def idea_out(i: Idea, trope_list: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -517,7 +579,9 @@ def _idea_tropes(i: Idea, tl: list[dict[str, Any]] | None) -> list[dict[str, Any
 
 def card_out(c: Card, trope_list: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     out = {"id": c.id, "book_id": c.book_id, "type": c.type, "name": c.name, "summary": c.summary,
-           "data": c.data or {}, "known_by": list(c.known_by or []), "updated_at": iso(c.updated_at)}
+           "data": c.data or {}, "known_by": list(c.known_by or []), "updated_at": iso(c.updated_at),
+           "status": c.status if c.status in ("active", "deprecated") else "active",
+           "ref_enabled": bool(c.ref_enabled) if c.ref_enabled is not None else True, "soul": soul_out(c)}
     if trope_list is not None:
         from app.services import tropes
 
@@ -542,14 +606,17 @@ LINT_KEYS = ("ai_score", "dialogue_ratio", "repeated_ngrams", "banned_hits", "wa
              # v0.6 手艺类
              "intensifiers", "cliche_similes", "measure_errors", "crowd_shots", "dialogue_tics", "catchphrases", "fix_targets",
              # v0.9 平台风格档：platform（fanqie/qidian/generic）、long_paragraphs（超长段落数）
-             "platform", "long_paragraphs")
+             "platform", "long_paragraphs",
+             # v0.9.4：lint_tier（fanqie 番茄档 / publish 出版档）、numeric_conflicts（数值一致性问题，带位置）
+             "lint_tier", "numeric_conflicts")
 
 
 def lint_out(l: dict[str, Any] | None) -> dict[str, Any] | None:
     if not l:
         return None
     defaults: dict[str, Any] = {"repeated_ngrams": [], "banned_hits": [], "warnings": [], "intensifiers": [], "cliche_similes": [],
-                                "measure_errors": [], "dialogue_tics": [], "catchphrases": [], "fix_targets": [], "platform": "generic"}
+                                "measure_errors": [], "dialogue_tics": [], "catchphrases": [], "fix_targets": [], "platform": "generic",
+                                "lint_tier": "publish", "numeric_conflicts": []}
     return {k: l.get(k, defaults.get(k, 0)) for k in LINT_KEYS}
 
 
@@ -562,6 +629,11 @@ def review_out(r: dict[str, Any] | None) -> dict[str, Any] | None:
     # v0.9：审稿补丁 [{index, original, improved, reason, issue_ref, severity, applied}] 与应用记录
     out["patches"] = list(r.get("patches") or [])
     out["patch_log"] = list(r.get("patch_log") or [])
+    # v0.9.4：补丁后重审记录、high 仍在的标记、提交前修中等问题记录
+    out["rereview"] = r.get("rereview")
+    out["flagged"] = bool(r.get("flagged"))
+    out["flag_reason"] = r.get("flag_reason") or ""
+    out["pre_commit_fix"] = r.get("pre_commit_fix")
     return out
 
 

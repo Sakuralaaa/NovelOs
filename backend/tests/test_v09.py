@@ -251,10 +251,16 @@ def test_lint_platform_thresholds() -> None:
     fq = lint_chapter(text, th, platform="fanqie")
     gen = lint_chapter(text, th)
     assert fq.platform == "fanqie" and gen.platform == "generic"
-    assert fq.long_paragraphs == [0] and gen.long_paragraphs == []
-    assert any(t["kind"] == "长段" for t in fq.fix_targets) and not any(t["kind"] == "长段" for t in gen.fix_targets)
+    # v0.9.4 校准：番茄档长段 70→100 字，且要成片（≥3 段、占比 ≥10%）才算问题；单段 73 字不再报
+    assert fq.long_paragraphs == [] and gen.long_paragraphs == []
+    assert not any(t["kind"] == "长段" for t in fq.fix_targets)
     assert any("单句成段" in w for w in gen.warnings) and not any("单句成段" in w for w in fq.warnings)
-    assert any("70 字" in w for w in fq.warnings) and fq.to_dict()["long_paragraphs"] == 1
+    long3 = "\n\n".join([long_para + long_para[:40]] * 3)
+    text2 = long3 + "\n\n" + waterfall + "\n\n“走。”他说。"
+    fq2, gen2 = lint_chapter(text2, th, platform="fanqie"), lint_chapter(text2, th)
+    assert fq2.long_paragraphs == [0, 1, 2] and gen2.long_paragraphs == []
+    assert any(t["kind"] == "长段" for t in fq2.fix_targets) and not any(t["kind"] == "长段" for t in gen2.fix_targets)
+    assert any("100 字" in w for w in fq2.warnings) and fq2.to_dict()["long_paragraphs"] == 3
     # 群众反应镜头：番茄档上限放宽到 5
     crowd = "\n\n".join(["围观的人群里有人嘀咕了一句。", "他往前走。", "街坊们面面相觑。", "他继续走。", "人群往后退了两步。", "他没停。",
                          "众人愣住了。", "他到了门口。"])
@@ -454,6 +460,6 @@ def test_context_includes_next_two_outlines(client: TestClient) -> None:
 def test_version_090(client: TestClient) -> None:
     from pathlib import Path
 
-    assert client.get("/api/health").json()["version"].startswith("0.9.")  # v0.9.1 起版本号由 test_v091 精确校验
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10."))  # v0.9.1 起版本号由 test_v091 精确校验
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.0" in (root / "CHANGELOG.md").read_text(encoding="utf-8")

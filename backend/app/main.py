@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import routes_agent, routes_auth, routes_books, routes_core, routes_dev
+from app.api import routes_agent, routes_auth, routes_books, routes_core, routes_dev, routes_fanfic, routes_v093
 from app.apikeys import ApiKeyStore, token_from_headers
 from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
@@ -114,6 +114,8 @@ def create_app() -> FastAPI:
     app.include_router(routes_core.router)
     app.include_router(routes_books.router)
     app.include_router(routes_agent.router)
+    app.include_router(routes_v093.router)
+    app.include_router(routes_fanfic.router)  # v0.10 同人创作
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 

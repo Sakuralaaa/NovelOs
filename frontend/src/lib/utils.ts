@@ -63,6 +63,8 @@ export const cardTypeLabel = (t: CardType) => CARD_TYPES.find((x) => x.key === t
 
 export const JOB_KIND_LABEL: Record<string, string> = {
   agent_run: 'Agent 处理中',
+  fanfic_source: '提炼原著设定',
+  fanfic_ooc: 'OOC 检查',
   radar_refresh: '刷新热点榜单',
   radar_teardown: '拆解榜单书',
   radar_deep: '深度拆解',
@@ -120,6 +122,10 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   idea_organize: '一键整理选题',
   idea_fusion: '多本熔炉',
   book_test: '书测',
+  // v0.9.3
+  field_ai: '字段 AI',
+  character_soul: '灵魂五维',
+  teardown_project: '拆书',
 }
 export const jobLabel = (kind: string) => JOB_KIND_LABEL[kind] ?? kind
 

@@ -19,6 +19,7 @@ import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { api, qk, type ApiKey } from '@/lib/api'
 import type { ApiFormat, Channel, ImageMode, RouteKey, Routing, Trope } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { setCostHint, useCostHint } from '@/lib/cost'
 
 const PRESETS: { key: string; name: string; base_url: string; format: ApiFormat; models: string[]; color: string }[] = [
   { key: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', format: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'text-embedding-3-small', 'gpt-image-1'], color: '#10a37f' },
@@ -361,13 +362,23 @@ function WritingCard() {
     meta: { errorTitle: '保存失败' },
     onSuccess: (d) => { qc.setQueryData(qk.writing, d); localStorage.setItem('novelos-variants', String(d.default_variants)); toast.success('写作偏好已保存') },
   })
-  if (q.isError) return null
+  const costHint = useCostHint()
   const c = q.data
+  // v0.9.3：成本提示只存本机，写作设置接口出错时也要能开关
+  const costRow = (
+    <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+      <div className="min-w-0">
+        <div className="text-[13.5px] font-medium">AI 操作前显示成本预估</div>
+        <div className="mt-0.5 text-[12px] text-muted-foreground">写章、改写、审稿等先弹出预计 token、调用次数、模型和耗时，确认后再开始（只对本机生效）</div>
+      </div>
+      <Switch checked={costHint} onCheckedChange={(v) => { setCostHint(v); toast.success(v ? '已开启成本预估' : '已关闭成本预估，AI 操作将直接开始') }} />
+    </label>
+  )
   return (
     <Card>
       <CardHeader divider title="写作偏好" icon={<Copy className="h-4 w-4" />} />
       <CardBody className="p-0">
-        {!c ? <Skeleton className="m-5 h-28" /> : (
+        {q.isError ? <div className="divide-y divide-border/70">{costRow}</div> : !c ? <Skeleton className="m-5 h-28" /> : (
           <div className="divide-y divide-border/70">
             <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
               <div className="text-[13.5px] font-medium">默认版本数</div>
@@ -381,6 +392,21 @@ function WritingCard() {
               <div className="text-[13.5px] font-medium">审稿通过后自动提交</div>
               <Switch checked={c.auto_commit} onCheckedChange={(v) => m.mutate({ auto_commit: v })} />
             </label>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">提交前修中等问题</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">提交前先应用连续性 / 追读欲的一般问题补丁，剩下的定点改写原句；每章一次，旧正文进历史可撤回</div>
+              </div>
+              <Switch checked={c.fix_mid_before_commit ?? true} onCheckedChange={(v) => m.mutate({ fix_mid_before_commit: v })} />
+            </label>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">补丁后自动复审</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">写章时自动应用了审稿补丁，再审一次（只 1 次）；仍有严重问题就标记、不提交</div>
+              </div>
+              <Switch checked={c.auto_rereview ?? true} onCheckedChange={(v) => m.mutate({ auto_rereview: v })} />
+            </label>
+            {costRow}
           </div>
         )}
       </CardBody>

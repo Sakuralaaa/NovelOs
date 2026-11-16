@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
 import { ModelSelect, useModelRoute } from '@/components/common/AiAsk'
+import { AtButton, MentionTextarea, type MentionHandle } from '@/components/bible/MentionTextarea'
 import { ProposalCard } from './ProposalCard'
 import { useAgentSession, useAgentSessions, useAgentTools } from './useAgent'
 import { useBook } from '@/hooks/queries'
@@ -54,6 +55,7 @@ export function AgentChat({ bookId, variant = 'page', autoFocus }: { bookId: num
   const [text, setText] = useState('')
   const [pendingUser, setPendingUser] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<MentionHandle>(null)
   const running = !!d?.job || !!pendingUser
 
   const invalidateSessions = () => qc.invalidateQueries({ queryKey: qk.agentSessions(bookId) })
@@ -172,12 +174,15 @@ export function AgentChat({ bookId, variant = 'page', autoFocus }: { bookId: num
           </div>
         )}
         <div className="rounded-xl border bg-background shadow-xs transition-colors focus-within:border-primary/45">
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={variant === 'page' ? 3 : 2} autoFocus={autoFocus}
-            placeholder="告诉 Agent 要改什么，比如：别强调拳法，把碎星神通改个名，同步设定和大纲（Enter 发送，Shift+Enter 换行）"
+          <MentionTextarea ref={inputRef} bookId={bookId} placement="top" value={text} onChange={setText} rows={variant === 'page' ? 3 : 2} autoFocus={autoFocus}
+            placeholder="告诉 Agent 要改什么，比如：别强调拳法，把碎星神通改个名，同步设定和大纲（Enter 发送，Shift+Enter 换行，@ 引用设定）"
             className="block min-h-[60px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
-            <ModelSelect storage={storage} emptyLabel="默认（Agent 路由）" className="w-[180px]" />
+            <div className="flex min-w-0 items-center gap-1">
+              <ModelSelect storage={storage} emptyLabel="默认（Agent 路由）" className="w-[180px]" />
+              <AtButton onClick={() => inputRef.current?.insertAt()} />
+            </div>
             {running ? (
               <Button size="sm" variant="secondary" icon={<StopSquare className="h-3.5 w-3.5" />} loading={stop.isPending} disabled={!d?.job} onClick={() => stop.mutate()}>停止</Button>
             ) : (

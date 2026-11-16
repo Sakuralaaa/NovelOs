@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle, CheckCheck, ChevronLeft, Feather, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3,
+  AlertTriangle, CheckCheck, ChevronLeft, Feather, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3, Gauge, ShieldCheck, Zap,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +23,8 @@ import { LintPanel, type LocalStats } from '@/components/chapter/LintPanel'
 import { ChangesPanel } from '@/components/chapter/ChangesPanel'
 import { DiffView } from '@/components/chapter/DiffView'
 import { AigcPanel, useSha256 } from '@/components/aigc/Aigc'
+import { CostButton } from '@/components/cost/CostButton'
+import { FanficChapterPanel } from '@/components/FanficChapterPanel'
 import { useBook } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { useDebouncedCallback } from '@/hooks/useDebounced'
@@ -30,8 +32,15 @@ import { modKey, useHotkey } from '@/hooks/useHotkey'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import { analyzeText } from '@/lib/textAnalysis'
-import type { AigcSegment, Chapter, ChapterVariant } from '@/lib/types'
+import type { AigcSegment, ApprovalMode, Book, Chapter, ChapterVariant, EstimateKind } from '@/lib/types'
 import { cn, countWords, fmtNum, fmtTime } from '@/lib/utils'
+
+/** v0.9.3 工具栏：窄屏 / 触控 ≥40px；只有宽屏 + 鼠标时收成 32px */
+const FINE = '[@media(min-width:640px)_and_(pointer:fine)]'
+const TB = `h-10 px-2.5 ${FINE}:h-8`
+const TBI = `h-10 w-10 ${FINE}:h-8 ${FINE}:w-8`
+/** 后端 /api/estimate 支持 aigc（契约偏离补充），前端 EstimateKind 暂未列出 */
+const AIGC_KIND: EstimateKind = 'aigc'
 
 const STATUS: Record<Chapter['status'], { l: string; dot: string; tone: 'neutral' | 'warning' | 'success' }> = {
   draft: { l: '草稿', dot: 'bg-muted-foreground/50', tone: 'neutral' },
@@ -108,6 +117,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const { start } = useJobs()
   const q = useQuery({ queryKey: qk.chapter(id), queryFn: () => api.chapter(id) })
   const ch = q.data
+  const { data: book } = useBook(bookId)
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -207,7 +217,17 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     const label = kind === 'thicken' ? '描写增厚' : '人味修整'
     start(kind === 'thicken' ? api.thickenChapter(id) : api.humanizeChapter(id), {
       key: `${kind}:${id}`, label, silent: true,
-      onSuccess: async () => {
+      onSuccess: async (j) => {
+        // v0.9.3 审批模式 review：后端不落库，只回对比稿 draft（thicken 的 before/after 是指标，正文在 draft 里）
+        const d = (j.result as Record<string, any> | undefined)?.draft as { before?: unknown; after?: unknown; changed?: boolean; label?: string } | undefined
+        if (d && typeof d.after === 'string') {
+          const b0 = typeof d.before === 'string' ? d.before : before
+          if (d.changed === false || d.after === b0) { toast.info(`${label}完成，这一章没有需要改的地方`); return }
+          if (latest.current.content !== b0) { toast.error(`${label}期间正文被改过，为免覆盖已丢弃这次结果，请重试`); return }
+          autoReviewRef.current = false
+          setDiff({ title: `${label} · 逐段对比，确定后才写入`, before: b0, after: d.after, kind: 'rewrite', label: d.label || `${label}前` })
+          return
+        }
         try {
           const fresh = await api.chapter(id)
           qc.setQueryData(qk.chapter(id), fresh)
@@ -430,7 +450,9 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <TabsContent value="review" className="focus:outline-none"><ReviewPanel review={ch.review} onQuote={locateQuote} onReview={runReview} reviewing={!!reviewJob} activeQuote={focusQuote?.q}
           onApplyPatches={(ix) => applyPatches.mutate(ix)} applyingPatches={applyPatches.isPending}
-          patchDisabled={hasVariants ? '先采纳一个版本' : busy ? '有任务在进行' : !!diff && '先处理对比稿'} /></TabsContent>
+          patchDisabled={hasVariants ? '先采纳一个版本' : busy ? '有任务在进行' : !!diff && '先处理对比稿'}
+          onUndo={ch.history ? () => setConfirmUndo(true) : undefined} undoLabel={ch.last_history_label} undoDisabled={busy || hasVariants || !!diff} />
+          {book?.fanfic && <div className="mt-4"><FanficChapterPanel chapterId={ch.id} bookId={bookId} onLocate={locateQuote} /></div>}</TabsContent>
         <TabsContent value="lint" className="focus:outline-none">
           <LintPanel lint={lintForPanel} local={local} showBare={showBare} showSummary={showSummary} onToggleBare={setShowBare} onToggleSummary={setShowSummary}
             onHumanize={() => runRewrite('humanize')} onThicken={() => runRewrite('thicken')} busy={busy || hasVariants} thickening={!!thickenJob} humanizing={!!humanizeJob} />
@@ -451,48 +473,78 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* 工具栏 */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-background/85 px-4 py-2 backdrop-blur">
-          <div className="flex min-w-0 items-center gap-2">
+        {/* 工具栏（v0.9.3：吸顶、紧凑；窄屏横向滚动；触控 ≥40px） */}
+        <div className="sticky top-0 z-20 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b bg-background/85 px-2 py-1 backdrop-blur sm:flex-nowrap sm:px-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
             <div className="w-[150px] lg:hidden">
               <Select value={String(id)} onChange={(v) => v && nav(`/books/${bookId}/chapters/${v}`)} options={chapters.map((c) => ({ value: String(c.id), label: `第${c.number}章 ${c.title.replace(/^第\d+章\s*/, '')}` }))} />
             </div>
             <Badge tone={STATUS[ch.status].tone} dot>{STATUS[ch.status].l}</Badge>
             <SaveIndicator state={saveState} at={savedAt} />
           </div>
-          <div className="flex items-center gap-1">
-            <Tip content="整理段落：段与段之间统一空一行"><Button size="icon-sm" variant="ghost" disabled={busy || hasVariants || rewriting || !!diff} onClick={() => {
-              const fixed = content.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join('\n\n')
-              if (fixed === content) { toast.info('段落格式已经是整齐的'); return }
-              edit({ content: fixed }); toast.success('已整理段落', { description: '可随时手动再改' })
-            }} aria-label="整理段落"><Rows3 className="h-4 w-4" /></Button></Tip>
-            <Tip content={serif ? '切换为黑体' : '切换为宋体'}><Button size="icon-sm" variant="ghost" onClick={() => { setSerif(!serif); localStorage.setItem('novelos-serif', serif ? '0' : '1') }} aria-label="字体"><Type className="h-4 w-4" /></Button></Tip>
-            <Button size="sm" variant="ghost" loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onClick={runReview}><span className="hidden sm:inline">审稿</span></Button>
-            <Button size="sm" variant="ghost" loading={!!humanizeJob} disabled={busy || hasVariants} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={() => runRewrite('humanize')}><span className="hidden sm:inline">人味修整</span></Button>
-            <Button size="sm" variant="ghost" loading={!!thickenJob} disabled={busy || hasVariants} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => runRewrite('thicken')}><span className="hidden sm:inline">描写增厚</span></Button>
-            <Tip content="改成口语网文语感：短句、动作先行、去套话；不改情节和数值"><Button size="sm" variant="ghost" loading={!!polishJob} disabled={busy || hasVariants || !!diff} icon={<Feather className="h-3.5 w-3.5" />} onClick={runPolish}><span className="hidden sm:inline">语感重塑</span></Button></Tip>
-            <Tip content="写要求让 AI 改写全章或选中的文字，对比后再决定采纳"><Button size="sm" variant="ghost" loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onClick={openRewrite}><span className="hidden sm:inline">按要求改写</span></Button></Tip>
-            {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
-            <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
-              <DialogContent title="撤回到上一版正文？" desc={`恢复「${ch.last_history_label || '上一版'}」时的正文，之后的修改会丢掉。`}
-                footer={<><Button variant="ghost" onClick={() => setConfirmUndo(false)}>取消</Button><Button variant="primary" loading={undoMut.isPending} onClick={() => undoMut.mutate()}>撤回</Button></>} />
-            </Dialog>
-            <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} />
-            {ch.status !== 'committed' && <Tip content="删除草稿"><Button size="icon-sm" variant="ghost" disabled={busy} onClick={() => setConfirmDel(true)} aria-label="删除草稿" className="text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button></Tip>}
-            <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
-              <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
-                footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rmDraft.isPending} onClick={() => rmDraft.mutate()}>删除</Button></>} />
-            </Dialog>
-            <Tip content={hasVariants ? '先采纳一个版本' : ch.status === 'committed' ? '已提交，修改后可再次提交' : '确认本章，人物状态与伏笔写入底账'}>
-              <span><Button size="sm" variant={ch.status === 'committed' ? 'secondary' : 'primary'} loading={commit.isPending || committing} disabled={busy || hasVariants || committing} icon={<CheckCheck className="h-3.5 w-3.5" />} onClick={() => commit.mutate()}><span className="hidden sm:inline">提交</span></Button></span>
-            </Tip>
-            <Tip content={panelOpen ? '收起面板' : '展开面板'}>
-              <Button size="icon-sm" variant="ghost" className="hidden xl:inline-flex" onClick={() => { setPanelOpen(!panelOpen); localStorage.setItem('novelos-panel', panelOpen ? '0' : '1') }} aria-label="面板">
-                {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-              </Button>
-            </Tip>
-            <Button size="icon-sm" variant="ghost" className="xl:hidden" onClick={() => setSheetOpen(true)} aria-label="审稿面板"><PanelRightOpen className="h-4 w-4" /></Button>
+          <div className="-mx-2 flex w-[calc(100%+1rem)] min-w-0 overflow-x-auto overscroll-x-contain px-2 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:flex-1 sm:px-0 [&::-webkit-scrollbar]:hidden">
+            <div className="ml-auto flex shrink-0 items-center gap-1 py-0.5">
+              <Tip content="写下一章（AI 按大纲写新章节）">
+                <span className="inline-flex shrink-0"><WriteNextButton bookId={bookId} size="sm" label="写作" buttonClassName={`h-10 min-w-10 ${FINE}:h-8 ${FINE}:min-w-0`} /></span>
+              </Tip>
+              <ToolSep />
+              <Tip content="写要求让 AI 改写全章或选中的文字，对比后再决定采纳">
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: 'chapter_rewrite', bookId, chapterId: id }} label="按要求改写" confirmLabel="写要求"
+                  size="sm" variant="ghost" className={TB} loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onRun={openRewrite}>改写</CostButton></span>
+              </Tip>
+              <Tip content="语感重塑：短句、动作先行、去套话；不改情节和数值">
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: 'polish_voice', bookId, chapterId: id }} label="语感重塑"
+                  size="sm" variant="ghost" className={TB} loading={!!polishJob} disabled={busy || hasVariants || !!diff} icon={<Feather className="h-3.5 w-3.5" />} onRun={runPolish}>语感</CostButton></span>
+              </Tip>
+              <Tip content="人味修整：定点清理 AI 腔">
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: 'humanize', bookId, chapterId: id }} label="人味修整"
+                  size="sm" variant="ghost" className={TB} loading={!!humanizeJob} disabled={busy || hasVariants || !!diff} icon={<Wand2 className="h-3.5 w-3.5" />} onRun={() => runRewrite('humanize')}>人味</CostButton></span>
+              </Tip>
+              <Tip content="描写增厚：给裸对白、概述段补动作与细节">
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: 'thicken', bookId, chapterId: id }} label="描写增厚"
+                  size="sm" variant="ghost" className={TB} loading={!!thickenJob} disabled={busy || hasVariants || !!diff} icon={<Sparkles className="h-3.5 w-3.5" />} onRun={() => runRewrite('thicken')}>增厚</CostButton></span>
+              </Tip>
+              <ToolSep />
+              <Tip content="审稿：打分、挑问题、给补丁">
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: 'review', bookId, chapterId: id }} label="审稿"
+                  size="sm" variant="ghost" className={TB} loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onRun={runReview}>审稿</CostButton></span>
+              </Tip>
+              <Tip content={hasVariants ? '先采纳一个版本再检测' : rewriting ? '改写任务进行中' : 'AI 率检测（朱雀，计检测额度）'}>
+                <span className="inline-flex shrink-0"><CostButton target={{ kind: AIGC_KIND, bookId, chapterId: id }} label="AI 率检测"
+                  size="sm" variant="ghost" className={TB} loading={!!aigcJob} disabled={hasVariants || rewriting || !!diff} icon={<Gauge className="h-3.5 w-3.5" />} onRun={runAigc}>AI 率</CostButton></span>
+              </Tip>
+              <ToolSep />
+              <Tip content="整理段落：段与段之间统一空一行"><Button size="sm" variant="ghost" className={TB} disabled={busy || hasVariants || rewriting || !!diff} onClick={() => {
+                const fixed = content.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean).join('\n\n')
+                if (fixed === content) { toast.info('段落格式已经是整齐的'); return }
+                edit({ content: fixed }); toast.success('已整理段落', { description: '可随时手动再改' })
+              }} icon={<Rows3 className="h-3.5 w-3.5" />}>整理段落</Button></Tip>
+              <Tip content={serif ? '切换为黑体' : '切换为宋体'}><Button size="icon-sm" variant="ghost" className={TBI} onClick={() => { setSerif(!serif); localStorage.setItem('novelos-serif', serif ? '0' : '1') }} aria-label="字体"><Type className="h-4 w-4" /></Button></Tip>
+              {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" className={TBI} disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
+              <ToolSep />
+              {book && <ApprovalToggle book={book} disabled={busy || !!diff} />}
+              <ToolSep />
+              {ch.status !== 'committed' && <Tip content="删除草稿"><Button size="icon-sm" variant="ghost" disabled={busy} onClick={() => setConfirmDel(true)} aria-label="删除草稿" className={cn(TBI, 'text-muted-foreground hover:text-danger')}><Trash2 className="h-4 w-4" /></Button></Tip>}
+              <Tip content={hasVariants ? '先采纳一个版本' : ch.status === 'committed' ? '已提交，修改后可再次提交' : '确认本章，人物状态与伏笔写入底账'}>
+                <span className="inline-flex shrink-0"><Button size="sm" variant={ch.status === 'committed' ? 'secondary' : 'primary'} className={TB} loading={commit.isPending || committing} disabled={busy || hasVariants || committing || !!diff} icon={<CheckCheck className="h-3.5 w-3.5" />} onClick={() => commit.mutate()}>提交</Button></span>
+              </Tip>
+              <Tip content={panelOpen ? '收起面板' : '展开面板'}>
+                <Button size="icon-sm" variant="ghost" className={cn(TBI, 'hidden xl:inline-flex')} onClick={() => { setPanelOpen(!panelOpen); localStorage.setItem('novelos-panel', panelOpen ? '0' : '1') }} aria-label="面板">
+                  {panelOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                </Button>
+              </Tip>
+              <Button size="icon-sm" variant="ghost" className={cn(TBI, 'xl:hidden')} onClick={() => setSheetOpen(true)} aria-label="审稿面板"><PanelRightOpen className="h-4 w-4" /></Button>
+            </div>
           </div>
+          <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
+            <DialogContent title="撤回到上一版正文？" desc={`恢复「${ch.last_history_label || '上一版'}」时的正文，之后的修改会丢掉。`}
+              footer={<><Button variant="ghost" onClick={() => setConfirmUndo(false)}>取消</Button><Button variant="primary" loading={undoMut.isPending} onClick={() => undoMut.mutate()}>撤回</Button></>} />
+          </Dialog>
+          <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} />
+          <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
+            <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
+              footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rmDraft.isPending} onClick={() => rmDraft.mutate()}>删除</Button></>} />
+          </Dialog>
         </div>
 
         {diff ? (
@@ -538,7 +590,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                 <div className="mb-8 rounded-xl bg-gradient-to-br from-primary-soft to-surface p-4 hairline">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <div className="flex items-center gap-1.5 text-[14px] font-semibold"><Copy className="h-4 w-4 text-primary" />这一章写了 {variants.length} 个版本</div>
+                      <div className="flex items-center gap-1.5 text-[14px] font-semibold"><Copy className="h-4 w-4 text-primary" />{variants.length > 1 ? `这一章写了 ${variants.length} 个版本` : '新章节待采纳：看过后点「采纳此版」才写入正文'}</div>
                     </div>
                     <Button size="sm" variant="primary" loading={adopt.isPending} disabled={!curVariant} onClick={() => curVariant && adopt.mutate(curVariant.id)}>采纳此版</Button>
                   </div>
@@ -597,6 +649,7 @@ function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit }: {
   const [scope, setScope] = useState<'all' | 'selection'>('all')
   const [autoReview, setAutoReview] = useState(() => localStorage.getItem('novelos-rewrite-review') !== '0')
   const storage = useModelRoute('novelos.rewrite-route')
+  const refBookId = useBookId()
   useEffect(() => { if (open) setScope(selection ? 'selection' : 'all') }, [open, selection])
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -606,13 +659,53 @@ function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit }: {
             options={[{ value: 'all', label: '全章' }, { value: 'selection', label: selection ? `选中的文字（${countWords(selection.text)} 字）` : '选中的文字（未选中）' }]} />
           {scope === 'selection' && selection && <p className="line-clamp-3 rounded-md bg-subtle px-3 py-2 font-serif text-[13px] leading-relaxed text-foreground/75">{selection.text}</p>}
           {committed && <p className="rounded-md bg-warning-soft px-3 py-2 text-[12.5px] text-warning">这一章已提交入账：改写只改正文，不会改人物状态和伏笔底账。情节有大改时记得核对。</p>}
-          <AskBox title="改写要求" storage={storage} emptyLabel="默认（正文模型）" value={ask} onChange={setAsk} submitLabel="生成改写稿"
+          <AskBox title="改写要求" refBookId={refBookId} storage={storage} emptyLabel="默认（正文模型）" value={ask} onChange={setAsk} submitLabel="生成改写稿"
             placeholder="例如：节奏加快，删掉中间那段回忆；对话多一点；把打斗写得更短更狠"
             onSubmit={() => { onSubmit({ instruction: ask.trim(), scope, route: storage.model, autoReview }); setAsk('') }}
             extra={<label className="flex cursor-pointer items-center justify-between gap-3 text-[12.5px] text-muted-foreground"><span>采纳后自动重新审稿（人味检查会自动跑）</span><Switch checked={autoReview} onCheckedChange={(v) => { setAutoReview(v); localStorage.setItem('novelos-rewrite-review', v ? '1' : '0') }} /></label>} />
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ToolSep() {
+  return <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-border" />
+}
+
+/** v0.9.3：审批模式切换。章节 AI 只有显式设为 review 才拦截落库（approval_mode_explicit），所以按实际生效的模式显示 */
+function ApprovalToggle({ book, disabled }: { book: Book; disabled?: boolean }) {
+  const qc = useQueryClient()
+  const explicit = !!book.approval_mode_explicit
+  const cur: ApprovalMode = explicit && book.approval_mode === 'review' ? 'review' : 'auto'
+  const m = useMutation({
+    mutationFn: (mode: ApprovalMode) => api.setApprovalMode(book.id, mode),
+    meta: { errorTitle: '切换审批模式失败' },
+    onSuccess: (b, mode) => {
+      if (b && typeof b === 'object') qc.setQueryData(qk.book(book.id), (old: Book | undefined) => ({ ...(old ?? b), ...b }))
+      qc.invalidateQueries({ queryKey: qk.book(book.id) })
+      toast.success(mode === 'review' ? '已切到逐条审批' : '已切到自动采纳', {
+        description: mode === 'review' ? '写章、改写、人味修整、增厚等只给对比稿，你确认后才写入正文' : 'AI 改动按写作偏好自动落库（旧正文仍可撤回）',
+      })
+    },
+  })
+  const opts: { v: ApprovalMode; l: string; i: typeof Zap; tip: string }[] = [
+    { v: 'auto', l: '自动采纳', i: Zap, tip: 'AI 改动直接写入正文（旧正文进历史，可撤回）' },
+    { v: 'review', l: '逐条审批', i: ShieldCheck, tip: 'AI 只生成对比稿 / 待采纳版本，逐段确认后才写入' },
+  ]
+  return (
+    <div role="radiogroup" aria-label="审批模式" className="inline-flex shrink-0 items-center rounded-md bg-muted p-0.5">
+      {opts.map((o) => (
+        <Tip key={o.v} content={!explicit && o.v === 'review' && book.approval_mode === 'review' ? '这本书还没显式设置过：章节 AI 目前仍自动落库，点这里开启逐条审批' : o.tip}>
+          <button type="button" role="radio" aria-checked={cur === o.v} disabled={disabled || m.isPending}
+            onClick={() => { if (cur !== o.v) m.mutate(o.v) }}
+            className={cn('focus-ring inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-[5px] px-2.5 text-[12.5px] font-medium transition disabled:opacity-55',
+              `${FINE}:h-7`, cur === o.v ? 'bg-surface text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground')}>
+            {m.isPending && m.variables === o.v ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <o.i className="h-3.5 w-3.5" />}{o.l}
+          </button>
+        </Tip>
+      ))}
+    </div>
   )
 }
 

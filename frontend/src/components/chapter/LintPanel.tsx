@@ -1,4 +1,4 @@
-import { AlertTriangle, Highlighter, Sparkles, Wand2 } from '@/components/icons'
+import { AlertTriangle, Highlighter, Scales, Sparkles, Wand2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
@@ -36,6 +36,7 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
       </div>
 
       {lint && <LongParaSection lint={lint} />}
+      {lint && <NumericSection lint={lint} />}
 
       <div className="grid grid-cols-2 gap-2">
         <Tip content="只改写干巴巴的对白和概述段落：补动作、神态、环境、心理，情节不变。完成后可逐段对比、接受或撤销。">
@@ -146,18 +147,20 @@ function LongParaSection({ lint }: { lint: Lint }) {
   if (lint.platform === undefined && lint.long_paragraphs === undefined) return null
   const n = lint.long_paragraphs ?? 0
   const quotes = (lint.fix_targets ?? []).filter((t) => t.kind === '长段')
-  const fanqie = (lint.platform ?? 'fanqie') === 'fanqie'
+  const fanqie = lint.lint_tier ? lint.lint_tier === 'fanqie' : (lint.platform ?? 'fanqie') === 'fanqie'
+  // v0.9.4 起番茄档长段阈值改为 >100 字（带 lint_tier 的结果）
+  const lim = lint.lint_tier ? 100 : 70
   return (
     <div className={cn('rounded-lg p-3 hairline', n > 0 && 'bg-warning-soft/40')}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] font-medium">长段落</span>
         <span className="flex items-center gap-1.5">
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">按{platformLabel(lint.platform)}档检查</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{lint.lint_tier ? `${lint.lint_tier === 'fanqie' ? '番茄' : '出版'}档阈值` : `按${platformLabel(lint.platform)}档检查`}</span>
           {fanqie && <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium', n ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success')}>{n ? `${n} 段` : '健康'}</span>}
         </span>
       </div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-foreground/75">
-        {!fanqie ? '这一档不查长段。' : n ? '超过 70 字的段落在手机上超过 3 行，读者容易划走。点「人味修整」会把点名的长段拆开。' : '没有超过 70 字的段落。'}
+        {!fanqie ? '这一档不查长段。' : n ? `超过 ${lim} 字的段落在手机上读着累，读者容易划走。${lint.lint_tier ? '长段 ≥3 段且占比 ≥10% 才算问题；' : ''}点「人味修整」会把点名的长段拆开。` : `没有超过 ${lim} 字的段落。`}
       </p>
       {quotes.length > 0 && (
         <ul className="mt-2 space-y-1">
@@ -165,6 +168,44 @@ function LongParaSection({ lint }: { lint: Lint }) {
             <li key={i} className="line-clamp-2 border-l-2 border-warning/60 pl-2 font-serif text-[12px] leading-relaxed text-foreground/70"><span className="num mr-1 font-sans text-warning">{q.word}</span>{q.quote}</li>
           ))}
         </ul>
+      )}
+    </div>
+  )
+}
+
+const NUM_KIND: Record<string, string> = { weight: '重量', height: '身高/高度', length: '长度', width: '宽度', thick: '厚度', depth: '深度', range: '距离', power: '功率', speed: '速度', age: '年龄', days: '期限', realm: '境界' }
+
+/** v0.9.4：数值一致性冲突（年龄、身高、境界、期限…与前文 / 账本 / 设定卡对不上） */
+function NumericSection({ lint }: { lint: Lint }) {
+  const list = lint.numeric_conflicts
+  if (list === undefined) return null
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h4 className="flex items-center gap-1.5 text-[13px] font-semibold"><Scales className="h-3.5 w-3.5 text-muted-foreground" />数值一致性</h4>
+        {!!list.length && <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] font-medium text-warning">{list.length} 处冲突</span>}
+      </div>
+      {!list.length ? <p className="text-xs text-success">年龄、身高、境界、期限等数值和前文一致 👍</p> : (
+        <div className="space-y-2">
+          {list.map((i, k) => {
+            const rel = i.related
+            const ledger = !!(rel && (rel.label || (rel.source && rel.source !== 'chapter')))
+            return (
+              <div key={k} className="rounded-lg p-3 text-[12.5px] hairline">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
+                  {i.object && <span className="font-medium text-foreground">{i.object}</span>}
+                  {i.kind && <span className="rounded bg-muted px-1.5 py-0.5">{NUM_KIND[i.kind] ?? i.kind}</span>}
+                  {i.position?.paragraph != null && <span>第 {i.position.paragraph + 1} 段</span>}
+                </div>
+                {i.quote && <div className="mt-1.5 line-clamp-2 break-words border-l-2 border-warning/60 pl-2 font-serif leading-relaxed text-foreground/80">{i.quote}</div>}
+                {rel && (ledger
+                  ? <div className="mt-1.5 break-words rounded-md bg-subtle px-2.5 py-1.5 text-[12px]"><span className="text-muted-foreground">对照 {rel.label || '事实账本'}：</span><span className="font-serif">{rel.value}</span></div>
+                  : rel.quote ? <div className="mt-1.5 break-words rounded-md bg-subtle px-2.5 py-1.5 text-[12px]"><span className="text-muted-foreground">对照前文{rel.paragraph != null ? `（第 ${rel.paragraph + 1} 段）` : ''}：</span><span className="font-serif">{rel.quote}</span></div> : null)}
+                <p className="mt-1.5 break-words leading-relaxed text-foreground/85">{i.comment}</p>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

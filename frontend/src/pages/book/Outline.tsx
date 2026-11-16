@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
-import { Field, Input, Textarea } from '@/components/ui/input'
+import { Field, Input } from '@/components/ui/input'
+import { MentionTextarea } from '@/components/bible/MentionTextarea'
 import { Skeleton } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
@@ -211,11 +212,12 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
             </div>
           </div>
         ) : node && (
-          <AskBox title={`让 AI 重写这个${LEVEL[node.level].label}的概要`} storage={storage} value={ask} onChange={setAsk} onSubmit={suggest} job={job}
+          <AskBox title={`让 AI 重写这个${LEVEL[node.level].label}的概要`} storage={storage} value={ask} onChange={setAsk} onSubmit={suggest} job={job} refBookId={bookId}
             placeholder={node.level === 'book' ? '例如：主线别再围着身世转，改成揭开码头旧案' : node.level === 'volume' ? '例如：这一卷的卷末爆点更大，让反派当众翻车' : '例如：节奏快一点，弧末加一场反杀'} />
         )}
         <Field label="标题"><Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-        <Field label="内容概要" hint={versions > 0 ? `改过 ${versions} 次，可撤回` : undefined}><Textarea value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} className="min-h-[160px] leading-relaxed" /></Field>
+        <Field label="内容概要" hint={versions > 0 ? `改过 ${versions} 次，可撤回` : undefined}><MentionTextarea bookId={bookId} value={f.summary} onChange={(v) => setF({ ...f, summary: v })} placeholder="输入 @ 可引用设定条目"
+          className="flex min-h-[160px] w-full rounded-md border border-input bg-surface px-3 py-2 text-sm leading-relaxed shadow-xs transition-[border,box-shadow] placeholder:text-muted-foreground/70 focus:border-primary/60 focus:shadow-glow focus:outline-none" /></Field>
         {node?.level === 'chapter' && (
           <div>
             <div className="mb-1.5 flex items-center justify-between"><span className="text-[13px] font-medium">节拍</span><Button size="xs" variant="ghost" icon={<Plus className="h-3 w-3" />} onClick={() => setF({ ...f, beats: [...f.beats, { k: '', v: '' }] })}>添加</Button></div>

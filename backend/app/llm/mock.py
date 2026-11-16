@@ -1113,7 +1113,67 @@ def mock_idea_fusion(meta: dict[str, Any]) -> str:
     return _j({"ideas": _strip_words(ideas, [str(x) for x in meta.get("banned_keywords") or []])})
 
 
+# ---------------------------------------------------------------- v0.9.3 字段级 AI / 灵魂五维 / 拆书工作台
+
+def mock_field_ai(meta: dict[str, Any]) -> str:
+    cur = meta.get("current")
+    mode = meta.get("mode") or "fill"
+    name = meta.get("card_name") or "这个条目"
+    note = {"fill": "补写", "rewrite": "改写", "expand": "扩写"}.get(mode, "改写")
+    if isinstance(cur, list):
+        return _j({"value": [*[str(x) for x in cur], f"{name}的新细节"], "note": f"{note}了一项"})
+    base = str(cur or "")
+    if meta.get("field") == "name":
+        return _j({"value": f"{base or name}·改", "note": "换了个名字"})
+    if mode == "rewrite":
+        val = f"{name}：按要求重写后的说法，写清了是谁、在哪、怎么做。"
+    elif mode == "expand":
+        val = f"{base}另外，{name}每次出手都要付出一点代价，这一点在第一卷就会露出来。"
+    else:
+        val = base or f"{name}的具体设定：一个看得见的场面，加一条能被利用的限制。"
+    return _j({"value": val, "note": f"{note}（演示）"})
+
+
+def mock_character_soul(meta: dict[str, Any]) -> str:
+    n = meta.get("card_name") or "他"
+    return _j({"soul": {
+        "desire": f"{n}想在三个月内把被夺走的铺子拿回来",
+        "fear": f"{n}怕自己再一次眼睁睁看着身边人被带走",
+        "wound": f"十二岁那年冬天，{n}因为一句没说出口的话失去了师父",
+        "belief": "欠的账一定要还；绝不对手无寸铁的人动手",
+        "voice": "话短，爱反问，紧张时会把对方的名字连叫两遍",
+    }, "note": "五维补全（演示）"})
+
+
+def mock_teardown_project(meta: dict[str, Any]) -> str:
+    n = max(3, min(10, int(meta.get("chapters") or 3)))
+    names = [str(x) for x in meta.get("names") or []][:5]
+    return _j({
+        "structure": {"opening": "第一段就让主角撞上异常，三百字内亮出代价", "rhythm": "三章一小爽、十章一大爽，爽点之间夹一次失利",
+                      "chapter_hooks": ["章末抛出新人物的半句话", "章末让主角发现规则的例外", "章末把刚到手的好处变成麻烦"]},
+        "characters": [
+            {"role": "主角", "template": "底层出身、嘴硬心软，靠算计而不是蛮力赢", "traits": ["隐忍", "记仇", "护短"], "function": "推动主线"},
+            {"role": "前期反派", "template": "有靠山的同辈，处处压主角一头", "traits": ["傲慢", "多疑", "爱面子"], "function": "提供第一次打脸"},
+            {"role": "引路人", "template": "看似落魄的长辈，掌握金手指的来历", "traits": ["话少", "护短", "藏秘密"], "function": "给信息、埋长线"},
+        ],
+        "golden_finger": {"mechanism": "完成特定行为后获得一次结算奖励", "limits": "每天只能结算一次，越级奖励要付寿命",
+                          "growth": "解锁新的结算条件", "payoff": "每次结算都是一次可预期的小高潮"},
+        "selling_points": ["开局即翻身", "规则型金手指可预期", "反派层层升级"],
+        "pacing_chart": [{"chapter": i, "title": f"第{i}章", "conflict": (i % 5) + 1, "payoff": ((i + 2) % 5) + 1,
+                          "hook": ((i + 1) % 5) + 1, "note": "演示打分"} for i in range(1, n + 1)],
+        "reusable": [
+            {"name": "代价前置", "pattern": "金手指第一次用就付出看得见的代价", "how_to_use": "开篇第二章写一次透支"},
+            {"name": "好处变麻烦", "pattern": "刚到手的收益立刻招来更强的对手", "how_to_use": "每个小高潮后接一个新威胁"},
+            {"name": "旁观者打分", "pattern": "让配角替读者说出震惊", "how_to_use": "打脸场景安排一名围观者"},
+        ],
+        "names": names,
+    })
+
+
 HANDLERS = {
+    "field_ai": mock_field_ai,
+    "character_soul": mock_character_soul,
+    "teardown_project": mock_teardown_project,
     "idea_seed": mock_idea_seed,
     "idea_organize": mock_idea_organize,
     "idea_fusion": mock_idea_fusion,
@@ -1148,6 +1208,10 @@ HANDLERS = {
     "teardown_deep": mock_teardown_deep,
     "reskin": mock_reskin,
 }
+
+from app.llm.mock_fanfic import FANFIC_HANDLERS  # noqa: E402  v0.10 同人：原著卡提炼、OOC 检查
+
+HANDLERS.update(FANFIC_HANDLERS)
 
 
 def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) -> str:

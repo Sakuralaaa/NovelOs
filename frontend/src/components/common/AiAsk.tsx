@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
+import { AtButton, MentionTextarea, type MentionHandle } from '@/components/bible/MentionTextarea'
 import { AlertTriangle, Sparkles, Wand2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
@@ -24,24 +25,36 @@ export function ModelSelect({ storage, emptyLabel = '默认（策划模型）', 
 }
 
 /** 写要求 + 选模型 + 发起：各页「让 AI 改」统一用这一块 */
-export function AskBox({ title, placeholder, value, onChange, onSubmit, job, storage, submitLabel = '让 AI 改', disabled, emptyLabel, extra, allowEmpty, className }: {
+export function AskBox({ title, placeholder, value, onChange, onSubmit, job, storage, submitLabel = '让 AI 改', disabled, emptyLabel, extra, allowEmpty, className, refBookId, submitWrap }: {
   title: ReactNode; placeholder: string; value: string; onChange: (v: string) => void; onSubmit: () => void
   job?: TrackedJob; storage: ReturnType<typeof useModelRoute>; submitLabel?: string; disabled?: boolean; emptyLabel?: string; extra?: ReactNode
   allowEmpty?: boolean; className?: string
+  /** v0.9.3：给了书 id 就支持输入 @ 引用设定条目 */
+  refBookId?: number
+  /** v0.9.3：自定义提交按钮（如带成本提示的 CostButton） */
+  submitWrap?: (p: { can: boolean; loading: boolean; label: string }) => ReactNode
 }) {
   const can = (allowEmpty || !!value.trim()) && !job && !disabled
+  const mref = useRef<MentionHandle>(null)
   return (
     <div className={cn('space-y-2.5 rounded-xl bg-primary-soft/40 p-3 hairline', className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-[13px] font-semibold"><Wand2 className="h-4 w-4 text-primary" />{title}</span>
         <ModelSelect storage={storage} emptyLabel={emptyLabel} />
       </div>
-      <Textarea rows={2} value={value} disabled={!!job} onChange={(e) => onChange(e.target.value)} className="min-h-[64px] bg-surface text-[13px]"
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can) onSubmit() }} placeholder={placeholder} />
+      {refBookId ? (
+        <MentionTextarea ref={mref} bookId={refBookId} rows={2} value={value} disabled={!!job} onChange={onChange}
+          className="flex min-h-[64px] w-full rounded-md border border-input bg-surface px-3 py-2 text-[13px] leading-relaxed shadow-xs transition-[border,box-shadow] placeholder:text-muted-foreground/70 focus:border-primary/60 focus:shadow-glow focus:outline-none"
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can) onSubmit() }} placeholder={`${placeholder}（输入 @ 引用设定）`} />
+      ) : (
+        <Textarea rows={2} value={value} disabled={!!job} onChange={(e) => onChange(e.target.value)} className="min-h-[64px] bg-surface text-[13px]"
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && can) onSubmit() }} placeholder={placeholder} />
+      )}
       {extra}
       <div className="flex items-center justify-end gap-3">
+        {refBookId && !job && <AtButton className="mr-auto" onClick={() => mref.current?.insertAt()} />}
         {job && <div className="min-w-0 flex-1"><JobInline job={job} /></div>}
-        <Button size="sm" variant="primary" icon={<Sparkles className="h-3.5 w-3.5" />} loading={!!job} disabled={!can} onClick={onSubmit}>{submitLabel}</Button>
+        {submitWrap ? submitWrap({ can, loading: !!job, label: submitLabel }) : <Button size="sm" variant="primary" icon={<Sparkles className="h-3.5 w-3.5" />} loading={!!job} disabled={!can} onClick={onSubmit}>{submitLabel}</Button>}
       </div>
     </div>
   )

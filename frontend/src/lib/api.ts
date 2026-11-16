@@ -5,6 +5,7 @@ import type {
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankBoard, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
   BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport, RadarAiKind, RadarBookDetail, ZhuqueSettings, ZhuqueSettingsInput,
   IdeaSeed, FusionRef, ImitateExtract, RadarReportConfig,
+  Completeness, OnboardingState, OnboardingKey, FieldAiMode, RefEntry, Estimate, EstimateKind, BookUsage, TeardownRecord, TeardownListItem, TeardownSourceType, TeardownBiblePart, ApprovalMode,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -272,6 +273,35 @@ export const api = {
   rejectProposal: (pid: number) => post<AgentProposal>(`/agent/proposals/${pid}/reject`),
   revertProposal: (pid: number) => post<AgentProposal>(`/agent/proposals/${pid}/revert`),
 
+  // ---------- v0.9.3 ----------
+  completeness: (bookId: number) => get<Completeness>(`/books/${bookId}/completeness`),
+  /** 完整度 / 待办里 action.type=job 的 target（形如 /api/books/1/bible/generate）：空 body POST，返回 Job */
+  postJobPath: (target: string) => viaJobId(post(target.replace(/^\/api(?=\/)/, ''))),
+  onboarding: () => get<OnboardingState>('/onboarding'),
+  saveOnboarding: (b: { steps?: Partial<Record<OnboardingKey, boolean>>; dismissed?: boolean }) => put<OnboardingState>('/onboarding', b),
+  /** 设定库管理页带上已弃用条目 */
+  allCards: (bookId: number) => get<Card[]>(`/books/${bookId}/cards${qs({ include_deprecated: true })}`),
+  /** 字段级 AI：只给建议值，Job.result = FieldAiResult */
+  fieldAi: (bookId: number, entryId: number, b: { field: string; mode: FieldAiMode; instruction?: string; route?: string | null }) =>
+    viaJobId(post(`/books/${bookId}/bible/${entryId}/field-ai`, b)),
+  applyFieldAi: (bookId: number, entryId: number, b: { field: string; value: unknown }) => post<Card>(`/books/${bookId}/bible/${entryId}/field-ai/apply`, b),
+  refs: (bookId: number, q: string, limit = 20) => get<RefEntry[]>(`/books/${bookId}/refs${qs({ q, limit })}`),
+  /** 人物灵魂五维：Job.result = SoulResult（不写库，采纳走 PUT /cards/{id} {soul}） */
+  soulAi: (bookId: number, entryId: number, b: { mode?: 'fill' | 'rewrite'; instruction?: string; route?: string | null } = {}) =>
+    viaJobId(post(`/books/${bookId}/characters/${entryId}/soul`, b)),
+  setApprovalMode: (bookId: number, mode: ApprovalMode) => patch<Book>(`/books/${bookId}`, { approval_mode: mode }),
+  estimate: (b: { kind: EstimateKind; book_id?: number; chapter_id?: number; words?: number }) => post<Estimate>('/estimate', b),
+  usage: (bookId: number) => get<BookUsage>(`/books/${bookId}/usage`),
+  teardowns: () => get<TeardownListItem[]>('/teardowns'),
+  teardownDetail: (id: number) => get<TeardownRecord>(`/teardowns/${id}`),
+  /** Job.result = {teardown, teardown_id} */
+  createTeardown: (b: { source: TeardownSourceType; book_id_ext?: string; text?: string; title?: string }) => viaJobId(post('/teardowns', b)),
+  deleteTeardown: (id: number) => del<{ ok: boolean }>(`/teardowns/${id}`),
+  /** expand=true：Job（idea_seed），result = {idea, idea_id} */
+  teardownToIdeaJob: (id: number, notes?: string) => viaJobId(post(`/teardowns/${id}/to-idea`, { expand: true, ...(notes ? { notes } : {}) })),
+  teardownToIdea: (id: number, notes?: string) => post<{ idea: Idea }>(`/teardowns/${id}/to-idea`, { expand: false, ...(notes ? { notes } : {}) }),
+  teardownToBible: (id: number, b: { book_id: number; parts: TeardownBiblePart[] }) => post<{ cards: Card[]; warnings: string[]; skipped: number }>(`/teardowns/${id}/to-bible`, b),
+
   /** 以 Blob 方式下载发布包（兼容 mock 与真实后端） */
   async exportBook(bookId: number, filename: string) {
     let res: Response
@@ -339,4 +369,76 @@ export const qk = {
   agentTools: ['agent', 'tools'] as const,
   agentSessions: (bookId: number) => ['agent', 'sessions', bookId] as const,
   agentSession: (sid: number) => ['agent', 'session', sid] as const,
+  completeness: (bookId: number) => ['completeness', bookId] as const,
+  onboarding: ['onboarding'] as const,
+  refs: (bookId: number, q: string) => ['refs', bookId, q] as const,
+  usage: (bookId: number) => ['usage', bookId] as const,
+  teardowns: ['teardowns'] as const,
+  teardownDetail: (id: number) => ['teardowns', id] as const,
+}
+
+// ---------- v0.9.4：任务续跑、书级写作设置（追加，避免与并行改动冲突） ----------
+type BookWritingSettings = import('./types').BookWritingSettings
+type BookWritingSettingsInput = import('./types').BookWritingSettingsInput
+export const apiV094 = {
+  /** 409：不可续跑（状态不对 / 不支持 / 没断点）；404：任务不存在 */
+  resumeJob: (id: number) => post<Job>(`/jobs/${id}/resume`),
+  bookWritingSettings: (bookId: number) => get<BookWritingSettings>(`/books/${bookId}/writing-settings`),
+  saveBookWritingSettings: (bookId: number, b: BookWritingSettingsInput) => put<BookWritingSettings>(`/books/${bookId}/writing-settings`, b),
+}
+export const qkV094 = {
+  bookWriting: (bookId: number) => ['book-writing-settings', bookId] as const,
+}
+
+// ---------------------------------------------------------------- v0.10 同人创作
+import type {
+  ChapterFanficMeta, FanficCatalog, FanficDepth, FanficImportPart, FanficInfo, FanficOverlap, FanficSource, FanficSourceBrief,
+  FanficSpecInput, SourceCards,
+} from './types'
+
+export type FanficSourceInput =
+  | { source: 'paste'; text: string; title?: string; focus?: string[]; depth?: FanficDepth }
+  | { source: 'txt'; file: File; title?: string; focus?: string[]; depth?: FanficDepth }
+export type FanficPatchInput = Partial<Pick<FanficSpecInput, 'fidelity' | 'direction' | 'extra_source_ids' | 'notes'>>
+
+export const fanficApi = {
+  directions: () => get<FanficCatalog>('/fanfic/directions'),
+  sources: () => get<FanficSourceBrief[]>('/fanfic/sources'),
+  source: (id: number) => get<FanficSource>(`/fanfic/sources/${id}`),
+  /** Job（kind=fanfic_source），result = {source, source_id} */
+  createSource: (b: FanficSourceInput) => {
+    if (b.source === 'txt') {
+      const fd = new FormData()
+      fd.append('file', b.file)
+      if (b.title) fd.append('title', b.title)
+      if (b.focus?.length) fd.append('focus', b.focus.join(','))
+      if (b.depth) fd.append('depth', b.depth)
+      return viaJobId(request('POST', '/fanfic/sources', fd))
+    }
+    return viaJobId(post('/fanfic/sources', b))
+  },
+  updateSource: (id: number, b: { title?: string; cards?: Partial<SourceCards> }) => put<{ source: FanficSource; warnings: string[] }>(`/fanfic/sources/${id}`, b),
+  /** 有书在用时 409，force=true 强删 */
+  deleteSource: (id: number, force = false) => del<{ ok: boolean }>(`/fanfic/sources/${id}${qs({ force: force || undefined })}`),
+  /** 建同人书：copyright_ack 必须 true */
+  createBook: (b: { title?: string; genre: string; gender: Gender; premise?: string; platform_style?: PlatformStyle; fanfic: FanficSpecInput; copyright_ack: boolean }) => post<Book>('/books', b),
+  bookFanfic: (bookId: number) => get<FanficInfo>(`/books/${bookId}/fanfic`),
+  attachFanfic: (bookId: number, b: FanficSpecInput & { copyright_ack: true }) => post<FanficInfo>(`/books/${bookId}/fanfic`, b),
+  patchFanfic: (bookId: number, b: FanficPatchInput) => patch<FanficInfo>(`/books/${bookId}/fanfic`, b),
+  detachFanfic: (bookId: number) => del<{ ok: boolean }>(`/books/${bookId}/fanfic`),
+  context: (bookId: number) => get<{ book_id: number; text: string; chars: number }>(`/books/${bookId}/fanfic/context`),
+  importCards: (bookId: number, parts?: FanficImportPart[]) => post<{ cards: Card[]; skipped: number }>(`/books/${bookId}/fanfic/import-cards`, parts?.length ? { parts } : {}),
+  /** Job（kind=fanfic_ooc），result = {chapter_id, ooc, overlap} */
+  oocCheck: (chapterId: number) => viaJobId(post(`/chapters/${chapterId}/ooc-check`)),
+  chapterOoc: (chapterId: number) => get<ChapterFanficMeta>(`/chapters/${chapterId}/ooc`),
+  overlap: (chapterId: number) => post<{ chapter_id: number; overlap: FanficOverlap }>(`/chapters/${chapterId}/fanfic-overlap`),
+}
+
+export const fqk = {
+  directions: ['fanfic', 'directions'] as const,
+  sources: ['fanfic', 'sources'] as const,
+  source: (id: number) => ['fanfic', 'sources', id] as const,
+  book: (bookId: number) => ['fanfic', 'book', bookId] as const,
+  context: (bookId: number) => ['fanfic', 'context', bookId] as const,
+  chapter: (chapterId: number) => ['fanfic', 'chapter', chapterId] as const,
 }

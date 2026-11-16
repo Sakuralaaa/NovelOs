@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, ArrowUpRight, Check, CircleDashed, FileText, Lightbulb, Plus, Radar, X } from '@/components/icons'
+import { ArrowRight, ArrowUpRight, Check, CircleDashed, FileText, Hourglass, Lightbulb, Plus, Radar, RotateCw, X } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader } from '@/components/ui/card'
 import { Progress, Skeleton } from '@/components/ui/misc'
+import { OnboardingCard } from '@/components/common/OnboardingCard'
 import { BookCover, QuickCreateDialog, StageBadge } from '@/components/common/BookBits'
-import { useBooks, useChannels, useJobsList, useStatus } from '@/hooks/queries'
+import { useBooks, useJobsList } from '@/hooks/queries'
 import { cn, fmtNum, fmtTime, jobLabel } from '@/lib/utils'
+import { useResumeJob } from '@/lib/jobs'
 
 function greeting() {
   const h = new Date().getHours()
@@ -21,17 +23,13 @@ const BOOK_ROWS = 4
 const JOB_ROWS = 6
 
 export default function Home() {
-  const { data: status } = useStatus()
-  const { data: channels } = useChannels()
   const { data: books, isLoading: booksLoading } = useBooks()
   const { data: jobs } = useJobsList()
+  const resume = useResumeJob()
   const [createOpen, setCreateOpen] = useState(false)
-  const [hideGuide, setHideGuide] = useState(() => localStorage.getItem('novelos-hide-guide') === '1')
   const nav = useNavigate()
 
-  const hasModel = (channels?.length ?? 0) > 0 && !status?.mock_mode
   const hasBooks = (books?.length ?? 0) > 0
-  const showGuide = !hideGuide && (!hasModel || !hasBooks)
   const recentJobs = (jobs ?? []).slice(0, JOB_ROWS)
   const latest = books?.[0]
 
@@ -41,13 +39,6 @@ export default function Home() {
     { to: latest ? `/books/${latest.id}/chapters` : '/books', icon: FileText, t: latest ? '继续写作' : '我的书', tone: 'bg-primary/10 text-primary' },
   ]
 
-  const steps = [
-    { done: hasModel, title: '接入模型', action: () => nav('/settings'), cta: '去设置' },
-    { done: hasBooks, title: '挑一个题材', action: () => nav('/radar'), cta: '看热点' },
-    { done: hasBooks, title: '开始第一本书', action: () => setCreateOpen(true), cta: '一键开写' },
-  ]
-  const cur = steps.findIndex((s) => !s.done)
-
   return (
     <div className="page">
       <div className="mb-7 flex min-h-[40px] flex-wrap items-center justify-between gap-4">
@@ -55,29 +46,7 @@ export default function Home() {
         <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreateOpen(true)}>新建作品</Button>
       </div>
 
-      {showGuide && (
-        <Card className="mb-6 p-2">
-          <div className="grid gap-2 md:grid-cols-[repeat(3,1fr)_auto]">
-            {steps.map((s, i) => (
-              <div key={s.title} className={cn('flex h-[60px] items-center gap-3 rounded-lg px-4', i === cur ? 'bg-primary-soft' : 'bg-subtle/60')}>
-                <span className={cn(
-                  'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12.5px] font-semibold',
-                  s.done ? 'bg-success text-white' : i === cur ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-                )}>
-                  {s.done ? <Check className="h-4 w-4" strokeWidth={2.5} /> : i + 1}
-                </span>
-                <span className={cn('flex-1 truncate text-[14px] font-medium', s.done && 'text-muted-foreground line-through decoration-foreground/20')}>{s.title}</span>
-                {!s.done && <Button size="sm" variant={i === cur ? 'primary' : 'secondary'} onClick={s.action}>{s.cta}</Button>}
-              </div>
-            ))}
-            {hasBooks && (
-              <button onClick={() => { localStorage.setItem('novelos-hide-guide', '1'); setHideGuide(true) }} className="hidden h-[60px] w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground md:flex" aria-label="隐藏">
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </Card>
-      )}
+      <OnboardingCard latestBookId={latest?.id} onCreate={() => setCreateOpen(true)} onNavigate={(to) => nav(to)} />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         {quick.map((q) => (
@@ -135,10 +104,16 @@ export default function Home() {
                 <div key={j.id} className="flex min-h-[48px] flex-col justify-center rounded-lg px-3 py-2 hover:bg-subtle">
                   <div className="flex items-center gap-2.5">
                     <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
-                      j.status === 'succeeded' ? 'bg-success-soft text-success' : j.status === 'failed' ? 'bg-danger-soft text-danger' : 'bg-primary-soft text-primary')}>
-                      {j.status === 'succeeded' ? <Check className="h-3 w-3" strokeWidth={3} /> : j.status === 'failed' ? <X className="h-3 w-3" strokeWidth={3} /> : <CircleDashed className="h-3 w-3 animate-spin" strokeWidth={2.5} />}
+                      j.status === 'succeeded' ? 'bg-success-soft text-success' : j.status === 'failed' ? 'bg-danger-soft text-danger' : j.status === 'interrupted' ? 'bg-warning-soft text-warning' : 'bg-primary-soft text-primary')}>
+                      {j.status === 'succeeded' ? <Check className="h-3 w-3" strokeWidth={3} /> : j.status === 'interrupted' ? <Hourglass className="h-3 w-3" /> : j.status === 'failed' ? <X className="h-3 w-3" strokeWidth={3} /> : <CircleDashed className="h-3 w-3 animate-spin" strokeWidth={2.5} />}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[13.5px]">{jobLabel(j.kind)}</span>
+                    {j.status === 'interrupted' && <span className="shrink-0 text-[12px] font-medium text-warning">已中断</span>}
+                    {j.status === 'interrupted' && j.resumable !== false && (
+                      <button onClick={() => resume(j.id)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-primary-soft px-2 text-[12px] font-medium text-primary hover:bg-primary-soft/70">
+                        <RotateCw className="h-3 w-3" />继续
+                      </button>
+                    )}
                     <span className="shrink-0 text-[12px] text-muted-foreground">{fmtTime(j.updated_at)}</span>
                   </div>
                   {active && <Progress className="ml-[30px] mt-2 w-auto" value={j.progress} />}

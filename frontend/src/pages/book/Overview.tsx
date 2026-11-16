@@ -20,6 +20,9 @@ import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { BatchWriteButton, WriteNextButton } from '@/components/common/WriteActions'
 import { BookCrumb } from './_shared'
+import { CompletenessCard, UsageCard } from '@/components/book/Completeness'
+import { FanficInfoCard } from '@/components/fanfic/FanficInfoCard'
+import { BookWritingSettings } from '@/components/book/BookWritingSettings'
 import { useBook, useJobsList } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
@@ -63,8 +66,14 @@ export default function BookOverview() {
         </div>
       </div>
 
+      {/* v0.9.3：作品完整度 + 待办 */}
+      <CompletenessCard bookId={id} />
+
+      {/* v0.10：同人书信息 */}
+      {book.fanfic && <FanficInfoCard bookId={id} />}
+
       {/* 流水线 */}
-      <Card className="mt-8 overflow-hidden">
+      <Card className="mt-6 overflow-hidden">
         <div className="relative px-4 pb-2 pt-6 md:px-6">
           <div className="grid grid-cols-3 gap-y-5 md:grid-cols-6">
             {STAGES.map((s, i) => {
@@ -97,6 +106,9 @@ export default function BookOverview() {
         <Link to={`/books/${id}/foreshadows`} className="block h-full"><Stat className="card-hover" label="开放伏笔" icon={<Waypoints className="h-3.5 w-3.5" />} value={book.stats.foreshadow_open} /></Link>
         <Stat label="最近更新" icon={<CircleDashed className="h-3.5 w-3.5" />} value={<span className="text-[18px]">{fmtTime(book.updated_at)}</span>} sub={STAGES[cur].label + '阶段'} />
       </div>
+
+      <UsageCard bookId={id} />
+      <div className="mt-6"><BookWritingSettings bookId={id} /></div>
 
       <Card className="mt-6">
         <CardHeader title="本书任务" />

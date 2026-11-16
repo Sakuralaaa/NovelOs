@@ -396,6 +396,10 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
             pacing="\n".join(f"- {x}" for x in audit) or "（无）",
             instruction=instruction, schema=schema,
         )
+        from app.services.refs import refs_block  # v0.9.3 @引用
+
+        rb = refs_block(s, book.id or 0, node.title or "", node.summary or "", json.dumps(node.beats or {}, ensure_ascii=False))
+        user += ("\n\n" + rb) if rb else ""
         level = node.level
     ctx.progress(15, f"展开{level}")
     data = gw.chat_json("expand", system_prompt("expand"), user, meta=meta)
@@ -521,6 +525,10 @@ def suggest_node(node_id: int, instruction: str, route: str | None, ctx: JobCont
                       node_title=node.title, node_summary=node.summary or "（空）", instruction=instruction.strip(),
                       level_rule=LEVEL_RULE.get(node.level, ""))
         user += tropes.prompt_block(tl, instruction)
+        from app.services.refs import refs_block  # v0.9.3 @引用
+
+        rb = refs_block(s, book.id or 0, node.title or "", node.summary or "", instruction)
+        user += ("\n\n" + rb) if rb else ""
         cur = {"title": node.title, "summary": node.summary}
         meta = {**cur, "level": node.level, "instruction": instruction, "banned_keywords": tropes.keywords(tl, instruction)}
     ctx.progress(30, f"AI 重写{LEVEL_LABEL.get(meta['level'], '')}")

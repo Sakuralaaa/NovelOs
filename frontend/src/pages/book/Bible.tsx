@@ -1,7 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { AlertTriangle, Eye, Globe2, Gem, MapPin, MessageSquareQuote, Plus, RotateCcw, Shield, Sparkles, Trash2, User, Wand2, X, Zap } from '@/components/icons'
+import { AlertTriangle, Archive, At, ChevronDown, Eye, Globe2, Gem, MapPin, MessageSquareQuote, Plus, RotateCcw, Shield, Sparkles, Trash2, User, Wand2, X, Zap } from '@/components/icons'
+import { Switch } from '@/components/ui/switch'
+import { FieldAiButton } from '@/components/bible/FieldAi'
+import { SoulCard, emptySoul, soulFilled } from '@/components/bible/SoulCard'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,7 +24,7 @@ import { BookCrumb } from './_shared'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { BibleProposal, Card as CardT, CardType } from '@/lib/types'
+import type { BibleProposal, Card as CardT, CardType, Soul } from '@/lib/types'
 import { CARD_TYPES, cn, fmtTime } from '@/lib/utils'
 
 const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, cheat: Sparkles, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
@@ -33,28 +37,60 @@ const TYPE_COLOR: Record<CardType, string> = {
 /** 人物卡约定键（合约 v0.1 增补），在专用表单中编辑 */
 const CHAR_KEYS = ['voice', 'catchphrases', 'habits', 'demeanor'] as const
 
+/** 设定库管理页带上已弃用条目（契约：默认列表不含 deprecated） */
+const allKey = (id: number) => [...qk.cards(id), 'all'] as const
+
 export default function Bible() {
   const id = useBookId()
   const [filter, setFilter] = useState<'all' | CardType>('all')
   const [editing, setEditing] = useState<Partial<CardT> | null>(null)
+  const [autoSoul, setAutoSoul] = useState(false)
+  const [showDep, setShowDep] = useState(false)
+  const [sp, setSp] = useSearchParams()
   const { start } = useJobs()
+  const qc = useQueryClient()
   const job = useActiveJob(`bible:${id}`)
-  const cards = useQuery({ queryKey: qk.cards(id), queryFn: () => api.cards(id) })
-  const list = cards.data ?? []
+  const cards = useQuery({ queryKey: allKey(id), queryFn: () => api.allCards(id) })
+  const all = cards.data ?? []
+  const list = all.filter((c) => c.status !== 'deprecated')
+  const deprecated = all.filter((c) => c.status === 'deprecated')
   const groups = CARD_TYPES.map((t) => ({ ...t, items: list.filter((c) => c.type === t.key) })).filter((g) => (filter === 'all' ? g.items.length : g.key === filter))
   const charNames = list.filter((c) => c.type === 'character').map((c) => c.name)
+
+  // 从完整度待办跳来：?entry=ID 打开条目，&soul=1 自动补全灵魂五维
+  useEffect(() => {
+    const e = Number(sp.get('entry'))
+    if (!e || !cards.data) return
+    const c = cards.data.find((x) => x.id === e)
+    if (c) { setEditing(c); setAutoSoul(sp.get('soul') === '1') }
+    sp.delete('entry'); sp.delete('soul'); setSp(sp, { replace: true })
+  }, [cards.data, sp, setSp])
+
+  const patchCard = useMutation({
+    mutationFn: ({ c, b }: { c: CardT; b: Partial<CardT> }) => api.updateCard(c.id, b),
+    meta: { errorTitle: '更新设定失败' },
+    onMutate: ({ c, b }) => { qc.setQueryData<CardT[]>(allKey(id), (old) => old?.map((x) => (x.id === c.id ? { ...x, ...b } : x))) },
+    onSuccess: (r, { b }) => {
+      qc.invalidateQueries({ queryKey: qk.cards(id) }); qc.invalidateQueries({ queryKey: ['refs', id] }); qc.invalidateQueries({ queryKey: qk.completeness(id) })
+      if (b.status === 'deprecated') toast.success(`已弃用「${r.name}」`, { description: '不再进入写作上下文，可在列表底部恢复', action: { label: '撤销', onClick: () => patchCard.mutate({ c: r, b: { status: 'active' } }) } })
+      else if (b.status === 'active') toast.success(`已恢复「${r.name}」`)
+    },
+    onError: () => qc.invalidateQueries({ queryKey: allKey(id) }),
+  })
 
   const gen = () => start(api.generateBible(id), { key: `bible:${id}`, label: '生成设定', successMsg: '设定库已生成，挑几张看看吧' })
   const [aiOpen, setAiOpen] = useState(false)
   const [histOpen, setHistOpen] = useState(false)
   const tropeCount = list.filter((c) => c.trope_hits?.length).length
+  const openNew = (type: CardType) => { setAutoSoul(false); setEditing({ type, name: '', summary: '', data: {}, known_by: [], ref_enabled: true, status: 'active' }) }
+  const open = (c: CardT) => { setAutoSoul(false); setEditing(c) }
 
   return (
     <div className="page">
       <BookCrumb bookId={id} page="设定库" />
       <PageHeader className="mt-3" title="设定库"
         actions={<>
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setEditing({ type: filter === 'all' ? 'character' : filter, name: '', summary: '', data: {}, known_by: [] })}>新建设定</Button>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => openNew(filter === 'all' ? 'character' : filter)}>新建设定</Button>
           <Button variant="ghost" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setHistOpen(true)}>历史版本</Button>
           <Button variant="primary" loading={!!job} icon={<Wand2 className="h-4 w-4" />} onClick={() => (list.length ? setAiOpen(true) : gen())}>AI 生成设定</Button>
         </>} />
@@ -71,13 +107,14 @@ export default function Bible() {
           const Icon = TYPE_ICON[t.key]
           return <TypeChip key={t.key} active={filter === t.key} onClick={() => setFilter(t.key)}><Icon className="h-3.5 w-3.5" />{t.label} <span className="opacity-60">{list.filter((c) => c.type === t.key).length}</span></TypeChip>
         })}
+        <span className="ml-auto hidden items-center gap-1 text-[12px] text-muted-foreground sm:flex"><At className="h-3.5 w-3.5" />在章节要求、章纲、Agent 里输入 @ 可引用开着「@引用」的条目</span>
       </div>
 
-      {cards.isLoading ? <GridSkeleton n={6} h="h-44" /> : cards.error ? <ErrorState error={cards.error} onRetry={() => cards.refetch()} /> : !list.length ? (
+      {cards.isLoading ? <GridSkeleton n={6} h="h-44" /> : cards.error ? <ErrorState error={cards.error} onRetry={() => cards.refetch()} /> : !all.length ? (
         <EmptyState kind="cards" title="设定库还是空的"
-          action={<><Button onClick={() => setEditing({ type: 'character', name: '', summary: '', data: {}, known_by: [] })}>手动新建</Button><Button variant="primary" loading={!!job} icon={<Sparkles className="h-4 w-4" />} onClick={gen}>AI 生成设定</Button></>} />
+          action={<><Button onClick={() => openNew('character')}>手动新建</Button><Button variant="primary" loading={!!job} icon={<Sparkles className="h-4 w-4" />} onClick={gen}>AI 生成设定</Button></>} />
       ) : !groups.length ? (
-        <EmptyState compact kind="cards" title={`还没有「${CARD_TYPES.find((t) => t.key === filter)?.label}」`} action={<Button size="sm" onClick={() => setEditing({ type: filter as CardType, name: '', summary: '', data: {}, known_by: [] })}>新建一张</Button>} />
+        <EmptyState compact kind="cards" title={`还没有「${CARD_TYPES.find((t) => t.key === filter)?.label ?? '设定'}」`} action={<Button size="sm" onClick={() => openNew(filter === 'all' ? 'character' : filter)}>新建一张</Button>} />
       ) : (
         <div className="space-y-8">
           {groups.map((g) => {
@@ -88,8 +125,8 @@ export default function Bible() {
                   <h2 className="flex items-center gap-1.5 text-[15px] font-semibold"><Icon className="h-4 w-4 text-muted-foreground" />{g.label}</h2>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {g.items.map((c) => <BibleCard key={c.id} card={c} onClick={() => setEditing(c)} />)}
-                  <button onClick={() => setEditing({ type: g.key, name: '', summary: '', data: {}, known_by: [] })} className="flex min-h-[120px] items-center justify-center gap-1.5 rounded-xl border border-dashed text-[13px] text-muted-foreground transition hover:border-primary/50 hover:bg-primary-soft/40 hover:text-primary">
+                  {g.items.map((c) => <BibleCard key={c.id} card={c} onClick={() => open(c)} onToggleRef={(v) => patchCard.mutate({ c, b: { ref_enabled: v } })} />)}
+                  <button onClick={() => openNew(g.key)} className="flex min-h-[120px] items-center justify-center gap-1.5 rounded-xl border border-dashed text-[13px] text-muted-foreground transition hover:border-primary/50 hover:bg-primary-soft/40 hover:text-primary">
                     <Plus className="h-4 w-4" />添加{g.label}
                   </button>
                 </div>
@@ -99,7 +136,35 @@ export default function Bible() {
         </div>
       )}
 
-      <CardEditor bookId={id} card={editing} onClose={() => setEditing(null)} charNames={charNames} />
+      {deprecated.length > 0 && (
+        <section className="mt-10 rounded-xl border border-dashed bg-subtle/30">
+          <button onClick={() => setShowDep((x) => !x)} aria-expanded={showDep} className="flex min-h-[48px] w-full items-center gap-2 px-4 text-left text-[13.5px] text-muted-foreground hover:text-foreground">
+            <Archive className="h-4 w-4" />已弃用 <span className="num">{deprecated.length}</span>
+            <span className="hidden text-[12px] sm:inline">· 不进入写作上下文、不能被 @ 引用，可随时恢复</span>
+            <ChevronDown className={cn('ml-auto h-4 w-4 transition-transform', showDep && 'rotate-180')} />
+          </button>
+          {showDep && (
+            <div className="grid gap-2 px-3 pb-3 md:grid-cols-2 xl:grid-cols-3">
+              {deprecated.map((c) => {
+                const Icon = TYPE_ICON[c.type]
+                return (
+                  <div key={c.id} className="flex min-h-[56px] items-center gap-3 rounded-lg bg-surface/60 px-3 py-2 opacity-70 grayscale transition hover:opacity-100 hairline">
+                    <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <button className="min-w-0 flex-1 text-left" onClick={() => open(c)}>
+                      <div className="truncate text-[13.5px] font-medium line-through decoration-foreground/30">{c.name}</div>
+                      <div className="truncate text-[12px] text-muted-foreground">{c.summary || '暂无简介'}</div>
+                    </button>
+                    <Button size="sm" variant="ghost" className="h-10 shrink-0" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={patchCard.isPending && patchCard.variables?.c.id === c.id} onClick={() => patchCard.mutate({ c, b: { status: 'active' } })}>恢复</Button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      <CardEditor bookId={id} card={editing} onClose={() => { setEditing(null); setAutoSoul(false) }} charNames={charNames} autoSoul={autoSoul}
+        onStatus={(c, status) => patchCard.mutateAsync({ c, b: { status } }).then(() => setEditing(null))} />
       <BibleAiSheet bookId={id} open={aiOpen} onOpenChange={setAiOpen} />
       <SnapshotSheet bookId={id} open={histOpen} onOpenChange={setHistOpen} />
     </div>
@@ -174,15 +239,19 @@ function TypeChip({ active, children, onClick }: { active: boolean; children: Re
   return <button onClick={onClick} className={cn('flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] transition', active ? 'bg-foreground text-background' : 'bg-surface text-foreground/75 hairline hover:text-foreground')}>{children}</button>
 }
 
-function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
+function BibleCard({ card: c, onClick, onToggleRef }: { card: CardT; onClick: () => void; onToggleRef: (v: boolean) => void }) {
   const Icon = TYPE_ICON[c.type]
   const entries = Object.entries(c.data ?? {}).filter(([k]) => !(c.type === 'character' && (CHAR_KEYS as readonly string[]).includes(k))).slice(0, 3)
   const cp: string[] = Array.isArray(c.data?.catchphrases) ? c.data.catchphrases : []
+  const refOn = c.ref_enabled !== false
+  const soulN = c.type === 'character' ? soulFilled(c.soul) : -1
   return (
-    <motion.button layout onClick={onClick} className="group flex flex-col rounded-xl bg-surface p-4 text-left hairline shadow-card transition hover:-translate-y-0.5 hover:shadow-lift">
+    <motion.div layout role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      className="focus-ring group flex cursor-pointer flex-col rounded-xl bg-surface p-4 text-left hairline shadow-card transition hover:-translate-y-0.5 hover:shadow-lift">
       <div className="flex items-center gap-2.5">
         <div className={cn('flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br to-transparent', TYPE_COLOR[c.type])}><Icon className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1 truncate font-semibold group-hover:text-primary">{c.name}</div>
+        {soulN >= 0 && <span title="灵魂五维已填项数" className={cn('num shrink-0 rounded px-1.5 py-0.5 text-[11px]', soulN === 5 ? 'bg-success-soft text-success' : 'bg-muted text-muted-foreground')}>魂 {soulN}/5</span>}
         {!!c.trope_hits?.length && <span title={`命中禁用套路：${c.trope_hits.map((h) => h.name).join('、')}`} className="shrink-0 rounded bg-warning-soft px-1.5 py-0.5 text-[11px] text-warning">套路</span>}
       </div>
       <p className="mt-2.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{c.summary || '暂无简介'}</p>
@@ -201,11 +270,15 @@ function BibleCard({ card: c, onClick }: { card: CardT; onClick: () => void }) {
       )}
       <div className="mt-auto flex items-center justify-between gap-2 pt-3">
         <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {c.known_by?.length ? <><Eye className="h-3 w-3 text-muted-foreground" />{c.known_by.slice(0, 3).map((k) => <Badge key={k} tone="outline" className="h-5 text-[11px]">{k}</Badge>)}{c.known_by.length > 3 && <span className="text-[11px] text-muted-foreground">+{c.known_by.length - 3}</span>}</> : <span className="text-[11.5px] text-muted-foreground/70">仅作者可见</span>}
+          {c.known_by?.length ? <><Eye className="h-3 w-3 text-muted-foreground" />{c.known_by.slice(0, 2).map((k) => <Badge key={k} tone="outline" className="h-5 text-[11px]">{k}</Badge>)}{c.known_by.length > 2 && <span className="text-[11px] text-muted-foreground">+{c.known_by.length - 2}</span>}</> : <span className="text-[11.5px] text-muted-foreground/70">仅作者可见</span>}
         </div>
-        <span className="shrink-0 text-[11px] text-muted-foreground/70">{fmtTime(c.updated_at)}</span>
+        <label onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} title={refOn ? '可以在章节要求、章纲、Agent 里 @ 引用' : '不会出现在 @ 补全里'}
+          className={cn('-my-1.5 -mr-1.5 flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-1.5 text-[11.5px] transition hover:bg-subtle', refOn ? 'text-primary' : 'text-muted-foreground')}>
+          <At className="h-3.5 w-3.5" />用于 @引用
+          <Switch checked={refOn} onCheckedChange={onToggleRef} />
+        </label>
       </div>
-    </motion.button>
+    </motion.div>
   )
 }
 
@@ -227,10 +300,17 @@ type Row = { k: string; v: string; json?: boolean }
 const toRows = (d: Record<string, any>, skip: readonly string[]): Row[] =>
   Object.entries(d ?? {}).filter(([k]) => !skip.includes(k)).map(([k, v]) => (k === 'role' && typeof v === 'string' ? { k: keyLabel(k), v: ROLE_LABEL[v] ?? v } : Array.isArray(v) && v.every((x) => typeof x === 'string') ? { k: keyLabel(k), v: v.join('；') } : typeof v === 'string' || typeof v === 'number' ? { k: keyLabel(k), v: String(v) } : { k: keyLabel(k), v: JSON.stringify(v), json: true }))
 
-function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card: Partial<CardT> | null; onClose: () => void; charNames: string[] }) {
+type Form = { type: CardType; name: string; summary: string; known_by: string[]; rows: Row[]; voice: string; catchphrases: string[]; habits: string[]; demeanor: string; soul: Soul; ref_enabled: boolean }
+
+function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
+  bookId: number; card: Partial<CardT> | null; onClose: () => void; charNames: string[]; autoSoul?: boolean
+  onStatus: (c: CardT, status: 'active' | 'deprecated') => Promise<unknown>
+}) {
   const open = !!card
   const isNew = !card?.id
-  const [form, setForm] = useState<{ type: CardType; name: string; summary: string; known_by: string[]; rows: Row[]; voice: string; catchphrases: string[]; habits: string[]; demeanor: string }>()
+  const entryId = card?.id
+  const deprecatedCard = card?.status === 'deprecated'
+  const [form, setForm] = useState<Form>()
   const [lastId, setLastId] = useState<unknown>(undefined)
   const toForm = (c: Partial<CardT>) => {
     const d = c.data ?? {}
@@ -239,6 +319,7 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
       rows: toRows(d, c.type === 'character' ? CHAR_KEYS : []),
       voice: typeof d.voice === 'string' ? d.voice : '', catchphrases: Array.isArray(d.catchphrases) ? d.catchphrases : [],
       habits: Array.isArray(d.habits) ? d.habits : [], demeanor: typeof d.demeanor === 'string' ? d.demeanor : '',
+      soul: { ...emptySoul(), ...(c.soul ?? {}) }, ref_enabled: c.ref_enabled !== false,
     }
   }
   if (card && lastId !== card) {
@@ -271,13 +352,42 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
       if (f.habits.length) data.habits = f.habits
       if (f.demeanor.trim()) data.demeanor = f.demeanor.trim()
     }
-    return { type: f.type, name: f.name.trim(), summary: f.summary, data, known_by: f.known_by }
+    const out: Partial<CardT> = { type: f.type, name: f.name.trim(), summary: f.summary, data, known_by: f.known_by, ref_enabled: f.ref_enabled }
+    // 灵魂五维按键合并：只传人物的；空串表示清空该项
+    if (f.type === 'character') out.soul = f.soul
+    return out
   }
   const save = useMutation({
     mutationFn: () => (isNew ? api.createCard(bookId, build()) : api.updateCard(card!.id!, build())),
     meta: { errorTitle: '保存失败' },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: qk.cards(bookId) }); toast.success(isNew ? '已新建设定' : '已保存'); onClose() },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: qk.cards(bookId) }); qc.invalidateQueries({ queryKey: qk.completeness(bookId) }); qc.invalidateQueries({ queryKey: ['refs', bookId] }); toast.success(isNew ? '已新建设定' : '已保存'); onClose() },
   })
+  /** 字段级 AI 采纳：同步写库（写前自动存快照），同时更新表单里的这一项，其它没保存的修改保留 */
+  const adoptField = async (field: string, value: unknown) => {
+    if (!entryId) return
+    try {
+      await api.applyFieldAi(bookId, entryId, { field, value })
+    } catch (e: any) { toast.error('采纳失败', { description: e?.message }); throw e }
+    qc.invalidateQueries({ queryKey: qk.cards(bookId) }); qc.invalidateQueries({ queryKey: qk.completeness(bookId) })
+    setForm((f) => {
+      if (!f) return f
+      if (field === 'name' || field === 'summary') return { ...f, [field]: String(value ?? '') }
+      if (field.startsWith('soul.')) return { ...f, soul: { ...f.soul, [field.slice(5)]: String(value ?? '') } }
+      const k = field.slice(5)
+      if (k === 'voice' || k === 'demeanor') return { ...f, [k]: String(value ?? '') }
+      if (k === 'catchphrases' || k === 'habits') return { ...f, [k]: Array.isArray(value) ? value.map(String) : String(value ?? '').split(/[；;]/).map((x) => x.trim()).filter(Boolean) }
+      return { ...f, rows: f.rows.map((x) => ((LABEL_KEY[x.k.trim()] ?? x.k.trim()) === k ? (typeof value === 'string' ? { k: x.k, v: value } : Array.isArray(value) && value.every((y) => typeof y === 'string') ? { k: x.k, v: value.join('；') } : { k: x.k, v: JSON.stringify(value), json: true }) : x)) }
+    })
+    toast.success('已采纳并保存', { description: '写入前存了设定快照，可在「历史版本」回滚' })
+  }
+  const adoptSoul = async (soul: Soul) => {
+    if (!entryId) return
+    try { await api.updateCard(entryId, { soul }) } catch (e: any) { toast.error('采纳失败', { description: e?.message }); throw e }
+    qc.invalidateQueries({ queryKey: qk.cards(bookId) }); qc.invalidateQueries({ queryKey: qk.completeness(bookId) })
+    setForm((f) => (f ? { ...f, soul: { ...f.soul, ...soul } } : f))
+    toast.success('灵魂五维已保存')
+  }
+  const [statusBusy, setStatusBusy] = useState(false)
   const del = useMutation({
     mutationFn: () => api.deleteCard(card!.id!),
     meta: { errorTitle: '删除失败' },
@@ -311,7 +421,10 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
       onError: (j) => { setBusy(null); toast.error('AI 改写失败', { description: j.error ?? undefined }) },
     })
   }
-  const ai = (field: string, label: string) => (
+  const ai = (field: string, label: string) => entryId ? (
+    <FieldAiButton bookId={bookId} entryId={entryId} field={field.includes('.') || field === 'name' || field === 'summary' ? field : `data.${field}`} label={label}
+      onAdopt={(v) => adoptField(field.includes('.') || field === 'name' || field === 'summary' ? field : `data.${field}`, v)} className="-my-1.5" />
+  ) : (
     <button type="button" disabled={!!busy} onClick={() => suggest(field, ask.trim())} title={ask.trim() ? `按上面的要求改${label}` : `AI 改${label}`}
         className="focus-ring inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px] font-normal text-muted-foreground transition hover:bg-primary-soft hover:text-primary disabled:opacity-50">
         <Wand2 className={cn('h-3 w-3', busy === field && 'animate-pulse')} />{busy === field ? '改写中' : 'AI 改'}
@@ -321,14 +434,19 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
 
   return (
     <Sheet open={open} onOpenChange={(o) => { if (!o) { onClose(); setConfirmDel(false) } }} title={isNew ? '新建设定' : `编辑：${card?.name}`}
-      footer={<>
+      footer={<div className="flex w-full flex-wrap items-center gap-2">
         {!isNew && (confirmDel
-          ? <Button variant="danger" className="mr-auto" loading={del.isPending} onClick={() => del.mutate()}>确认删除</Button>
-          : <Button variant="ghost" className="mr-auto text-danger hover:bg-danger-soft hover:text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setConfirmDel(true)}>删除</Button>)}
-        <Button variant="ghost" onClick={onClose}>取消</Button>
-        <Button variant="primary" disabled={!form.name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存</Button>
-      </>}>
+          ? <Button variant="danger" className="h-10" loading={del.isPending} onClick={() => del.mutate()}>确认删除</Button>
+          : <Button variant="ghost" className="h-10 text-danger hover:bg-danger-soft hover:text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setConfirmDel(true)}>删除</Button>)}
+        {!isNew && <Button variant="ghost" className="h-10" loading={statusBusy} icon={deprecatedCard ? <RotateCcw className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+          onClick={async () => { setStatusBusy(true); try { await onStatus(card as CardT, deprecatedCard ? 'active' : 'deprecated') } finally { setStatusBusy(false) } }}>{deprecatedCard ? '恢复' : '弃用'}</Button>}
+        <div className="ml-auto flex gap-2">
+          <Button variant="ghost" className="h-10" onClick={onClose}>取消</Button>
+          <Button variant="primary" className="h-10" disabled={!form.name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存</Button>
+        </div>
+      </div>}>
       <div className="space-y-5">
+        {deprecatedCard && <div className="flex items-center gap-2 rounded-lg bg-muted px-3.5 py-2.5 text-[13px] text-muted-foreground"><Archive className="h-4 w-4 shrink-0" />这条设定已弃用：不进入写作上下文、不能被 @ 引用。点底部「恢复」重新启用。</div>}
         {!isNew && <TropeAlert hits={(card as CardT | null)?.trope_hits} busy={busy === '__card'} onReplace={() => suggest(null, tropeReplaceInstruction((card as CardT).trope_hits ?? []))} />}
         <div className="space-y-2 rounded-xl bg-primary-soft/40 p-3 hairline">
           <div className="flex items-center justify-between gap-2">
@@ -344,10 +462,19 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
         </div>
         <div className="grid grid-cols-[140px_1fr] gap-3">
           <Field label="类型"><Select value={form.type} onChange={(v) => v && set({ type: v as CardType })} options={CARD_TYPES.map((t) => ({ value: t.key, label: t.label }))} /></Field>
-          <Field label="名称"><Input autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={isChar ? '人物名' : '设定名称'} /></Field>
+          <Field label="名称" hint={entryId ? ai('name', '名称') : undefined}><Input autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={isChar ? '人物名' : '设定名称'} /></Field>
         </div>
+        <label className="flex min-h-[48px] cursor-pointer items-center justify-between gap-3 rounded-xl bg-subtle/60 px-3.5 py-2 hairline">
+          <span className="min-w-0"><span className="flex items-center gap-1.5 text-[13px] font-medium"><At className="h-4 w-4 text-primary" />用于 @引用</span>
+            <span className="block text-[12px] text-muted-foreground">在章节要求、章纲、Agent 里输入 @{form.name || '名称'}，生成时会带上这条设定的完整内容</span></span>
+          <Switch checked={form.ref_enabled} onCheckedChange={(v) => set({ ref_enabled: v })} />
+        </label>
         <Field label="简介" hint={ai('summary', '简介')}><Textarea value={form.summary} onChange={(e) => set({ summary: e.target.value })} placeholder="一两句话说清楚它是什么" /></Field>
 
+        {isChar && (
+          <SoulCard bookId={bookId} entryId={entryId} value={form.soul} onChange={(soul) => set({ soul })} autoFill={autoSoul}
+            onAdoptField={(k, v) => adoptField(`soul.${k}`, v)} onAdoptAll={adoptSoul} />
+        )}
         {isChar && (
           <div className="space-y-4 rounded-xl bg-amber-500/[0.06] p-4 hairline">
             <div>
@@ -371,7 +498,9 @@ function CardEditor({ bookId, card, onClose, charNames }: { bookId: number; card
               <div key={i} className="flex gap-1.5">
                 <Input value={r.k} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} placeholder="属性" className="w-[120px] shrink-0" />
                 <Input value={r.v} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} placeholder="内容" className={cn(r.json && 'font-mono text-xs')} />
-                <Button size="icon" variant="ghost" disabled={!!busy || !r.k.trim()} onClick={() => suggest(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, ask.trim())} aria-label="AI 改这一项" title="AI 改这一项"><Wand2 className={cn('h-4 w-4', busy === `data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}` && 'animate-pulse text-primary')} /></Button>
+                {entryId && r.k.trim() && (card?.data ?? {})[LABEL_KEY[r.k.trim()] ?? r.k.trim()] !== undefined
+                  ? <FieldAiButton bookId={bookId} entryId={entryId} field={`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`} label={r.k.trim()} onAdopt={(v) => adoptField(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, v)} className="h-9 shrink-0" />
+                  : <Button size="icon" variant="ghost" disabled={!!busy || !r.k.trim()} onClick={() => suggest(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, ask.trim())} aria-label="AI 改这一项" title="AI 改这一项"><Wand2 className={cn('h-4 w-4', busy === `data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}` && 'animate-pulse text-primary')} /></Button>}
                 <Button size="icon" variant="ghost" onClick={() => set({ rows: form.rows.filter((_, j) => j !== i) })} aria-label="删除"><X className="h-4 w-4" /></Button>
               </div>
             ))}

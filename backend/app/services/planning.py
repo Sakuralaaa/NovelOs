@@ -403,7 +403,7 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
     ctx.progress(70, "写入设定卡与初始事实")
     with session_scope() as s:
         book = common.get_book(s, book_id)
-        existing = {c.name: c for c in common.cards(s, book_id)}
+        existing = {c.name: c for c in common.cards(s, book_id, include_deprecated=True)}
         if existing:  # 已有设定时先存快照，可回滚
             from app.services.bible_ops import snapshot
 

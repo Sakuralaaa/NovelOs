@@ -1,5 +1,58 @@
 # 更新日志
 
+## v0.10.0（2026-11-17，合并 v0.9.3 拆书工作台与引导、v0.9.4 提交前定点修与数值一致性、v0.10 同人创作）
+
+### 同人创作
+- 原著资料：`POST /api/fanfic/sources`（粘贴或 TXT 上传，≤30MB，任务）从作者导入的原著提炼「原著设定卡」——角色（性格/说话方式/口癖/关系/能力与边界）、世界观、势力、关键事件时间线、名场面（用自己的话）。长文本按重点段落→开头→均匀抽样取 20 万字，quick/standard/deep 分 1/2/4 轮提炼并合并。**原文不入库**，只存设定卡与 8 字指纹；除口癖外与原文连续 8 字相同的字段清掉并提示。`GET/PUT/DELETE /api/fanfic/sources/{id}`、列表；设定卡可手改。
+- 版权确认：建同人书必须提交 `copyright_ack: true`（仅供个人创作学习、发布需遵守平台同人规则与原著授权），否则 400；书上记确认时间。
+- 同人书：建书时带 `fanfic: {source_id, fidelity, direction}`，或 `POST/PATCH/DELETE /api/books/{id}/fanfic`；Book 新字段 `fanfic`。遵循度三档 strict / moderate / loose，原著卡摘要与遵循规则自动进大纲、写章等所有书设定上下文；`import-cards` 可把原著角色/势力/世界观写进设定库。
+- 12 种方向模板 `GET /api/fanfic/directions`：原著向补完、if 线改写、穿书、重生、系统、AU 现代、AU 古代、配角主视角、CP 向、反派洗白、后日谈、跨作品联动（说明、写作要点、风险、建议遵循度、想法模板）。
+- OOC 检查 `POST /api/chapters/{id}/ooc-check`（任务）：对照原著角色卡逐角色打分、列出言行/口癖/关系/能力越界/时间线问题（带本章原句），按遵循度调宽严，结果存章节 `fanfic_meta`；`GET /api/chapters/{id}/ooc`。
+- 原著重合检查 `POST /api/chapters/{id}/fanfic-overlap`：与原著的 8 字 n-gram 重合计数、最长片段、占比与告警等级（复用拆书指纹，口癖与人名不计）。
+- 新表 `fanfic_source`；`book.fanfic`、`chapter.fanfic_meta` 新列（自动迁移）。
+
+## v0.9.4（2026-11-17，随 v0.10.0 一同发布）
+
+### 写作流程
+- 提交前修中等问题：章节提交（自动提交与 `POST /chapters/{id}/commit` 都走）前，若最后一轮审稿（含番茄老读者审读）里有 continuity / retention 类 **mid** 问题，先按对应审稿补丁逐字替换，没有补丁的按问题描述再定点改一次，然后提交。每章只做一次，旧正文进历史可撤回；记录在 `review.pre_commit_fix`。审批模式为「逐条审阅」时跳过。开关 `fix_mid_before_commit`（全局默认开，可按书覆盖）。
+- 审稿补丁后自动重审：写章流程自动应用补丁后再审一次（最多 1 次），新审稿写回章节（旧补丁保留在列表前面，过期的标 `stale`）；high 仍在则不提交、`review.flagged=true` 并写进变更警告。开关 `auto_rereview`（默认开，可按书覆盖）。
+- 书级开关：`GET/PUT /api/books/{id}/writing-settings`；全局 `PUT /api/settings/writing` 新增两个字段。
+
+### 数值一致性 lint
+- 新规则 `app/lint/numeric_zh.py`（纯规则）：同章前后、或与设定卡/事实账本对照，同一对象的重量（斤/公斤/千克/吨）、身高长度（米/厘米/丈/尺，“一米八”）、年龄、期限（三天后/后天）、境界（炼气三层…）、机甲参数（高/重/功率/时速）不一致 → mid / continuity 问题，带位置（offset、段落、原句、对照来源）；市制与公制混用也提示。结果进 lint（`numeric_conflicts`）和审稿 `review.issues`（`source: "lint:numeric"`）。
+
+### 任务断点续跑
+- 写章任务每完成一步（拆场景、每个场景、每个版本、建章、采纳、精修、补丁重审）写断点（新表 `job_checkpoint`）。服务重启时有断点的写章任务标 `interrupted`（其余仍 failed）；`POST /api/jobs/{id}/resume` 用同一个任务从最后完成的场景继续；失败（failed）且有断点的任务也能续跑。`GET /api/jobs/{id}` 新增 `resumable`、`checkpoint`。
+
+### lint 阈值校准
+- craft_zh、长段、瀑布流短段、弱化副词等阈值集中到 `app/config.py` 的 `lint_profiles`（番茄档 / 出版档两套，按平台风格档选用，可用 `NOVELOS_LINT_PROFILES` 覆盖）。
+- 按 7 章样章校准：番茄档长段 70→100 字，且要 ≥3 段、占比 ≥10% 才算问题，定点修最多点名 3 段；样章「需定点修」从 7/7 降到 2/7。统计见 `docs/research/lint-calibration-v094.md`，脚本 `backend/scripts/lint_calibration.py`。
+- lint 输出新增 `lint_tier`、`numeric_conflicts`。
+
+## v0.9.3（2026-11-17，随 v0.10.0 一同发布）
+
+### 作品完整度与新手引导
+- `GET /api/books/{id}/completeness`：10 项待办（概览、世界观、主角五维、配角、势力地点、大纲、前三章章纲、第 1 章、书名简介、封面），0–100 分，每项带跳转或一键任务。
+- `GET/PUT /api/onboarding`：四步引导（接模型→立项→设定与大纲→第一章），按库内数据自动打勾，可手动勾选与关闭。
+
+### 设定库
+- 字段级 AI：`POST /books/{id}/bible/{entry}/field-ai`（补全/改写/扩写，任务只返回对比稿），`.../field-ai/apply` 采纳写库（写前存快照）。
+- 「用于 @引用」：条目 `ref_enabled`；`GET /books/{id}/refs?q=`；写章、场景计划、改写、大纲、Agent 的指令里 `@条目名` 自动注入该条目全文。
+- 角色灵魂五维 `soul`（欲望/恐惧/伤口/信念/声音），按键合并；`POST /books/{id}/characters/{entry}/soul` 一键补全（fill 模式保留已有项）；写章时出场角色带一行五维。
+- 弃用条目 `status=deprecated`：不进任何生成上下文，列表默认隐藏（`?include_deprecated=true` 取回），快照与回滚保留。
+
+### 章节与成本
+- 书级审批模式 `approval_mode`（auto/review，与 `agent_auto_apply` 双向同步）；显式 review 时写章、人味修整、描写增厚只出对比稿不落库。
+- `POST /api/estimate`：调模型前估算 token、调用次数、模型与耗时（耗时按历史平均）；AI 率检测（朱雀）不计 token。
+- 新表 `llm_usage` 记录每次模型调用；`GET /books/{id}/usage`、`GET /api/usage?days=`。
+
+### 拆书工作台
+- `POST/GET /api/teardowns`、`GET/DELETE /api/teardowns/{id}`：来源可选榜单书、粘贴或 TXT（≤20000 字），产物含结构、人设模板、金手指、卖点、节奏图、可复用套路；原文不入库，只存 8 字指纹与专名表。
+- `to-idea` 生成选题，`to-bible` 写入设定（去专名、与原文连续 8 字相同的跳过）。
+
+### 前端
+- 完整度环与待办、首页新手引导卡、字段 AI 按钮与对比浮层、@ 补全、五维卡、弃用折叠、章节吸顶工具栏与审批切换、成本提示浮层（可关闭）、本书用量卡、拆书全屏工作台。
+
 ## v0.9.2（2026-11-16）
 
 ### 风向标日报升级（榜单 → 立项）

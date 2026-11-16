@@ -1,5 +1,5 @@
 // 与 novelos/docs/API_CONTRACT.md 一一对应
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'
 export interface Job {
   id: number
   kind: string
@@ -185,6 +185,9 @@ export interface Book {
   /** v0.9：平台风格档（默认 fanqie）、是否做过书测 */
   platform_style?: PlatformStyle
   has_book_test?: boolean
+  /** v0.9.3：AI 改动自动采纳 / 逐条审批 */
+  approval_mode?: ApprovalMode
+  approval_mode_explicit?: boolean
 }
 export type PlatformStyle = 'fanqie' | 'qidian' | 'generic'
 
@@ -311,6 +314,10 @@ export interface Card {
   known_by: string[]
   updated_at: string
   trope_hits?: TropeHit[]
+  /** v0.9.3：是否可被 @ 引用（默认 true）、弃用状态、人物灵魂五维 */
+  ref_enabled?: boolean
+  status?: CardStatus
+  soul?: Soul | null
 }
 export interface Fact {
   id: number
@@ -571,3 +578,226 @@ export interface AgentSessionDetail {
   proposal_jobs: Record<string, AgentJobState | null>; job: Job | null
 }
 export interface AgentToolInfo { name: string; label: string; kind: 'read' | 'write'; description: string }
+
+// ---------- v0.9.3 完整度 / 引导 / 设定 AI / 灵魂 / 审批 / 成本 / 拆书（docs/API_CONTRACT.md「v0.9.3」节）----------
+export interface CompletenessItem {
+  key: string
+  label: string
+  done: boolean
+  weight: number
+  /** 未完成时的一句提示，完成时为空串 */
+  hint: string
+  /** route：target 是前端路由；job：target 是要 POST（空 body）的接口路径（含 /api 前缀），返回 Job */
+  action?: { type: 'route' | 'job'; target: string } | null
+}
+export interface Completeness { book_id: number; score: number; items: CompletenessItem[] }
+
+export type OnboardingKey = 'model' | 'project' | 'bible_outline' | 'first_chapter'
+export interface OnboardingState {
+  steps: Record<OnboardingKey, boolean>
+  order: OnboardingKey[]
+  labels: Partial<Record<OnboardingKey, string>>
+  auto: Partial<Record<OnboardingKey, boolean>>
+  current: OnboardingKey | null
+  dismissed: boolean
+}
+
+export type FieldAiMode = 'fill' | 'rewrite' | 'expand'
+export interface FieldAiResult { entry_id: number; field: string; mode: FieldAiMode; before: unknown; value: unknown; note?: string }
+
+export type CardStatus = 'active' | 'deprecated'
+export type SoulKey = 'desire' | 'fear' | 'wound' | 'belief' | 'voice'
+export type Soul = Record<SoulKey, string>
+export interface SoulResult { entry_id: number; mode: 'fill' | 'rewrite'; before: Soul; soul: Soul; note?: string }
+
+export interface RefEntry { id: number; name: string; type: CardType | string; type_label?: string; brief?: string }
+
+export type ApprovalMode = 'auto' | 'review'
+
+export type EstimateKind = 'chapter_write' | 'chapter_rewrite' | 'polish_voice' | 'humanize' | 'thicken' | 'review' | 'outline' | 'bible'
+  | 'report' | 'idea' | 'field_ai' | 'soul' | 'teardown' | 'package' | 'aigc'
+export interface Estimate {
+  kind: EstimateKind
+  input_tokens_est: number
+  output_tokens_est: number
+  calls_est: number
+  route: string
+  model: string
+  seconds_est: number
+  seconds_source?: 'history' | 'default'
+  note?: string
+}
+export interface UsageRow { calls: number; in_tokens: number; out_tokens: number; ms: number }
+export interface BookUsage extends UsageRow {
+  book_id: number | null
+  by_kind: (UsageRow & { kind: string })[]
+  by_route: (UsageRow & { route: string })[]
+  last_at: string | null
+}
+
+export type TeardownSourceType = 'rank_book' | 'paste' | 'txt'
+export interface PacingPoint { chapter: number; title: string; conflict: number; payoff: number; hook: number; note?: string }
+export interface TeardownResult {
+  structure?: { opening?: string; rhythm?: string; chapter_hooks?: string[] }
+  characters?: { role: string; template: string; traits: string[]; function: string }[]
+  golden_finger?: { mechanism?: string; limits?: string; growth?: string; payoff?: string }
+  selling_points?: string[]
+  pacing_chart?: PacingPoint[]
+  reusable?: { name: string; pattern: string; how_to_use: string }[]
+}
+export interface TeardownRecord {
+  id: number
+  title: string
+  source: TeardownSourceType
+  book_id_ext: string | null
+  chars: number
+  result: TeardownResult
+  warnings: string[]
+  model: string
+  created_at: string
+}
+export interface TeardownListItem {
+  id: number; title: string; source: TeardownSourceType; book_id_ext: string | null; chars: number; created_at: string
+  warnings_count: number; modules: string[]
+}
+export type TeardownBiblePart = 'characters' | 'golden_finger' | 'reusable' | 'selling_points'
+
+// ---------- v0.9.4 提交前修中等问题 / 数值一致性 / 补丁后重审 / 断点续跑 ----------
+export interface JobCheckpoint {
+  /** node | scenes | scene:{版本}:{已写}/{总数} | variant:{n} | chapter | adopted | refined | patched */
+  stage: string
+  resumes: number
+  updated_at: string
+  chapter_id?: number | null
+  number?: number | null
+  scenes_total?: number | null
+  scenes_done?: number | null
+  variants_done?: number | null
+}
+export interface Job {
+  /** v0.9.4：interrupted / failed 且有断点、kind 支持续跑 */
+  resumable?: boolean
+  checkpoint?: JobCheckpoint | null
+}
+export type NumericKind = 'weight' | 'height' | 'length' | 'width' | 'thick' | 'depth' | 'range' | 'power' | 'speed' | 'age' | 'days' | 'realm'
+/** 对照来源：本章前文原句 `{quote, offset, paragraph}`，或账本/设定卡 `{source, label, value}` */
+export interface NumericRelated { quote?: string; offset?: number; paragraph?: number; source?: 'ledger' | string; label?: string; value?: string }
+/** 字段已合并进 ReviewIssue（见下方增补） */
+export type NumericIssue = ReviewIssue
+export interface ReviewIssue {
+  /** v0.9.4：程序检查来源，例如 `lint:numeric` */
+  source?: string
+  position?: { offset: number; paragraph: number; match: string }
+  object?: string
+  kind?: NumericKind | string
+  related?: NumericRelated
+}
+export interface Lint {
+  /** v0.9.4：数值一致性冲突、阈值档 */
+  numeric_conflicts?: NumericIssue[]
+  lint_tier?: 'fanqie' | 'publish'
+}
+export interface RereviewInfo {
+  round: number
+  at: string
+  before_overall: number
+  after_overall: number
+  passed: boolean
+  high_left: number
+  dropped_issues: number
+}
+export interface PreCommitFix {
+  issues: number[]
+  patches_applied: number[]
+  patches_skipped: PatchSkip[]
+  rewritten: number
+  changed: boolean
+  at: string
+  skipped?: string
+}
+export interface Review {
+  rereview?: RereviewInfo | null
+  flagged?: boolean
+  flag_reason?: string
+  pre_commit_fix?: PreCommitFix | null
+}
+export interface ReviewPatch {
+  /** v0.9.4：0 = 上一轮审稿的补丁，1 = 复审补丁；stale 的手动应用会被跳过 */
+  round?: number
+  stale?: boolean
+}
+export interface WritingSettings {
+  fix_mid_before_commit?: boolean
+  auto_rereview?: boolean
+}
+export interface BookWritingToggles { fix_mid_before_commit: boolean; auto_rereview: boolean }
+export interface BookWritingSettings {
+  book_id: number
+  /** null = 跟随全局 */
+  overrides: { fix_mid_before_commit: boolean | null; auto_rereview: boolean | null }
+  effective: BookWritingToggles
+  global: BookWritingToggles
+}
+export type BookWritingSettingsInput = Partial<{ fix_mid_before_commit: boolean | null; auto_rereview: boolean | null }>
+
+// ---------------------------------------------------------------- v0.10 同人创作
+export type FanficDepth = 'quick' | 'standard' | 'deep'
+export type FanficFidelity = 'strict' | 'moderate' | 'loose'
+export type FanficDirectionId =
+  | 'canon_fill' | 'if_line' | 'transmigration' | 'rebirth' | 'system' | 'au_modern' | 'au_ancient' | 'side_pov'
+  | 'cp' | 'villain_redemption' | 'epilogue' | 'crossover'
+export type FanficSourceType = 'paste' | 'txt'
+export interface SourceCharacter {
+  name: string; aliases: string[]; role: string; personality: string; speech_style: string; catchphrases: string[]
+  relations: { target: string; relation: string }[]; abilities: string[]; limits: string[]; notes: string
+}
+export interface SourceWorld { summary: string; rules: string[]; locations: { name: string; desc: string }[] }
+export interface SourceFaction { name: string; stance: string; members: string[]; notes: string }
+export interface SourceTimelineItem { order: number; event: string; characters: string[]; impact: string }
+export interface SourceScene { title: string; summary: string; characters: string[] }
+export interface SourceCards {
+  characters: SourceCharacter[]; world: SourceWorld; factions: SourceFaction[]; timeline: SourceTimelineItem[]; scenes: SourceScene[]
+}
+export type SourceCardPart = keyof SourceCards
+export interface FanficSourceBrief {
+  id: number; title: string; source: FanficSourceType; chars: number; total_chars: number; depth: FanficDepth; focus: string[]
+  completeness: number; counts: { characters: number; factions: number; timeline: number; scenes: number }
+  warnings_count: number; used_by: number[]; model: string; created_at: string; updated_at: string
+}
+export interface FanficSource extends FanficSourceBrief { cards: SourceCards; warnings: string[] }
+export interface BookFanfic {
+  source_id: number; source_title: string; fidelity: FanficFidelity; direction: FanficDirectionId
+  extra_source_ids: number[]; notes: string; copyright_ack: boolean; copyright_ack_at: string; attached_at: string
+}
+export interface FanficInfoDetail extends BookFanfic {
+  direction_label: string; fidelity_label: string; source: FanficSourceBrief | null; source_missing: boolean
+}
+export interface FanficInfo { book_id: number; fanfic: FanficInfoDetail | null }
+export interface FanficSpecInput {
+  source_id: number; fidelity?: FanficFidelity; direction?: FanficDirectionId; extra_source_ids?: number[]; notes?: string
+}
+export interface FanficDirection {
+  id: FanficDirectionId; label: string; desc: string; tips: string[]; risks: string[]; suggested_fidelity: FanficFidelity; template: string
+}
+export interface FanficFidelityInfo { id: FanficFidelity; label: string; desc: string; pass_score: number }
+export interface FanficCatalog { directions: FanficDirection[]; fidelities: FanficFidelityInfo[]; copyright_notice: string }
+export type FanficImportPart = 'characters' | 'factions' | 'world' | 'locations'
+export type OocIssueType = 'speech' | 'catchphrase' | 'relation' | 'ability' | 'timeline'
+export type OocLevel = 'pass' | 'warn' | 'fail'
+export interface OocIssue {
+  type: OocIssueType; type_label: string; severity: 'high' | 'mid' | 'low'; quote: string; problem: string; suggestion: string; source: 'model' | 'program'
+}
+export interface OocCharacter { name: string; score: number; model_score: number | null; level: OocLevel; verdict: string; issues: OocIssue[] }
+export interface OocResult {
+  fidelity: FanficFidelity; fidelity_label: string; pass_score: number; overall: number; verdict: OocLevel
+  characters: OocCharacter[]; summary: string; ignored_issues: number; content_hash: string; checked_at: string; model: string
+  stale?: boolean
+}
+export type OverlapLevel = 'ok' | 'info' | 'warn' | 'high'
+export interface FanficOverlap {
+  ngram: number; hits: number; segments: number; longest: number; ratio: number; level: OverlapLevel; warning: string
+  samples: string[]; content_hash: string; checked_at: string; stale?: boolean
+}
+export interface ChapterFanficMeta { chapter_id: number; ooc: OocResult | null; overlap: FanficOverlap | null }
+/** v0.10：book_out 新字段（原创书为 null）——接口合并，补到 Book 上 */
+export interface Book { fanfic?: BookFanfic | null }

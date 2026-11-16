@@ -39,11 +39,27 @@ def book_stats(s: Session, book_id: int) -> dict[str, int]:
     return {"chapters": int(chapters[0]), "words": int(chapters[1]), "foreshadow_open": int(fo)}
 
 
-def cards(s: Session, book_id: int, type_: str | None = None) -> list[Card]:
+def cards(s: Session, book_id: int, type_: str | None = None, include_deprecated: bool = False) -> list[Card]:
+    """设定条目。默认不含 v0.9.3 的弃用条目（status=deprecated）——所有生成上下文都走这里；
+    管理类操作（列表、快照、回滚、按名去重）传 include_deprecated=True。"""
     q = select(Card).where(Card.book_id == book_id)
     if type_:
         q = q.where(Card.type == type_)
+    if not include_deprecated:
+        q = q.where(Card.status != "deprecated")
     return list(s.exec(q.order_by(Card.id)))
+
+
+def approval_mode(b: Book) -> str:
+    """v0.9.3：显式设置过就用设置；否则按旧的书级 agent_auto_apply 映射（true→auto，false→review）。"""
+    if b.approval_mode in ("auto", "review"):
+        return b.approval_mode
+    return "auto" if b.agent_auto_apply else "review"
+
+
+def chapter_review_mode(b: Book) -> bool:
+    """章节 AI 是否只出对比稿不落库：只在作者显式选了 review 时生效（未设置的旧书维持旧行为）。"""
+    return b.approval_mode == "review"
 
 
 def protagonist(s: Session, book_id: int) -> Card | None:
@@ -107,6 +123,10 @@ def book_context(s: Session, book: Book, with_cards: bool = True) -> str:
         for c in cards(s, book.id or 0):
             if c.type in ("world", "cheat", "power", "faction", "character"):
                 lines.append(f"[{c.type}] {c.name}：{c.summary}")
+    if getattr(book, "fanfic", None):  # v0.10 同人：原著卡摘要 + 遵循规则（大纲/写章/设定等所有带书设定的提示词）
+        from app.services.fanfic import context_block
+
+        lines.append(context_block(s, book))
     return "\n".join(lines)
 
 

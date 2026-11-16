@@ -47,6 +47,9 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "book_test": ("package",),
     "radar_book_ai": ("package",),
     "polish_voice": ("humanize", "writing"),
+    "field_ai": ("bible",),
+    "character_soul": ("bible",),
+    "teardown_project": (),
 }
 
 

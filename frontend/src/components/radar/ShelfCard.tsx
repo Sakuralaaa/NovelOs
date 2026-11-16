@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowUpRight, Feather, Sparkles } from '@/components/icons'
+import { ArrowDown, ArrowUp, ArrowUpRight, Feather, Scissors, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { BookCover, RANK_COLORS } from '@/components/radar/BookCover'
 import type { RankBoard, RankItem } from '@/lib/types'
@@ -47,8 +47,8 @@ export function RankNumber({ n, className }: { n: number; className?: string }) 
 }
 
 /** 番茄书架式卡片：名次 + 竖版封面 + 书名/作者/章节/在读 + 两行简介 + 题材标签 + 操作 */
-export function ShelfCard({ item: i, n, onOpen, onAnalyze, onImitate }: {
-  item: RankItem; n: number; onOpen: () => void; onAnalyze: () => void; onImitate: () => void
+export function ShelfCard({ item: i, n, onOpen, onAnalyze, onImitate, onTeardown }: {
+  item: RankItem; n: number; onOpen: () => void; onAnalyze: () => void; onImitate: () => void; onTeardown?: () => void
 }) {
   const tags = [...new Set([i.category, ...(i.tags ?? [])].filter(Boolean))].slice(0, 4)
   const ago = fmtAgoDays(i.last_update_at)
@@ -78,12 +78,13 @@ export function ShelfCard({ item: i, n, onOpen, onAnalyze, onImitate }: {
           ))}
           {ago && <span className="ml-auto shrink-0 text-[11.5px] text-muted-foreground/80">{ago}</span>}
         </div>
-        <div className="mt-auto flex items-center gap-1.5 pt-3">
-          <Button size="sm" variant="ghost" className="h-9 px-2.5 sm:h-8" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={stop(onAnalyze)}>AI 分析</Button>
-          <Button size="sm" variant="soft" className="h-9 px-2.5 sm:h-8" icon={<Feather className="h-3.5 w-3.5" />} onClick={stop(onImitate)}>仿写立项</Button>
+        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-1.5 pt-3">
+          <Button size="sm" variant="ghost" className="h-10 px-2.5 sm:h-8" icon={<Sparkles className="h-3.5 w-3.5" />} onClick={stop(onAnalyze)}>AI 分析</Button>
+          {onTeardown && <Button size="sm" variant="ghost" className="h-10 px-2.5 sm:h-8" icon={<Scissors className="h-3.5 w-3.5" />} onClick={stop(onTeardown)}>拆书</Button>}
+          <Button size="sm" variant="soft" className="h-10 px-2.5 sm:h-8" icon={<Feather className="h-3.5 w-3.5" />} onClick={stop(onImitate)}>仿写立项</Button>
           {i.source_url ? (
             <a href={i.source_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
-              className="focus-ring ml-auto inline-flex h-9 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground sm:h-8">
+              className="focus-ring ml-auto inline-flex h-10 shrink-0 items-center gap-1 rounded-md px-2.5 text-[13px] font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground sm:h-8">
               原文<ArrowUpRight className="h-3.5 w-3.5" />
             </a>
           ) : null}

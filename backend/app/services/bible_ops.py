@@ -49,6 +49,11 @@ def card_dict(c: Card) -> dict[str, Any]:
     return {"id": c.id, "type": c.type, "name": c.name, "summary": c.summary, "data": dict(c.data or {}), "known_by": list(c.known_by or [])}
 
 
+def snapshot_dict(c: Card) -> dict[str, Any]:
+    """快照里多存 v0.9.3 的 status / ref_enabled / soul，回滚时一起恢复。"""
+    return {**card_dict(c), "status": c.status or "active", "ref_enabled": bool(c.ref_enabled), "soul": dict(c.soul) if c.soul else None}
+
+
 def normalize_card(it: dict[str, Any], fallback_type: str = "character") -> dict[str, Any] | None:
     if not isinstance(it, dict) or not str(it.get("name") or "").strip():
         return None
@@ -162,7 +167,7 @@ def propose(book_id: int, mode: str, instruction: str, route: str | None, ctx: J
 
 
 def snapshot(s: Session, book_id: int, note: str) -> BibleSnapshot:
-    snap = BibleSnapshot(book_id=book_id, note=note[:80], cards=[card_dict(c) for c in common.cards(s, book_id)])
+    snap = BibleSnapshot(book_id=book_id, note=note[:80], cards=[snapshot_dict(c) for c in common.cards(s, book_id, include_deprecated=True)])
     s.add(snap)
     s.flush()
     olds = list(s.exec(select(BibleSnapshot).where(BibleSnapshot.book_id == book_id).order_by(BibleSnapshot.id)))
@@ -182,7 +187,7 @@ def apply(book_id: int, mode: str, instruction: str, ops: list[dict[str, Any]], 
     with session_scope() as s:
         book = common.get_book(s, book_id)
         snap = snapshot(s, book_id, f"{MODE_LABEL.get(mode, '批量修改')}前" + (f"：{instruction.strip()[:30]}" if instruction.strip() else ""))
-        cards = {c.id: c for c in common.cards(s, book_id)}
+        cards = {c.id: c for c in common.cards(s, book_id, include_deprecated=True)}
         names = {c.name for c in cards.values()}
         n = {"created": 0, "updated": 0, "deleted": 0}
         try:
@@ -259,7 +264,7 @@ def restore(book_id: int, snapshot_id: int) -> dict[str, Any]:
             raise NotFound("快照不存在")
         target = list(snap.cards or [])
         before = snapshot(s, book_id, f"回滚到「{snap.note}」之前")
-        cur = {c.id: c for c in common.cards(s, book_id)}
+        cur = {c.id: c for c in common.cards(s, book_id, include_deprecated=True)}
         keep = {int(c["id"]) for c in target if c.get("id")}
         for cid, c in cur.items():
             if cid not in keep:
@@ -273,6 +278,9 @@ def restore(book_id: int, snapshot_id: int) -> dict[str, Any]:
                 c = Card(id=d.get("id") if other is None else None, book_id=book_id, type=d["type"], name=d["name"])
             c.type, c.name, c.summary = d.get("type") or "character", d.get("name") or "未命名", d.get("summary") or ""
             c.data, c.known_by, c.updated_at = dict(d.get("data") or {}), list(d.get("known_by") or []), utcnow()
+            c.status = d.get("status") if d.get("status") in ("active", "deprecated") else "active"
+            c.ref_enabled = bool(d.get("ref_enabled", True))
+            c.soul = dict(d["soul"]) if isinstance(d.get("soul"), dict) else None
             s.add(c)
         s.commit()
         return {"restored": len(target), "snapshot_id": before.id}

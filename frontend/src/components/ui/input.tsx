@@ -31,7 +31,9 @@ Textarea.displayName = 'Textarea'
 
 export function Label({ className, hint, children, ...p }: React.LabelHTMLAttributes<HTMLLabelElement> & { hint?: React.ReactNode }) {
   return (
-    <label className={cn('mb-1.5 flex items-baseline justify-between gap-2 text-[13px] font-medium text-foreground/85', className)} {...p}>
+    <label className={cn('mb-1.5 flex items-baseline justify-between gap-2 text-[13px] font-medium text-foreground/85', className)}
+      // 没有 htmlFor 时，点标签文字不要“激活”hint 里的按钮（比如字段旁的 AI 按钮）
+      onClick={p.htmlFor ? undefined : (e) => { if (!(e.target as HTMLElement).closest('button,a,input,textarea,select')) e.preventDefault() }} {...p}>
       <span>{children}</span>
       {hint && <span className="text-xs font-normal text-muted-foreground">{hint}</span>}
     </label>
