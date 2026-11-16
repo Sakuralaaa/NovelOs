@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ArrowDown, ArrowUp, Feather, LayoutGrid, Lightbulb, RefreshCw, Rows3 } from '@/components/icons'
+import { ArrowDown, ArrowUp, Compass, Feather, LayoutGrid, Lightbulb, RefreshCw, Rows3 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,17 +13,25 @@ import { Tip } from '@/components/ui/tooltip'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { ImitatePanel } from '@/components/radar/ImitatePanel'
+import { TrendReportView } from '@/components/radar/TrendReport'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { Gender, RankItem, TrendTopic } from '@/lib/types'
+import type { Gender, RankBoard, RankItem, TrendTopic } from '@/lib/types'
 import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
 
 const PAGE = 50
-const SOURCE: Record<string, string> = { web: '番茄阅读榜', app: '番茄 App 榜', mock: '示例数据' }
+const SOURCE: Record<string, string> = { web: '番茄网页榜', app: '番茄 App 榜', mock: '示例数据' }
+const BOARD_LABEL: Record<RankBoard, string> = { read: '阅读榜', new: '新书榜' }
+type View = 'rank' | 'report'
 
 export default function RadarPage() {
   const [gender, setGender] = useState<Gender>('male')
   const [category, setCategory] = useState<string>('')
+  const [sp, setSp] = useSearchParams()
+  const tab: View = sp.get('tab') === 'report' ? 'report' : 'rank'
+  const setTab = (t: View) => { const n = new URLSearchParams(sp); if (t === 'report') n.set('tab', 'report'); else n.delete('tab'); setSp(n, { replace: true }) }
+  const [board, setBoardState] = useState<RankBoard>(() => (localStorage.getItem('novelos.radar-board') === 'new' ? 'new' : 'read'))
+  const setBoard = (b: RankBoard) => { setBoardState(b); setCategory(''); localStorage.setItem('novelos.radar-board', b) }
   const [view, setView] = useState<'table' | 'grid'>('table')
   const [limit, setLimit] = useState(PAGE)
   const [imitate, setImitate] = useState<RankItem | null>(null)
@@ -32,15 +40,16 @@ export default function RadarPage() {
   const { start } = useJobs()
   const job = useActiveJob('radar-refresh')
 
-  const latest = useQuery({ queryKey: qk.radarLatest(gender), queryFn: () => api.radarLatest({ gender }) })
-  const trends = useQuery({ queryKey: qk.radarTrends(gender), queryFn: () => api.radarTrends(gender) })
+  const latest = useQuery({ queryKey: qk.radarLatest(gender, '', board), queryFn: () => api.radarLatest({ gender, board }) })
+  const trends = useQuery({ queryKey: qk.radarTrends(gender, board), queryFn: () => api.radarTrends(gender, board) })
+  const boards = latest.data?.boards
   const cfg = useQuery({ queryKey: qk.radarConfig, queryFn: api.radarConfig })
   const enable = useMutation({
     mutationFn: () => api.saveRadarConfig({ ...(cfg.data ?? { daily_hour: 8 }), enabled: true }),
     onSuccess: (d) => { qc.setQueryData(qk.radarConfig, d); refresh() },
   })
 
-  useEffect(() => setLimit(PAGE), [gender, category])
+  useEffect(() => setLimit(PAGE), [gender, category, board])
 
   const items = latest.data?.items ?? []
   const cats = useMemo(() => {
@@ -55,7 +64,13 @@ export default function RadarPage() {
 
   const refresh = () => start(api.radarRefresh(), {
     key: 'radar-refresh', label: '刷新榜单',
-    successMsg: (j) => (j.result?.unchanged ? '榜单今天还没更新' : j.result?.source === 'mock' ? '已生成示例数据' : '榜单已更新'),
+    successMsg: (j) => {
+      if (j.result?.unchanged) return '榜单今天还没更新'
+      if (j.result?.source === 'mock') return '已生成示例数据'
+      const b = j.result?.boards as { read?: number; new?: number } | undefined
+      const parts = b ? [b.read ? `阅读榜 ${b.read} 本` : '', b.new ? `新书榜 ${b.new} 本` : ''].filter(Boolean).join('、') : ''
+      return `榜单已更新${parts ? `：${parts}` : ''}${j.result?.report_job_id ? '，风向标日报生成中' : ''}`
+    },
   })
   const toIdeas = (genre: string, g: Gender = gender) => nav(`/ideas?genre=${encodeURIComponent(genre)}&gender=${g}&from_trends=1`)
 
@@ -78,6 +93,10 @@ export default function RadarPage() {
 
       {job && <JobInline job={job} className="mb-5" />}
 
+      <Segmented className="mb-6" value={tab} onChange={setTab} options={[{ value: 'rank', label: '榜单' }, { value: 'report', label: <span className="inline-flex items-center gap-1.5"><Compass className="h-3.5 w-3.5" />风向标</span> }]} />
+
+      {tab === 'report' ? <TrendReportView /> : <>
+
       {isMock && cfg.data && !cfg.data.enabled && !latest.isLoading && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/25 bg-warning-soft px-4 py-3">
           <span className="text-[13.5px] font-medium text-warning">当前是示例数据，开启雷达后获取番茄真实阅读榜</span>
@@ -85,16 +104,20 @@ export default function RadarPage() {
         </div>
       )}
 
-      <div className="mb-6 flex items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center gap-2.5">
         <Segmented value={gender} onChange={(g) => { setGender(g); setCategory('') }} options={[{ value: 'male', label: '男频' }, { value: 'female', label: '女频' }]} />
+        <Segmented value={board} onChange={setBoard} options={(['read', 'new'] as RankBoard[]).map((b) => ({
+          value: b, label: <span className={cn(boards && boards.length && !boards.includes(b) && 'opacity-50')}>{BOARD_LABEL[b]}</span>,
+        }))} />
+        {boards && boards.length > 0 && !boards.includes(board) && <span className="text-[12.5px] text-muted-foreground">这份快照没有{BOARD_LABEL[board]}，刷新榜单后再看</span>}
       </div>
 
-      <TrendSection data={trends.data} loading={trends.isLoading} error={trends.error} onRetry={trends.refetch} onPick={(t) => toIdeas(t.category)} activeCat={category} onFilter={(c) => setCategory((x) => (x === c ? '' : c))} />
+      <TrendSection board={board} data={trends.data} loading={trends.isLoading} error={trends.error} onRetry={trends.refetch} onPick={(t) => toIdeas(t.category)} activeCat={category} onFilter={(c) => setCategory((x) => (x === c ? '' : c))} />
 
       <Card className="mt-6 overflow-hidden">
         <CardHeader
           divider
-          title={category || '全部题材'}
+          title={<span className="flex items-center gap-2">{category || '全部题材'}<Badge tone={board === 'new' ? 'primary' : 'neutral'}>{BOARD_LABEL[board]}</Badge></span>}
           action={<Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: <Rows3 className="h-3.5 w-3.5" /> }, { value: 'grid', label: <LayoutGrid className="h-3.5 w-3.5" /> }]} />}
         />
         <div className="flex flex-wrap gap-1.5 border-b px-5 py-3">
@@ -107,7 +130,7 @@ export default function RadarPage() {
         ) : latest.error ? (
           <ErrorState className="m-5" error={latest.error} onRetry={() => latest.refetch()} />
         ) : !shown.length ? (
-          <EmptyState className="m-5 border-0" kind="radar" title="还没有榜单数据" action={<Button variant="primary" loading={!!job} onClick={refresh}>刷新榜单</Button>} />
+          <EmptyState className="m-5 border-0" kind="radar" title={snap ? `这份快照里没有${BOARD_LABEL[board]}数据` : '还没有榜单数据'} action={<Button variant="primary" loading={!!job} onClick={refresh}>刷新榜单</Button>} />
         ) : view === 'table' ? (
           <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={setImitate} />
         ) : (
@@ -121,6 +144,7 @@ export default function RadarPage() {
           </div>
         )}
       </Card>
+      </>}
 
       <ImitatePanel item={imitate} onClose={() => setImitate(null)} />
     </div>
@@ -142,8 +166,8 @@ function Diff({ v }: { v?: number }) {
     : <span className="num inline-flex items-center gap-0.5 text-success"><ArrowDown className="h-3 w-3" strokeWidth={2.5} />{-v}</span>
 }
 
-function TrendSection({ data, loading, error, onRetry, onPick, onFilter, activeCat }: {
-  data?: TrendTopic[]; loading: boolean; error: unknown; onRetry: () => void; onPick: (t: TrendTopic) => void; onFilter: (c: string) => void; activeCat: string
+function TrendSection({ board, data, loading, error, onRetry, onPick, onFilter, activeCat }: {
+  board: RankBoard; data?: TrendTopic[]; loading: boolean; error: unknown; onRetry: () => void; onPick: (t: TrendTopic) => void; onFilter: (c: string) => void; activeCat: string
 }) {
   const top = (data ?? []).slice(0, 10)
   const max = Math.max(1, ...top.map((t) => t.heat))
@@ -151,7 +175,7 @@ function TrendSection({ data, loading, error, onRetry, onPick, onFilter, activeC
   const cur = top[Math.min(sel, top.length - 1)]
   return (
     <Card>
-      <CardHeader divider title="题材热度" />
+      <CardHeader divider title={`题材热度 · ${BOARD_LABEL[board]}`} />
       <div className="p-5">
         {loading ? (
           <div className="grid gap-6 md:grid-cols-[1fr_300px]"><Skeleton className="h-[340px]" /><Skeleton className="h-[340px]" /></div>
@@ -222,7 +246,7 @@ function RankTable({ items, byBoard, onIdea, onImitate }: { items: RankItem[]; b
             <tr key={`${i.category}-${i.book_id_ext}`} className="group h-[52px] border-b border-border/60 last:border-0 hover:bg-subtle/60">
               <td className="pl-5"><RankNo n={byBoard ? i.rank : k + 1} /></td>
               <td className="max-w-0 pr-4">
-                <Tip content={i.abstract || null}><span className="block truncate font-medium">{i.title}</span></Tip>
+                <Tip content={i.abstract || null}><span className="flex min-w-0 items-center gap-1.5"><span className="truncate font-medium">{i.title}</span><BoardTag board={i.board} /></span></Tip>
               </td>
               <td className="max-w-[120px] truncate pr-3 text-muted-foreground">{i.author}</td>
               <td><Badge>{i.category}</Badge></td>
@@ -259,7 +283,7 @@ function RankCard({ item: i, n, onIdea, onImitate }: { item: RankItem; n: number
       <div className="flex items-start gap-3">
         <RankNo n={n} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[14.5px] font-semibold">{i.title}</div>
+          <div className="flex min-w-0 items-center gap-1.5"><span className="truncate text-[14.5px] font-semibold">{i.title}</span><BoardTag board={i.board} /></div>
           <div className="mt-1 truncate text-[12.5px] text-muted-foreground">{i.author} · {i.category}</div>
         </div>
         <span className="text-[12px]"><Diff v={i.rank_diff} /></span>
@@ -274,4 +298,9 @@ function RankCard({ item: i, n, onIdea, onImitate }: { item: RankItem; n: number
       </div>
     </div>
   )
+}
+
+function BoardTag({ board }: { board?: RankBoard }) {
+  const b = board ?? 'read'
+  return <span className={cn('shrink-0 rounded px-1.5 py-px text-[10.5px] font-medium', b === 'new' ? 'bg-primary-soft text-primary' : 'bg-muted text-muted-foreground')}>{b === 'new' ? '新书' : '阅读'}</span>
 }

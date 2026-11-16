@@ -258,6 +258,26 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     },
   })
 
+  // v0.9：应用审稿补丁（同步）；先落盘本地修改，旧正文进历史可撤回
+  const applyPatches = useMutation({
+    mutationFn: async (indices: number[]) => {
+      if (!(await save())) throw new Error('本地修改还没保存成功，稍后再试')
+      return api.applyReviewPatches(id, indices)
+    },
+    meta: { errorTitle: '应用补丁失败' },
+    onSuccess: (r) => {
+      qc.setQueryData(qk.chapter(id), r.chapter); qc.invalidateQueries({ queryKey: qk.chapters(bookId) })
+      dirty.current = false; setContent(r.chapter.content ?? ''); setTitle(r.chapter.title); setSaveState('saved'); setFocusQuote(null)
+      const skipped = r.skipped.length ? `跳过 ${r.skipped.length} 处：${r.skipped.map((k) => `#${k.index + 1} ${k.reason}`).join('；')}` : undefined
+      if (!r.applied.length) { toast.info('没有应用任何补丁', { description: skipped ?? '原句在正文里找不到了' }); return }
+      toast.success(`已应用 ${r.applied.length} 处补丁`, {
+        description: skipped ?? '应用前的正文已存进历史',
+        action: { label: '撤回', onClick: () => undoMut.mutate() },
+        duration: 8000,
+      })
+    },
+  })
+
   const applyDiff = useMutation({
     mutationFn: (c: string) => api.saveChapter(id, { title: latest.current.title, content: c }),
     meta: { errorTitle: '应用修改失败' },
@@ -342,7 +362,9 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     <Tabs value={tab} onValueChange={setTab} className="flex h-full flex-col">
       <div className="border-b px-4 py-3"><TabsList className="w-full"><TabsTrigger value="review">审稿</TabsTrigger><TabsTrigger value="lint">人味</TabsTrigger><TabsTrigger value="changes">变更</TabsTrigger></TabsList></div>
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        <TabsContent value="review" className="focus:outline-none"><ReviewPanel review={ch.review} onQuote={locateQuote} onReview={runReview} reviewing={!!reviewJob} activeQuote={focusQuote?.q} /></TabsContent>
+        <TabsContent value="review" className="focus:outline-none"><ReviewPanel review={ch.review} onQuote={locateQuote} onReview={runReview} reviewing={!!reviewJob} activeQuote={focusQuote?.q}
+          onApplyPatches={(ix) => applyPatches.mutate(ix)} applyingPatches={applyPatches.isPending}
+          patchDisabled={hasVariants ? '先采纳一个版本' : busy ? '有任务在进行' : !!diff && '先处理对比稿'} /></TabsContent>
         <TabsContent value="lint" className="focus:outline-none">
           <LintPanel lint={lintForPanel} local={local} showBare={showBare} showSummary={showSummary} onToggleBare={setShowBare} onToggleSummary={setShowSummary}
             onHumanize={() => runRewrite('humanize')} onThicken={() => runRewrite('thicken')} busy={busy || hasVariants} thickening={!!thickenJob} humanizing={!!humanizeJob} />

@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.db import kv_get, session_scope
 from app.jobs.manager import JobContext
 from app.lint.humanlint import LintResult, count_words, lint_chapter, paragraphs, sentence_stats
+from app.lint.platform import get_profile, thresholds_for
 from app.llm.gateway import get_gateway
 from app.llm.mock import kit_for
 from app.models.tables import Book, Card, Chapter, Fact, Foreshadow, OutlineNode, utcnow
@@ -34,7 +35,7 @@ from app.services.scene_state import (
     STATE_SCHEMA_HINT, chapter_so_far, merge_state, parse_scene_state, prop_move_warnings, render_state, scene_budget_lines,
     scene_rules, split_scene_output,
 )
-from app.services.review import run_review
+from app.services.review import apply_patches, run_review
 from app.skills.loader import render, system_prompt
 
 WRITING_SETTINGS_KEY = "writing_settings"
@@ -71,7 +72,18 @@ def lint_for(s: Session, book_id: int, content: str, number: int, exclude_chapte
     cards = common.cards(s, book_id)
     names = [c.name for c in cards]
     cps = {c.name: common.voice_of(c)["catchphrases"] for c in cards if c.type == "character" and (c.data or {}).get("catchphrases")}
-    return lint_chapter(content, get_settings().lint, others, names, number, catchphrases=cps)
+    return lint_chapter(content, get_settings().lint, others, names, number, catchphrases=cps, platform=book_platform(s, book_id))
+
+
+def book_platform(s: Session, book_id: int) -> str:
+    """书的平台风格档（v0.9）：fanqie 默认 / qidian / generic。"""
+    b = s.get(Book, book_id)
+    ps = getattr(b, "platform_style", None) if b else None
+    return ps if ps in ("fanqie", "qidian", "generic") else "fanqie"
+
+
+def book_thresholds(s: Session, book_id: int) -> Any:
+    return thresholds_for(get_settings().lint, book_platform(s, book_id))
 
 
 # ------------------------------------------------------------------ 场景节拍
@@ -272,7 +284,7 @@ def patch_rewrite(content: str, review: dict[str, Any] | None, lint: LintResult,
     if not problems:
         return content, 0
     raw = get_gateway().chat_json(
-        "humanize", system_prompt("humanize"),
+        "humanize", system_prompt("humanize", platform=meta.get("platform")),
         render("humanize", problems="\n".join(problems), content=content),
         meta={**meta, "content": content, "fix_quotes": [t["quote"] for t in lint.fix_targets[:20]]}, temperature=0.5,
     )
@@ -288,14 +300,14 @@ def patch_rewrite(content: str, review: dict[str, Any] | None, lint: LintResult,
     return content, applied
 
 
-def thicken_targets(content: str, lint: LintResult, max_n: int) -> list[dict[str, Any]]:
+def thicken_targets(content: str, lint: LintResult, max_n: int, merge_short: bool = True) -> list[dict[str, Any]]:
     paras = paragraphs(content)
     targets: dict[int, str] = {}
     for i in lint.bare_paragraphs:
         targets.setdefault(i, "裸对白：对白前后缺少动作、神态或环境")
     for i in lint.summary_paragraphs:
         targets.setdefault(i, "概述式叙述：一句话带过，需要写成可见的场面")
-    for i, p in enumerate(paras):
+    for i, p in enumerate(paras if merge_short else []):  # 番茄档：短句推进是常态，不合并
         st = sentence_stats(p)
         if st["count"] >= 3 and st["short_ratio"] >= 0.6:
             targets.setdefault(i, "短句碎段：连续动作拆得太碎，合并成长短交替的句子")
@@ -309,7 +321,8 @@ _QUOTE_RX = re.compile(r"“[^”]*”")
 def thicken(content: str, lint: LintResult, pack_voices: dict[str, dict[str, Any]], all_names: list[str], meta: dict[str, Any]) -> tuple[str, int, int]:
     """描写增厚：程序定位段落 → 只把这些段落交给 LLM → 校验后回贴。返回（新正文, 定位数, 应用数）。"""
     th = get_settings().lint
-    targets = thicken_targets(content, lint, th.thicken_max_paragraphs)
+    prof = get_profile(meta.get("platform"))
+    targets = thicken_targets(content, lint, th.thicken_max_paragraphs, prof.merge_short_sentences)
     if not targets:
         return content, 0, 0
     paras = paragraphs(content)
@@ -326,7 +339,7 @@ def thicken(content: str, lint: LintResult, pack_voices: dict[str, dict[str, Any
         for n, v in pack_voices.items()
     ) or "（未设定）"
     raw = get_gateway().chat_json(
-        "thicken", system_prompt("thicken"),
+        "thicken", system_prompt("thicken", platform=meta.get("platform")),
         render("thicken", voices=voices, targets="\n".join(f"{t['index']}: {t['problem']} | {t['text']}" for t in targets),
                context="\n".join(dict.fromkeys(around)) or "无"),
         meta={**meta, "targets": targets, "voices": pack_voices}, temperature=0.7,
@@ -385,7 +398,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
         number, plan = node.order, node_plan_text(node)
         beats = dict(node.beats or {})
         meta = {**common.kit_meta(s, book), "number": number, "beats": beats, "title": book.title,
-                "pronoun": common.pronoun(book), "words": book.chapter_words}
+                "pronoun": common.pronoun(book), "words": book.chapter_words, "platform": book_platform(s, book_id)}
         pool = _sensory_pool(s, book)
         plan_ctx = scene_plan_context(s, book, node)
 
@@ -466,6 +479,10 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
     refine = refine_chapter(chapter_id, pack, meta, plan)
     result.update(refine)
 
+    # 4.5) v0.9：最后一轮审稿仍有 mid/high 问题且带补丁 → 按原文逐字匹配逐个应用，重跑 lint，记进章节
+    ctx.progress(88, f"第{number}章：应用审稿补丁")
+    result["review_patches"] = auto_apply_review_patches(chapter_id)
+
     # 5) 提交
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
@@ -481,6 +498,79 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None) -> di
     return result
 
 
+AUTO_PATCH_SEVERITIES = ("high", "mid")
+
+
+def _record_patches(ch: Chapter, applied: list[dict[str, Any]], skipped: list[dict[str, Any]], label: str) -> None:
+    """把这次应用的补丁记进 review（patches[i].applied、patch_log）和变更声明的 warnings（提交后仍保留）。"""
+    rv = dict(ch.review or {})
+    pats = [dict(p) for p in rv.get("patches") or []]
+    for a in applied:
+        if 0 <= a["index"] < len(pats):
+            pats[a["index"]]["applied"] = True
+    rv["patches"] = pats
+    rv["patch_log"] = [*(rv.get("patch_log") or []), {"label": label, "at": utcnow().isoformat(),
+                                                      "applied": [a["index"] for a in applied], "skipped": skipped}][-10:]
+    ch.review = rv
+    if applied:
+        chg = dict(ch.changes or {})
+        brief = "；".join(f"「{a['original'][:16]}」→「{a['improved'][:16]}」" for a in applied[:5])
+        chg["warnings"] = [*(chg.get("warnings") or []), f"{label}：应用审稿补丁 {len(applied)} 处（{brief}）"
+                           + (f"，跳过 {len(skipped)} 处" if skipped else "")]
+        ch.changes = chg
+
+
+def auto_apply_review_patches(chapter_id: int) -> dict[str, Any]:
+    """写作流程里的自动修：只应用对应 mid/high 问题的补丁。返回 {applied:[index], skipped:[{index,reason}]}。
+    不重新审稿（passed 仍按审稿结果），作者可以再点一次审稿确认。"""
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        assert ch is not None
+        rv = ch.review or {}
+        issues = rv.get("issues") or []
+        pats = rv.get("patches") or []
+        if not pats or not any(i.get("severity") in AUTO_PATCH_SEVERITIES for i in issues):
+            return {"applied": [], "skipped": []}
+        want = [p["index"] for p in pats if not p.get("applied") and p.get("issue_ref") is not None
+                and 0 <= int(p["issue_ref"]) < len(issues) and issues[int(p["issue_ref"])].get("severity") in AUTO_PATCH_SEVERITIES]
+        if not want:
+            return {"applied": [], "skipped": []}
+        new, applied, skipped = apply_patches(ch.content, pats, want)
+        if applied:
+            push_history(ch, "审稿补丁前")
+            ch.content, ch.words = new, count_words(new)
+            ch.lint = lint_for(s, ch.book_id, new, ch.number, ch.id).to_dict()
+        _record_patches(ch, applied, skipped, "自动修")
+        ch.updated_at = utcnow()
+        s.add(ch)
+        s.commit()
+    return {"applied": [a["index"] for a in applied], "skipped": skipped}
+
+
+def apply_review_patches(chapter_id: int, indices: list[int]) -> tuple[Chapter, list[dict[str, Any]], list[dict[str, Any]]]:
+    """作者勾选应用审稿补丁（POST /chapters/{id}/review/patches/apply）。旧正文进历史可撤回，应用后重跑 lint。"""
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        if ch is None:
+            raise NotFound("章节不存在")
+        pats = (ch.review or {}).get("patches") or []
+        if not pats:
+            raise Conflict("这一章的审稿没有补丁，先重新审稿")
+        if not ch.content.strip():
+            raise Conflict("章节正文为空；多版本章节请先 adopt 一个版本")
+        new, applied, skipped = apply_patches(ch.content, pats, indices)
+        if applied:
+            push_history(ch, "应用审稿补丁前")
+            ch.content, ch.words = new, count_words(new)
+            ch.lint = lint_for(s, ch.book_id, new, ch.number, ch.id).to_dict()
+        _record_patches(ch, applied, skipped, "作者应用")
+        ch.updated_at = utcnow()
+        s.add(ch)
+        s.commit()
+        s.refresh(ch)
+        return ch, applied, skipped
+
+
 def _apply_variant(ch: Chapter, v: dict[str, Any]) -> None:
     ch.content = v["content"]
     ch.words = count_words(v["content"])
@@ -494,12 +584,12 @@ def _apply_variant(ch: Chapter, v: dict[str, Any]) -> None:
 
 
 def refine_chapter(chapter_id: int, pack: ContextPack, meta: dict[str, Any], plan: str) -> dict[str, Any]:
-    th = get_settings().lint
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
         assert ch is not None
         content, review, number, book_id = ch.content, ch.review or {}, ch.number, ch.book_id
         lint = lint_for(s, book_id, content, number, chapter_id)
+        th = book_thresholds(s, book_id)
     has_high = any(i.get("severity") == "high" for i in review.get("issues", []))
     info: dict[str, Any] = {"rewrite_round": 0, "patches": 0, "thickened": 0}
     if not (has_high or lint.over_threshold(th)):
@@ -678,7 +768,7 @@ def _pack_for_chapter(s: Session, ch: Chapter) -> tuple[ContextPack, dict[str, A
         node = OutlineNode(book_id=ch.book_id, level="chapter", order=ch.number, title=ch.title, beats={"characters": []})
     pack = build_context_pack(s, book, node)
     meta = {**common.kit_meta(s, book), "number": ch.number, "beats": node.beats or {}, "voices": pack.voices,
-            "pronoun": common.pronoun(book)}
+            "pronoun": common.pronoun(book), "platform": book_platform(s, ch.book_id)}
     return pack, meta, node_plan_text(node)
 
 
@@ -836,7 +926,8 @@ def rewrite_chapter_job(chapter_id: int, instruction: str, route: str | None, sc
                   text=text, instruction=instruction.strip())
     ctx.progress(20, "按要求改写" + ("选中的文字" if scope == "selection" else "全章"))
     out = get_gateway().chat(
-        "chapter_rewrite", [{"role": "system", "content": system_prompt("chapter_rewrite")}, {"role": "user", "content": user}],
+        "chapter_rewrite", [{"role": "system", "content": system_prompt("chapter_rewrite", platform=meta.get("platform"))},
+                            {"role": "user", "content": user}],
         meta={**meta, "text": text, "instruction": instruction, "scope": scope}, temperature=0.8, route=route,
     )
     new = _clean_rewrite(out)

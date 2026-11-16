@@ -274,7 +274,7 @@ def _proposal_result(c: ToolCtx, p: Any, extra: dict[str, Any] | None = None) ->
     if p.error:
         data["error"] = p.error
     if p.needs_review:
-        data["note"] = "有设定冲突，需要作者逐条审阅后才写入"
+        data["note"] = "需要作者选定一组后才写入" if p.kind == "book_test" else "有设定冲突，需要作者逐条审阅后才写入"
     if p.destructive:
         data["note"] = "删除类操作，必须作者确认"
     jobs = [p.job_id] if p.job_id else []
@@ -512,6 +512,22 @@ def t_imitate_rank_book(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
                                    "ideas": [{"title": x["title"], "logline": x["logline"], "warnings": x["source"]["warnings"]} for x in ideas]})
 
 
+def t_book_test(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
+    """v0.9 书测：出 A–D 四组包装（书名、副标题、钩子、封面提示词），存到书上并产出提案；
+    作者采纳时选一组（edited.index），书名/一句话简介走作品信息版本栈。"""
+    from app.services import book_test
+
+    r = book_test.generate(c.book_id, _SubCtx(c, "书测"))
+    vs = r["variants"]
+    p = props.create(c.book_id, c.session_id, "book_test", f"书测：{len(vs)} 组书名包装",
+                     "；".join(f"{v['style']}《{v['title']}》" for v in vs)[:400],
+                     {"variants": vs, "default_index": 0, "warnings": r["warnings"],
+                      "note": "采纳时用 edited={index, fields} 选一组；默认第 0 组，只写书名和副标题"},
+                     needs_review=True)
+    return _proposal_result(c, p, {"variants": [{"index": i, "style": v["style"], "title": v["title"], "subtitle": v["subtitle"]}
+                                                for i, v in enumerate(vs)]})
+
+
 # ================================================================== 注册表
 
 TOOLS: list[Tool] = [
@@ -565,6 +581,10 @@ TOOLS: list[Tool] = [
          "拆解一本热榜书（只用书名/简介/标签/热度，只学结构：爽点公式、金手指兑现、人设模板、可迁移要素、必须换掉的元素），"
          "再出 3 个换皮选题（带相似点自检），产出提案；采纳后存进选题库，不改当前这本书。用 rank_item_id 或书名指定。",
          {"rank_item_id": I, "title": {**S, "description": "榜单书名（在最新榜单里查找）"}}, [], t_imitate_rank_book),
+    Tool("book_test", "书测", "write",
+         "给本书出 4 组风格不同的书名包装（A 番茄情绪爽感 / B 悬疑规则脑洞 / C 轻松沙雕 / D 起点正剧），"
+         "每组有书名、≤20 字副标题、钩子、3:4 封面提示词，存到书上并产出提案；作者选定一组才会改书名和一句话简介。",
+         {}, [], t_book_test),
 ]
 BY_NAME = {t.name: t for t in TOOLS}
 

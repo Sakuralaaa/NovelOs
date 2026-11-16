@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertTriangle, ArrowRight, Check, CheckCircle2, Feather, FileText, ImagePlus, Layers, ListTree, LayoutDashboard, Loader2, Package as PackageIcon,
-  PenLine, Pencil, RotateCcw, Trash2, Undo2, Waypoints, X, XCircle,
+  PenLine, Pencil, RotateCcw, Trash2, Undo2, Waypoints, X, XCircle, Flask,
 } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,16 +14,17 @@ import { Textarea } from '@/components/ui/input'
 import { CompareRow, TropeAlert } from '@/components/common/AiAsk'
 import { ConflictReview } from '@/components/common/ConflictReview'
 import { DiffView } from '@/components/chapter/DiffView'
+import { BT_FIELDS, FieldPicker, splitStyle } from '@/components/common/BookTest'
 import * as D from '@radix-ui/react-dialog'
 import { api, qk } from '@/lib/api'
 import { useJobs } from '@/lib/jobs'
-import type { AgentJobState, AgentProposal, BibleOp, BibleProposal } from '@/lib/types'
+import type { AgentJobState, AgentProposal, BibleOp, BibleProposal, BookTestField, BookTestVariant } from '@/lib/types'
 import { cardTypeLabel, cn } from '@/lib/utils'
 
 const KIND_ICON: Record<string, typeof Layers> = {
   book_info: LayoutDashboard, bible: Layers, card_delete: Layers, outline_nodes: ListTree, chapter_rewrite: FileText,
   foreshadow_add: Waypoints, foreshadow_update: Waypoints, foreshadow_delete: Waypoints, package: PackageIcon, covers: ImagePlus, write_chapter: PenLine,
-  reskin_ideas: Feather,
+  reskin_ideas: Feather, book_test: Flask,
 }
 const STATUS: Record<AgentProposal['status'], { label: string; tone: 'neutral' | 'primary' | 'success' | 'warning' | 'danger' }> = {
   pending: { label: '待采纳', tone: 'primary' }, applied: { label: '已采纳', tone: 'success' }, rejected: { label: '已拒绝', tone: 'neutral' },
@@ -43,7 +44,7 @@ function linkFor(p: AgentProposal): { to: string; label: string } | null {
     case 'chapter_rewrite': return { to: `${b}/chapters/${p.payload.chapter_id}`, label: '去看这一章' }
     case 'write_chapter': return p.result?.chapter_id ? { to: `${b}/chapters/${p.result.chapter_id}`, label: '去看新章节' } : { to: `${b}/chapters`, label: '去章节' }
     case 'foreshadow_add': case 'foreshadow_update': case 'foreshadow_delete': return { to: `${b}/foreshadows`, label: '去伏笔' }
-    case 'package': case 'covers': return { to: `${b}/package`, label: '去包装发布' }
+    case 'package': case 'covers': case 'book_test': return { to: `${b}/package`, label: '去包装发布' }
     case 'reskin_ideas': return { to: '/ideas', label: '去选题库' }
   }
   return null
@@ -86,6 +87,9 @@ export function ProposalCard({ p, job, compact }: { p: AgentProposal; job?: Agen
     return draft
   }
   const onApply = () => {
+    if (p.kind === 'book_test') {
+      return apply.mutate({ edited: { index: draft.index ?? p.payload.default_index ?? 0, fields: draft.fields ?? ['title', 'subtitle'] } })
+    }
     if (p.kind === 'bible' && (p.needs_review || p.payload.removals?.length)) return setReview(true)
     if (p.destructive && !confirmDel) return setConfirmDel(true)
     apply.mutate(editing ? { edited: editedPayload() } : undefined)
@@ -109,14 +113,16 @@ export function ProposalCard({ p, job, compact }: { p: AgentProposal; job?: Agen
             <Badge tone={st.tone} dot>{st.label}{p.auto_applied && p.status !== 'pending' ? '（自动）' : ''}</Badge>
             <Badge tone="outline">{p.kind_label}</Badge>
             {p.destructive && <Badge tone="danger">删除 · 需确认</Badge>}
-            {p.needs_review && p.status === 'pending' && <Badge tone="warning">有冲突 · 需审阅</Badge>}
+            {p.needs_review && p.status === 'pending' && <Badge tone="warning">{p.kind === 'book_test' ? '需你选一组' : '有冲突 · 需审阅'}</Badge>}
           </div>
         </div>
       </div>
 
       <div className="space-y-2.5 px-3.5 py-3 text-[13px]">
         {p.summary && <p className="leading-relaxed text-foreground/75">{p.summary}</p>}
-        {!compact && <Preview p={p} editing={editing && p.status === 'pending'} draft={draft} setDraft={setDraft} />}
+        {p.kind === 'book_test'
+          ? <BookTestPreview p={p} draft={draft} setDraft={setDraft} compact={compact} />
+          : !compact && <Preview p={p} editing={editing && p.status === 'pending'} draft={draft} setDraft={setDraft} />}
         {p.status === 'running' && (
           <div className="rounded-lg bg-primary-soft/60 px-3 py-2">
             <div className="mb-1.5 flex items-center justify-between text-[12.5px] text-primary">
@@ -139,9 +145,9 @@ export function ProposalCard({ p, job, compact }: { p: AgentProposal; job?: Agen
       <div className="flex flex-wrap items-center gap-1.5 border-t bg-subtle/50 px-3 py-2">
         {(p.status === 'pending' || p.status === 'failed') && !confirmDel && (
           <>
-            <Button size="xs" variant={p.destructive ? 'danger' : 'primary'} loading={apply.isPending} disabled={busy} onClick={onApply}
+            <Button size="xs" variant={p.destructive ? 'danger' : 'primary'} loading={apply.isPending} disabled={busy || (p.kind === 'book_test' && Array.isArray(draft.fields) && !draft.fields.length)} onClick={onApply}
               icon={p.kind === 'bible' && (p.needs_review || p.payload.removals?.length) ? <AlertTriangle className="h-3 w-3" /> : <Check className="h-3 w-3" />}>
-              {p.kind === 'bible' && (p.needs_review || p.payload.removals?.length) ? '冲突审阅' : p.destructive ? '确认删除' : editing ? '按我改的采纳' : '采纳'}
+              {p.kind === 'bible' && (p.needs_review || p.payload.removals?.length) ? '冲突审阅' : p.destructive ? '确认删除' : p.kind === 'book_test' ? `采纳方案 ${bookTestLetter(p, draft)}` : editing ? '按我改的采纳' : '采纳'}
             </Button>
             {EDITABLE.has(p.kind) && !editing && (
               p.kind === 'chapter_rewrite'
@@ -368,6 +374,56 @@ function ReskinPreview({ p }: { p: AgentProposal }) {
         })}
       </ol>
       {p.status === 'pending' && <p className="text-[12px] text-muted-foreground">采纳后存进选题库（不改当前这本书）；撤回会删掉还没建书的那几个。</p>}
+    </div>
+  )
+}
+
+function bookTestLetter(p: AgentProposal, draft: Record<string, any>) {
+  const i = draft.index ?? p.payload.default_index ?? 0
+  const v = (p.payload.variants as BookTestVariant[] | undefined)?.[i]
+  return v ? splitStyle(v.style).letter || String(i + 1) : String(i + 1)
+}
+
+/** v0.9 书测方案：needs_review，作者选一组、勾选写入哪些字段后采纳（可撤回） */
+function BookTestPreview({ p, draft, setDraft, compact }: { p: AgentProposal; draft: Record<string, any>; setDraft: (d: Record<string, any>) => void; compact?: boolean }) {
+  const vs = (p.payload.variants as BookTestVariant[] | undefined) ?? []
+  const pending = p.status === 'pending' || p.status === 'failed'
+  const adoptedIdx: number | undefined = p.status === 'applied' ? p.result?.index : undefined
+  const sel: number = pending ? (draft.index ?? p.payload.default_index ?? 0) : adoptedIdx ?? -1
+  const fields: BookTestField[] = draft.fields ?? ['title', 'subtitle']
+  const applied: string[] = (p.result?.applied as string[] | undefined) ?? []
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-1.5">
+        {vs.map((v, i) => {
+          const st = splitStyle(v.style)
+          const on = sel === i
+          return (
+            <button key={i} type="button" disabled={!pending} onClick={() => setDraft({ ...draft, index: i })}
+              className={cn('flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left transition hairline', on ? 'bg-primary-soft/60 ring-1 ring-primary/40' : pending ? 'hover:bg-subtle' : 'opacity-70')}>
+              <span className={cn('mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[11px] font-semibold', on ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>{st.letter || i + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[11.5px] text-muted-foreground">{st.name}</span>
+                <span className="block break-words text-[13px] font-semibold">《{v.title}》</span>
+                {v.subtitle && <span className="block text-[12px] text-foreground/75">{v.subtitle}</span>}
+                {!compact && on && v.hook && <span className="mt-1 block text-[12px] leading-relaxed text-foreground/70">{v.hook}</span>}
+              </span>
+              {!pending && on && <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+            </button>
+          )
+        })}
+      </div>
+      {pending ? (
+        <div className="space-y-1">
+          <div className="text-[12px] text-muted-foreground">写入哪些</div>
+          <FieldPicker value={fields} onChange={(f) => setDraft({ ...draft, fields: f })} />
+        </div>
+      ) : applied.length > 0 && (
+        <p className="text-[12px] text-success">已写入：{applied.map((k) => BT_FIELDS.find((f) => f.key === k)?.label ?? k).join('、')}</p>
+      )}
+      {!!(p.payload.warnings as string[] | undefined)?.length && (
+        <ul className="space-y-1">{(p.payload.warnings as string[]).map((w, i) => <li key={i} className="flex gap-1.5 text-[12px] text-warning"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{w}</li>)}</ul>
+      )}
     </div>
   )
 }

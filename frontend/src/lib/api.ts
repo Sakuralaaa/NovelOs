@@ -2,7 +2,8 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
-  OutlineNode, Package, RadarConfig, RadarSnapshot, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
+  OutlineNode, Package, RadarConfig, RadarSnapshot, RankBoard, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
+  BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -89,9 +90,14 @@ export const api = {
 
   radarRefresh: () => post<Job>('/radar/refresh'),
   radarSnapshots: () => get<RadarSnapshot[]>('/radar/snapshots'),
-  radarLatest: (p: { gender?: Gender; category?: string }) =>
-    get<{ snapshot: RadarSnapshot | null; items: RankItem[] }>(`/radar/latest${qs(p)}`),
-  radarTrends: (gender?: Gender) => get<TrendTopic[]>(`/radar/trends${qs({ gender })}`),
+  radarLatest: (p: { gender?: Gender; category?: string; board?: RankBoard }) =>
+    get<{ snapshot: RadarSnapshot | null; items: RankItem[]; boards?: RankBoard[] }>(`/radar/latest${qs(p)}`),
+  /** board 不传时两类榜合并统计 */
+  radarTrends: (gender?: Gender, board?: RankBoard) => get<TrendTopic[]>(`/radar/trends${qs({ gender, board })}`),
+  // v0.9：风向标日报（生成走 Job，kind=radar_report）
+  radarReport: (scope = 'overall') => get<TrendReport>(`/radar/report${qs({ scope })}`),
+  radarReports: (p: { limit?: number; scope?: string; full?: boolean } = {}) => get<TrendReport[]>(`/radar/reports${qs(p)}`),
+  generateRadarReport: (b: { scope?: string; top_n?: number } = {}) => post<Job & { job_id?: number }>('/radar/report', b),
   radarConfig: () => get<RadarConfig>('/radar/config'),
   saveRadarConfig: (b: RadarConfig) => put<RadarConfig>('/radar/config', b),
   // v0.7：榜单仿写（同步接口）
@@ -105,7 +111,7 @@ export const api = {
 
   books: () => get<Book[]>('/books'),
   book: (id: number) => get<Book>(`/books/${id}`),
-  createBook: (b: { title?: string; genre: string; gender: Gender; premise?: string }) => post<Book>('/books', b),
+  createBook: (b: { title?: string; genre: string; gender: Gender; premise?: string; platform_style?: PlatformStyle }) => post<Book>('/books', b),
   updateBook: (id: number, b: Partial<Book>) => patch<Book>(`/books/${id}`, b),
   deleteBook: (id: number) => del<void>(`/books/${id}`),
 
@@ -145,6 +151,9 @@ export const api = {
   humanizeChapter: (id: number) => post<Job>(`/chapters/${id}/humanize`),
   thickenChapter: (id: number) => post<Job>(`/chapters/${id}/thicken`),
   adoptVariant: (id: number, variantId: number) => post<Chapter>(`/chapters/${id}/adopt-variant`, { variant_id: variantId }),
+  /** v0.9：按下标应用审稿补丁（同步，不调模型；旧正文进历史可 undo） */
+  applyReviewPatches: (id: number, indices: number[]) =>
+    post<{ chapter: Chapter; applied: { index: number; original: string; improved: string }[]; skipped: { index: number; reason: string }[] }>(`/chapters/${id}/review/patches/apply`, { indices }),
   /** v0.7.1 起是任务接口（要调模型生成摘要），result = { chapter_id, number, chapter } */
   commitChapter: (id: number) => post<Job>(`/chapters/${id}/commit`),
 
@@ -179,6 +188,12 @@ export const api = {
   detropeIdea: (id: number, b: { route?: string | null }) => post<Job>(`/ideas/${id}/detrope`, b),
   tropes: () => get<{ banned: Trope[]; defaults: Trope[] }>('/settings/tropes'),
   saveTropes: (banned: Trope[]) => put<{ banned: Trope[]; defaults: Trope[] }>('/settings/tropes', { banned }),
+
+  // v0.9：书测（生成走 Job，kind=book_test）
+  bookTest: (bookId: number) => get<BookTest>(`/books/${bookId}/book-test`),
+  generateBookTest: (bookId: number) => post<Job>(`/books/${bookId}/book-test`),
+  adoptBookTest: (bookId: number, b: { index: number; fields?: BookTestField[] }) =>
+    post<{ book: Book; package: Package; adopted: { index: number; variant: BookTestVariant; applied: BookTestField[]; before: Record<string, any>; after: Record<string, any> } }>(`/books/${bookId}/book-test/adopt`, b),
 
   generatePackage: (bookId: number) => post<Job>(`/books/${bookId}/package/generate`),
   reviseCoverPrompt: (bookId: number, b: { instruction: string; current?: string; route?: string | null }) => post<Job>(`/books/${bookId}/covers/prompt`, b),
@@ -241,8 +256,11 @@ export const qk = {
   writing: ['writing-settings'] as const,
   jobs: (bookId?: number) => ['jobs', bookId ?? 'all'] as const,
   job: (id: number) => ['job', id] as const,
-  radarLatest: (gender?: string, category?: string) => ['radar', 'latest', gender ?? '', category ?? ''] as const,
-  radarTrends: (gender?: string) => ['radar', 'trends', gender ?? ''] as const,
+  radarLatest: (gender?: string, category?: string, board?: string) => ['radar', 'latest', gender ?? '', category ?? '', board ?? ''] as const,
+  radarTrends: (gender?: string, board?: string) => ['radar', 'trends', gender ?? '', board ?? ''] as const,
+  radarReport: (scope: string) => ['radar', 'report', scope] as const,
+  radarReports: ['radar', 'reports'] as const,
+  bookTest: (bookId: number) => ['book-test', bookId] as const,
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
   teardown: (itemId: number) => ['radar', 'teardown', itemId] as const,

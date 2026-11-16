@@ -1,7 +1,7 @@
 ---
 stage: review
 title: 证据式审稿规则
-version: 0.6
+version: 0.9
 sources:
   - wfcz10086（evidence-based review）| Apache-2.0 | idea-only
   - lingfengQAQ/webnovel-writer | GPL-3.0 | idea-only
@@ -11,6 +11,7 @@ sources:
   - Tomsawyerhu/Chinese-WebNovel-Skill | 无协议 | idea-only
   - XuanRanL/webnovelwriter（六维审查：爽点/一致性/节奏/OOC/连贯/追读力）| GPL-3.0 | idea-only
   - maliangwriter.com 黄金三章检查（章尾四种断法：决定/发现/误判/代价）| 文章 | idea-only
+  - novel_ai_engine prompts_reconstructed/03（审稿直接给可应用的原文→改文补丁；战力数值、主角智商、水文、章尾钩子四重过滤）| 用户授权参考 | adapted
 ---
 # 证据式审稿规则
 
@@ -34,3 +35,8 @@ sources:
 13. semantics：意思写反（贬低却写“没有上限”）、称呼与关系不符（自称补录的人张口叫“师父”）、量词搭配错误（一柄铁砣）→ mid/low。
 14. 节奏补充：前三段只有氛围没有冲突 → hook/mid（第 1–3 章 high）；第 1 章金手指/卖点没有露面 → payoff/mid；群众反应镜头超过 3 个、章末连抛三个钩子 → pacing/mid；主角全程没有内心 → character/low。
 
+
+## v0.9 补丁（patches）
+15. 审稿除了指出问题，还要给能直接替换的补丁：original 是正文里逐字存在的连续片段，improved 是改好的文字。程序只按逐字匹配应用，匹配不到就跳过。
+16. 补丁只修问题本身：删掉拖沓的那几句、把降智的那句台词改聪明、把章末总结句换成卡点。不改情节结果、数值、对话结果，不新增人物和设定。
+17. 额外留意四件事：战力和数值是否吃设定（越级没有代价、数值前后对不上）→ coherence/mid；主角无意义地受气或放走必杀的对手 → character/mid；中段大段没有推动的心理独白或背景介绍 → pacing/mid；最后一句没有追读欲 → hook/mid。

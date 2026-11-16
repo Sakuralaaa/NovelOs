@@ -15,7 +15,7 @@ import { AskBox, CompareRow, TropeAlert, useModelRoute } from '@/components/comm
 import { ConflictReview } from '@/components/common/ConflictReview'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Progress, Skeleton, Stat } from '@/components/ui/misc'
-import { BookCover, StageBadge } from '@/components/common/BookBits'
+import { BookCover, PlatformStyleField, StageBadge } from '@/components/common/BookBits'
 import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { BatchWriteButton, WriteNextButton } from '@/components/common/WriteActions'
@@ -24,8 +24,8 @@ import { useBook, useJobsList } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { Book, BookInfo, BookRevision, BookStatus, Impact, SyncResult } from '@/lib/types'
-import { STAGES, cn, fmtNum, fmtTime, jobLabel, stageIndex } from '@/lib/utils'
+import type { Book, BookInfo, BookRevision, BookStatus, Impact, PlatformStyle, SyncResult } from '@/lib/types'
+import { STAGES, cn, fmtNum, fmtTime, jobLabel, platformLabel, stageIndex } from '@/lib/utils'
 
 const ICONS = [Lightbulb, Layers, ListTree, PenLine, Package, BookOpenCheck]
 
@@ -54,7 +54,7 @@ export default function BookOverview() {
             <h1 className="break-words text-[26px] font-semibold tracking-tight">{book.title}</h1>
             <StageBadge status={book.status} />
           </div>
-          <div className="mt-1 text-[13px] text-muted-foreground">{book.genre} · {book.gender === 'male' ? '男频' : '女频'} · 创建于 {fmtTime(book.created_at)}</div>
+          <div className="mt-1 text-[13px] text-muted-foreground">{book.genre} · {book.gender === 'male' ? '男频' : '女频'} · {platformLabel(book.platform_style)}风格 · 创建于 {fmtTime(book.created_at)}</div>
           {book.tagline && <p className="mt-3 max-w-2xl break-words text-[14px] leading-relaxed text-foreground/85">{book.tagline}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(true)}>编辑信息</Button>
@@ -203,7 +203,7 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
 
 function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolean; onOpenChange: (o: boolean) => void }) {
   const init = () => ({ title: book.title, tagline: book.tagline, premise: book.premise ?? '', target_words: book.target_words, chapter_words: book.chapter_words,
-    tropes: (book.banned_tropes ?? []).map((t) => t.name) })
+    tropes: (book.banned_tropes ?? []).map((t) => t.name), platform_style: (book.platform_style ?? 'fanqie') as PlatformStyle })
   const [f, setF] = useState(init)
   const [aiOpen, setAiOpen] = useState(false)
   useEffect(() => { if (open) setF(init()) }, [open, book]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -212,6 +212,7 @@ function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolea
   const m = useMutation({
     mutationFn: () => api.updateBook(book.id, {
       title: f.title, tagline: f.tagline, premise: f.premise, target_words: f.target_words, chapter_words: f.chapter_words,
+      platform_style: f.platform_style,
       banned_tropes: f.tropes.map((t) => (book.banned_tropes ?? []).find((x) => x.name === t) ?? { name: t, keywords: [t] }),
     }),
     meta: { errorTitle: '保存失败' },
@@ -242,6 +243,7 @@ function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolea
               <Field label="目标总字数"><Input type="number" step={10000} value={f.target_words} onChange={(e) => setF({ ...f, target_words: Number(e.target.value) })} /></Field>
               <Field label="每章字数"><Input type="number" step={100} value={f.chapter_words} onChange={(e) => setF({ ...f, chapter_words: Number(e.target.value) })} /></Field>
             </div>
+            <PlatformStyleField value={f.platform_style} onChange={(v) => setF({ ...f, platform_style: v })} />
             <Field label="本书额外禁用的套路" hint="全局列表在「设置」里改"><TagInput value={f.tropes} onChange={(v) => setF({ ...f, tropes: v })} placeholder="例如：赘婿、系统签到（回车添加，生成时避开，命中会标黄）" /></Field>
           </div>
         </DialogContent>

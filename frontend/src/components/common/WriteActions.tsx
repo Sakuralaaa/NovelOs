@@ -24,7 +24,12 @@ export function WriteNextButton({ bookId, size = 'md', className, navigateOnDone
     start(api.writeNext(bookId, variants), {
       key: `write-next:${bookId}`,
       label: variants > 1 ? `写下一章（${variants} 个版本）` : '写下一章',
-      successMsg: variants > 1 ? `新章节已生成 ${variants} 个版本，挑一个吧` : '新章节已写好并通过审稿',
+      successMsg: (j) => {
+        if (variants > 1) return `新章节已生成 ${variants} 个版本，挑一个吧`
+        const rp = j.result?.review_patches as { applied?: number[]; skipped?: unknown[] } | undefined
+        const a = rp?.applied?.length ?? 0, k = rp?.skipped?.length ?? 0
+        return `新章节已写好${a || k ? `，自动应用审稿补丁 ${a} 处${k ? `、跳过 ${k} 处` : ''}` : ''}`
+      },
       onSuccess: (j) => { if (navigateOnDone && j.result?.chapter_id) nav(`/books/${bookId}/chapters/${j.result.chapter_id}`) },
     })
   return (

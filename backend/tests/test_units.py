@@ -127,7 +127,7 @@ def test_radar_enabled_failure_falls_back_to_mock(client: TestClient, monkeypatc
 
     monkeypatch.setattr(fanqie, "fetch_rank_lists", boom)
     monkeypatch.setattr(fanqie_web, "fetch_rank_lists", boom)
-    assert client.put("/api/radar/config", json={"enabled": True, "daily_hour": 9}).json() == {"enabled": True, "daily_hour": 9}
+    assert client.put("/api/radar/config", json={"enabled": True, "daily_hour": 9}).json() == {"enabled": True, "daily_hour": 9, "auto_report": False}
     j = wait_job(client, client.post("/api/radar/refresh").json())
     assert j["result"]["source"] == "mock" and "回退" in j["result"]["note"]
     client.put("/api/radar/config", json={"enabled": False, "daily_hour": 8})

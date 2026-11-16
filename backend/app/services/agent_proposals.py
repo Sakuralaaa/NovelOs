@@ -42,6 +42,7 @@ KIND_LABEL = {
     "covers": "生成封面",
     "write_chapter": "写下一章",
     "reskin_ideas": "榜单仿写选题",
+    "book_test": "书测方案",
 }
 JOB_KINDS = ("covers", "write_chapter")
 
@@ -388,6 +389,38 @@ def _apply_package(book_id: int, payload: dict[str, Any], edited: dict[str, Any]
     return {"before": {k: before[k] for k in after}, "after": {k: now[k] for k in after}}
 
 
+def _apply_book_test(book_id: int, payload: dict[str, Any], edited: dict[str, Any] | None) -> dict[str, Any]:
+    """书测提案：edited={"index": 0–3, "fields": [...]} 选哪一组、写哪些字段；不传默认第 0 组的书名和副标题。"""
+    from app.services import book_test
+
+    e = edited or {}
+    try:
+        idx = int(e.get("index", payload.get("default_index", 0)))
+    except (TypeError, ValueError) as err:
+        raise ValueError("index 必须是 0–3 的整数") from err
+    fields = e.get("fields") if isinstance(e.get("fields"), list) else None
+    return book_test.adopt(book_id, idx, fields)
+
+
+def _revert_book_test(book_id: int, payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    before, after = result.get("before") or {}, result.get("after") or {}
+    with session_scope() as s:
+        b = common.get_book(s, book_id)
+        cur = book_edit.info_of(b)
+        info_changed = any(before.get(k) != after.get(k) for k in book_edit.INFO_FIELDS)
+        if info_changed and any(cur.get(k) != after.get(k) for k in book_edit.INFO_FIELDS):
+            raise Conflict("作品信息之后又改过，请到概览页「编辑信息」里按历史版本撤回")
+        pkg = s.get(Package, book_id)
+        for k in ("blurb", "cover_prompt"):
+            if pkg is not None and before.get(k) != after.get(k):
+                setattr(pkg, k, before.get(k) or "")
+                s.add(pkg)
+        s.commit()
+    if info_changed:
+        book_edit.undo_info(book_id)
+    return {"undone": True}
+
+
 def _revert_package(book_id: int, payload: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     with session_scope() as s:
         now = _pkg_now(s, book_id)
@@ -492,6 +525,7 @@ _APPLY: dict[str, Callable[..., Any]] = {
     "foreshadow_update": _apply_fs_update,
     "foreshadow_delete": _apply_fs_delete,
     "package": _apply_package,
+    "book_test": _apply_book_test,
     "write_chapter": _apply_write,
     "covers": _apply_covers,
     "reskin_ideas": _apply_reskin,
@@ -506,6 +540,7 @@ _REVERT: dict[str, Callable[..., Any]] = {
     "foreshadow_update": _revert_fs_update,
     "foreshadow_delete": _revert_fs_delete,
     "package": _revert_package,
+    "book_test": _revert_book_test,
     "write_chapter": _revert_write,
     "covers": _revert_covers,
     "reskin_ideas": _revert_reskin,

@@ -3,6 +3,9 @@ import { forwardRef } from 'react'
 import type { Icon as PhIcon, IconProps } from '@phosphor-icons/react'
 import {
   ArrowClockwiseIcon,
+  CompassIcon,
+  FlaskIcon,
+  FireIcon,
   BrainIcon,
   ChatsCircleIcon,
   PaperPlaneTiltIcon,
@@ -203,6 +206,9 @@ export const X = wrap(XIcon, 'X')
 export const XCircle = wrap(XCircleIcon, 'XCircle')
 export const Zap = wrap(LightningIcon, 'Zap')
 export const Bot = wrap(RobotIcon, 'Bot')
+export const Compass = wrap(CompassIcon, 'Compass')
+export const Flame = wrap(FireIcon, 'Flame')
+export const Flask = wrap(FlaskIcon, 'Flask')
 export const Brain = wrap(BrainIcon, 'Brain')
 export const Chats = wrap(ChatsCircleIcon, 'Chats')
 export const Send = wrap(PaperPlaneTiltIcon, 'Send')

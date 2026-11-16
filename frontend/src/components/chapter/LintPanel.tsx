@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
 import type { Lint } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, platformLabel } from '@/lib/utils'
 import { Gauge } from './RadarChart'
 
 export interface LocalStats { avg_sentence_len: number; short_sentence_ratio: number; bare_dialogue_ratio: number; summary_ratio: number; dialogue_ratio: number; bareCount: number; summaryCount: number }
@@ -34,6 +34,8 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
           <div className="flex h-2 overflow-hidden rounded-full"><div className="bg-primary/55" style={{ width: `${(1 - (lint?.dialogue_ratio ?? local.dialogue_ratio)) * 100}%` }} /><div className="flex-1 bg-amber-400/80" /></div>
         </div>
       </div>
+
+      {lint && <LongParaSection lint={lint} />}
 
       <div className="grid grid-cols-2 gap-2">
         <Tip content="只改写干巴巴的对白和概述段落：补动作、神态、环境、心理，情节不变。完成后可逐段对比、接受或撤销。">
@@ -138,3 +140,32 @@ function CraftSection({ lint }: { lint: Lint }) {
   )
 }
 
+
+/** v0.9：平台档与超长段落（番茄档 >70 字算长段，人味修整会定点拆段） */
+function LongParaSection({ lint }: { lint: Lint }) {
+  if (lint.platform === undefined && lint.long_paragraphs === undefined) return null
+  const n = lint.long_paragraphs ?? 0
+  const quotes = (lint.fix_targets ?? []).filter((t) => t.kind === '长段')
+  const fanqie = (lint.platform ?? 'fanqie') === 'fanqie'
+  return (
+    <div className={cn('rounded-lg p-3 hairline', n > 0 && 'bg-warning-soft/40')}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium">长段落</span>
+        <span className="flex items-center gap-1.5">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">按{platformLabel(lint.platform)}档检查</span>
+          {fanqie && <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-medium', n ? 'bg-warning-soft text-warning' : 'bg-success-soft text-success')}>{n ? `${n} 段` : '健康'}</span>}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-foreground/75">
+        {!fanqie ? '这一档不查长段。' : n ? '超过 70 字的段落在手机上超过 3 行，读者容易划走。点「人味修整」会把点名的长段拆开。' : '没有超过 70 字的段落。'}
+      </p>
+      {quotes.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {quotes.slice(0, 3).map((q, i) => (
+            <li key={i} className="line-clamp-2 border-l-2 border-warning/60 pl-2 font-serif text-[12px] leading-relaxed text-foreground/70"><span className="num mr-1 font-sans text-warning">{q.word}</span>{q.quote}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

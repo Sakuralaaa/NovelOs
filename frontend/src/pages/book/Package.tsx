@@ -15,6 +15,7 @@ import { Segmented } from '@/components/ui/tabs'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { BookCrumb } from './_shared'
+import { BookTestSection } from '@/components/common/BookTest'
 import { useBook } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
@@ -107,6 +108,24 @@ export default function PackagePage() {
     catch (e: any) { toast.error('导出失败', { description: e.message }) } finally { setExporting(false) }
   }
   const blurbWords = countWords(f.blurb)
+  // v0.9 书测：封面提示词带入 / 采纳后同步到当前表单（保留其它未保存的修改）
+  const takeCoverPrompt = (prompt: string) => {
+    if (!prompt) return
+    if (empty) {
+      save.mutate({ cover_prompt: prompt }, { onSuccess: () => toast.success('已把封面提示词存进包装', { description: '生成包装后可在封面区直接「生成 4 张」' }) })
+      return
+    }
+    set({ cover_prompt: prompt })
+    toast.success('已带入封面提示词', { description: '可以继续改，或直接点「生成 4 张」' })
+    setTimeout(() => document.getElementById('cover-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+  }
+  const onBookTestAdopted = (pkg: Package, applied: string[]) => {
+    setF((cur) => (cur ? {
+      ...cur,
+      ...(applied.includes('hook') ? { blurb: pkg.blurb } : {}),
+      ...(applied.includes('cover_prompt') ? { cover_prompt: pkg.cover_prompt } : {}),
+    } : pkg))
+  }
 
   return (
     <div className="page">
@@ -154,7 +173,7 @@ export default function PackagePage() {
             </Card>
           </div>
 
-          <Card className="h-fit">
+          <Card id="cover-card" className="h-fit scroll-mt-4">
             <CardHeader title="封面" icon={<ImagePlus className="h-4 w-4" />} />
             <CardBody className="space-y-4">
               <div>
@@ -220,6 +239,10 @@ export default function PackagePage() {
           </Card>
         </div>
       )}
+
+      <div className="mt-6">
+        <BookTestSection bookId={id} onCoverPrompt={takeCoverPrompt} onAdopted={onBookTestAdopted} />
+      </div>
     </div>
   )
 }

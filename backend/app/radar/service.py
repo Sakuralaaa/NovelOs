@@ -16,11 +16,12 @@ from app.db import kv_get, kv_set, session_scope
 from app.jobs.manager import JobContext, submit
 from app.models.tables import RadarSnapshot, RankItem
 from app.radar import fanqie, fanqie_web
-from app.radar.mock_data import mock_items_50
+from app.radar.mock_data import mock_items_50, mock_new_items
 
 log = logging.getLogger("novelos.radar")
 CONFIG_KEY = "radar_config"
-DEFAULT_CONFIG = {"enabled": False, "daily_hour": 8}
+DEFAULT_CONFIG = {"enabled": False, "daily_hour": 8, "auto_report": False}
+BOARDS = ("read", "new")
 TZ = ZoneInfo("Asia/Shanghai")
 
 
@@ -28,22 +29,38 @@ def get_config(s: Session) -> dict[str, Any]:
     return {**DEFAULT_CONFIG, **(kv_get(s, CONFIG_KEY, {}) or {})}
 
 
-def set_config(s: Session, enabled: bool, daily_hour: int) -> dict[str, Any]:
-    cfg = {"enabled": bool(enabled), "daily_hour": max(0, min(23, int(daily_hour)))}
+def set_config(s: Session, enabled: bool, daily_hour: int, auto_report: bool | None = None) -> dict[str, Any]:
+    """auto_report=None 表示不改（兼容只传 enabled/daily_hour 的旧前端）。"""
+    cur = get_config(s)
+    cfg = {"enabled": bool(enabled), "daily_hour": max(0, min(23, int(daily_hour))),
+           "auto_report": bool(cur.get("auto_report")) if auto_report is None else bool(auto_report)}
     kv_set(s, CONFIG_KEY, cfg)
     return cfg
 
 
+def board_of(it: Any) -> str:
+    """旧数据没有 board（或迁移补成空串）一律当阅读榜。"""
+    b = it.get("board") if isinstance(it, dict) else getattr(it, "board", None)
+    return b if b in BOARDS else "read"
+
+
+def snapshot_boards(s: Session, snapshot_id: int) -> set[str]:
+    rows = s.exec(select(RankItem.board).where(RankItem.snapshot_id == snapshot_id).distinct())
+    return {b if b in BOARDS else "read" for b in rows}
+
+
 def refresh(ctx: JobContext) -> dict[str, Any]:
-    """抓取顺序：网页阅读榜（真实、分题材）→ App 推荐榜（旧接口）→ 示例数据。
-    同一 rankVersion 已入库时不再新建快照，避免“越刷越变”。"""
+    """抓取顺序：网页阅读榜 + 新书榜（真实、分题材）→ App 推荐榜（旧接口）→ 示例数据。
+    同一 rankVersion 已入库且榜单类型没有变多时不再新建快照，避免“越刷越变”。
+    v0.9：配置 auto_report 打开时，新快照入库后提交一份风向标日报任务（radar_report）。"""
     with session_scope() as s:
         cfg = get_config(s)
         last = latest_snapshot(s)
+        last_boards = snapshot_boards(s, last.id or 0) if last is not None else set()
     source, version, note = "mock", "", None
     items: list[dict[str, Any]] = []
     if cfg["enabled"]:
-        ctx.progress(5, "读取番茄阅读榜")
+        ctx.progress(5, "读取番茄阅读榜与新书榜")
         try:
             items, version = fanqie_web.fetch_rank_lists(progress=ctx.progress)
             source = "web"
@@ -59,12 +76,18 @@ def refresh(ctx: JobContext) -> dict[str, Any]:
     else:
         note = "雷达未开启，使用示例数据"
     if not items:
-        source, items = "mock", mock_items_50()
+        source, items = "mock", mock_items_50() + mock_new_items()
         version = f"mock-{datetime.now(TZ).date().isoformat()}"
+    for it in items:
+        it["board"] = board_of(it)
 
-    if last is not None and version and last.version == version and last.source == source:
-        return {"snapshot_id": last.id, "source": source, "items": last.items_count, "unchanged": True,
-                "note": note or "榜单今天还没更新，沿用当前数据"}
+    new_boards = {it["board"] for it in items}
+    if (last is not None and version and last.version == version and last.source == source
+            and new_boards <= last_boards):
+        out = {"snapshot_id": last.id, "source": source, "items": last.items_count, "unchanged": True,
+               "note": note or "榜单今天还没更新，沿用当前数据"}
+        _maybe_auto_report(cfg, last.id or 0, out)
+        return out
 
     ctx.progress(85, "保存快照")
     with session_scope() as s:
@@ -72,31 +95,54 @@ def refresh(ctx: JobContext) -> dict[str, Any]:
         s.add(snap)
         s.flush()
         for it in items:
-            s.add(RankItem(snapshot_id=snap.id or 0, rank_diff=int(it.get("rank_diff") or 0), **{k: it[k] for k in (
+            s.add(RankItem(snapshot_id=snap.id or 0, rank_diff=int(it.get("rank_diff") or 0), board=it["board"], **{k: it[k] for k in (
                 "book_id_ext", "title", "author", "category", "rank", "read_count", "word_count", "abstract", "tags", "gender")}))
         s.commit()
         sid = snap.id
-    return {"snapshot_id": sid, "source": source, "items": len(items), "note": note}
+    out = {"snapshot_id": sid, "source": source, "items": len(items), "note": note,
+           "boards": {b: sum(1 for it in items if it["board"] == b) for b in BOARDS}}
+    _maybe_auto_report(cfg, sid or 0, out)
+    return out
+
+
+def _maybe_auto_report(cfg: dict[str, Any], snapshot_id: int, out: dict[str, Any]) -> None:
+    """开启自动日报且这份快照还没有总览日报时，提交 radar_report 任务（job id 写进刷新结果）。"""
+    if not cfg.get("auto_report") or not snapshot_id:
+        return
+    from app.radar import report as trend_report
+
+    try:
+        with session_scope() as s:
+            if trend_report.latest_report(s, "overall", snapshot_id=snapshot_id) is not None:
+                return
+        out["report_job_id"] = trend_report.submit_report("overall").id
+    except Exception as e:  # noqa: BLE001  日报失败不影响刷新本身
+        log.warning("自动提交风向标日报失败：%s", e)
 
 
 def latest_snapshot(s: Session, offset: int = 0) -> RadarSnapshot | None:
     return s.exec(select(RadarSnapshot).order_by(RadarSnapshot.id.desc()).offset(offset)).first()  # type: ignore[union-attr]
 
 
-def snapshot_items(s: Session, snapshot_id: int, gender: str | None = None, category: str | None = None, dedupe: bool = True) -> list[RankItem]:
+def snapshot_items(s: Session, snapshot_id: int, gender: str | None = None, category: str | None = None, dedupe: bool = True,
+                   board: str | None = None) -> list[RankItem]:
     q = select(RankItem).where(RankItem.snapshot_id == snapshot_id)
     if gender:
         q = q.where(RankItem.gender == gender)
     if category:
         q = q.where(RankItem.category == category)
+    if board == "read":
+        q = q.where(RankItem.board.in_(["read", ""]))  # type: ignore[attr-defined]  旧数据视为阅读榜
+    elif board:
+        q = q.where(RankItem.board == board)
     if category or not dedupe:
-        return list(s.exec(q.order_by(RankItem.gender, RankItem.rank)))
+        return list(s.exec(q.order_by(RankItem.gender, RankItem.board, RankItem.rank)))
     # “全部”视图：同一本书可能上多个题材榜，去重后按在读人数排
     rows = list(s.exec(q.order_by(RankItem.read_count.desc(), RankItem.rank)))  # type: ignore[attr-defined]
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     out = []
     for r in rows:
-        key = (r.gender, r.book_id_ext)
+        key = (r.gender, board_of(r), r.book_id_ext)
         if key not in seen:
             seen.add(key)
             out.append(r)
@@ -106,20 +152,30 @@ def snapshot_items(s: Session, snapshot_id: int, gender: str | None = None, cate
 def _items_for_trends(s: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     snap = latest_snapshot(s)
     if snap is None:
-        return mock_items_50(), []
+        return mock_items_50() + mock_new_items(), []
     cur = [i.model_dump() for i in snapshot_items(s, snap.id or 0, dedupe=False)]
     prev_snap = latest_snapshot(s, 1)
     prev = [i.model_dump() for i in snapshot_items(s, prev_snap.id or 0, dedupe=False)] if prev_snap else []
+    for it in (*cur, *prev):
+        it["board"] = board_of(it)
     return cur, prev
 
 
-def compute_trends(s: Session, gender: str | None = None) -> list[dict[str, Any]]:
-    """热度 = Σ(排名权重 × log 在读)，排名权重 = 1 / sqrt(rank)；rising = 名次上升或新上榜的书数。"""
+def rank_key(it: dict[str, Any]) -> tuple[str, str, str, str]:
+    """同一本书在同一类榜、同一题材里的身份（跨快照比名次用）。旧数据 board 视为 read。"""
+    return (it["gender"], board_of(it), it.get("category") or "", it["book_id_ext"])
+
+
+def compute_trends(s: Session, gender: str | None = None, board: str | None = None) -> list[dict[str, Any]]:
+    """热度 = Σ(排名权重 × log 在读)，排名权重 = 1 / sqrt(rank)；rising = 名次上升或新上榜的书数。
+    board=None 时阅读榜与新书榜合并统计；传 read / new 只看一类榜。"""
     cur, prev = _items_for_trends(s)
-    prev_rank = {(p["gender"], p["book_id_ext"]): p["rank"] for p in prev}
+    prev_rank = {rank_key(p): p["rank"] for p in prev}
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for it in cur:
         if gender and it["gender"] != gender:
+            continue
+        if board and it["board"] != board:
             continue
         groups[it["category"] or "其他"].append(it)
     out: list[dict[str, Any]] = []
@@ -130,7 +186,7 @@ def compute_trends(s: Session, gender: str | None = None) -> list[dict[str, Any]
             rising = sum(1 for i in items if (i.get("rank_diff") or 0) > 0)
         elif prev:
             for i in items:
-                pr = prev_rank.get((i["gender"], i["book_id_ext"]))
+                pr = prev_rank.get(rank_key(i))
                 if pr is None or pr > i["rank"]:
                     rising += 1
         items.sort(key=lambda i: i["rank"])

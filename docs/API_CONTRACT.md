@@ -212,3 +212,48 @@ Agent 新增提案工具 `imitate_rank_book`（`{rank_item_id?, title?}`）：�
 | DELETE | /api/debug/llm-calls | 清空 |
 
 配置：`NOVELOS_API_KEY`（可选固定密钥，须 nvk_ 开头）、`NOVELOS_LLM_TRACE`（默认 1）、`NOVELOS_LLM_TRACE_MAX`（默认 200）。
+
+
+## v0.9 新书榜、风向标日报、平台风格档、审稿补丁、书测
+
+### 雷达
+- `RankItem` 增加 `board: "read" | "new"`（阅读榜 / 新书榜；旧数据为 `read`）。
+- `GET /api/radar/latest?gender=&category=&board=read|new` → `{snapshot, items:[RankItem], boards:["new","read"]}`（`boards`：这份快照里有哪几类榜）。
+- `GET /api/radar/trends?gender=&board=read|new` → 同前；不传 board 时两类榜合并统计。
+- `GET/PUT /api/radar/config`：增加 `auto_report: bool`（PUT 不传表示不改）。刷新结果 `Job.result` 增加 `boards:{read:n,new:m}`，开启自动日报时还有 `report_job_id`。
+
+### 风向标日报
+- `POST /api/radar/report` body `{scope?: "overall" | "category:<male|female>:<题材名>", top_n?: 3–30}` → Job（`kind=radar_report`，`ref=trend_report:<scope>`，另带 `job_id` 同 `id`）。同 scope 进行中的任务直接返回。scope 格式错 400；没有快照 409；题材不在最新快照里 404。`Job.result` 同下面的 TrendReport。
+- `GET /api/radar/report?scope=overall` → TrendReport；没有 404（detail 说明怎么生成）。
+- `GET /api/radar/reports?limit=10&scope=&full=false` → TrendReport[]，新的在前；`full=false` 时没有 `report`，改为 `hot_words:[string]`。
+
+TrendReport：
+```json
+{"id":1,"snapshot_id":3,"scope":"overall","created_at":"…","model":"渠道名/模型名 或 mock","stale":false,
+ "snapshot":{"id":3,"taken_at":"…","source":"web|app|mock","version":"…","items_count":0},
+ "report":{
+   "hot_words":[{"word":"","why":"","examples":["榜上真实书名"]}],
+   "boards":[{"board":"男频阅读|男频新书|女频阅读|女频新书","overview":"","reader_mood":"","opportunity":"","writing_tips":"",
+              "idea_hooks":[{"title":"","pitch":""}]}],
+   "open_directions":[""],
+   "title_patterns":[{"pattern":"《[极端条件]，我跑去[反差行为]》","examples":["榜上真实书名"]}],
+   "pitfalls":[""],
+   "warnings":["程序校验记录：删掉的凭空例子、缺的榜、套话"],
+   "inputs":{"top_n":12,"books":0,"boards":{"男频阅读":12},"new_entries":{"男频阅读":0},"prev_snapshot_id":2}}}
+```
+题材日报的 `boards` 只有该频道的「阅读」「新书」两项。`stale=true` 表示已有更新的快照。
+
+### 书与平台风格档
+- Book 增加 `platform_style: "fanqie" | "qidian" | "generic"`（默认 fanqie）、`has_book_test: bool`。`POST /api/books`、`PATCH /api/books/{id}` 可设 `platform_style`。
+- Lint 增加 `platform`（本次按哪一档检查）、`long_paragraphs`（超长段落数，番茄档 >70 字）；`fix_targets` 可能出现 `kind:"长段"`。
+
+### 审稿补丁
+- Review 增加 `patches:[{index, original, improved, reason, issue_ref(int|null，对应 review.issues 下标), severity, applied}]` 与 `patch_log:[{label:"自动修|作者应用", at, applied:[index], skipped:[{index, reason}]}]`。`reader` 字段照常返回。
+- `write-next` 的 `Job.result` 增加 `review_patches:{applied:[index], skipped:[{index, reason}]}`（只自动应用对应 mid/high 问题的补丁；不重新审稿）。
+- `POST /api/chapters/{id}/review/patches/apply` body `{indices:[int]}`（1–20 个）→ `{chapter: Chapter, applied:[{index, original, improved}], skipped:[{index, reason}]}`。同步、不调模型；逐字匹配原文，匹配不到 / 已应用的跳过；旧正文进历史，可 `POST /api/chapters/{id}/undo`。没有补丁 409。预览由前端用 `patches` 自己做。
+
+### 书测
+- `POST /api/books/{id}/book-test` → Job（`kind=book_test`），`result` 同 GET。
+- `GET /api/books/{id}/book-test` → `{book_id, variants:[{style:"A 番茄情绪爽感|B 悬疑规则脑洞|C 轻松沙雕|D 起点正剧", title, subtitle(≤20字), hook, cover_prompt(含 3:4)}], warnings:[], created_at, model, adopted:int|null, adopted_fields:[]}`；没做过 404。
+- `POST /api/books/{id}/book-test/adopt` body `{index, fields?:["title","subtitle","hook","cover_prompt"]}`（默认 `["title","subtitle"]`：title→书名，subtitle→一句话简介，hook→包装简介，cover_prompt→包装封面提示词）→ `{book, package, adopted:{index, variant, applied, before, after}}`。书名/简介走作品信息版本栈，可 `POST /api/books/{id}/undo` 撤回。下标越界 404。
+- Agent 工具 `book_test`：产出 `kind:"book_test"`（标签「书测方案」）提案，`needs_review=true`（自动采纳不会替作者选）；`payload.variants` 为四组方案。采纳 `POST /api/agent/proposals/{pid}/apply` body `{edited:{index, fields?}}`，可撤回。

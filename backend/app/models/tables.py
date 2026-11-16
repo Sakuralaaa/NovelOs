@@ -85,6 +85,18 @@ class RankItem(SQLModel, table=True):
     abstract: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
     tags: list[str] = _json_list()
     gender: str = "male"
+    # v0.9：榜单类型 read（阅读榜，30 万字以上）/ new（新书榜，30 万字以下）；旧数据迁移后默认 read
+    board: str = "read"
+
+
+class TrendReport(SQLModel, table=True):
+    """v0.9 风向标日报：基于某个快照，由模型写的结构化日报（scope：overall 或 category:<gender>:<name>）。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(index=True)
+    scope: str = Field(default="overall", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    report: Optional[dict[str, Any]] = _json_dict_nullable()
+    model: str = ""
 
 
 class RankTeardown(SQLModel, table=True):
@@ -115,6 +127,10 @@ class Book(SQLModel, table=True):
     banned_tropes: list[dict[str, Any]] = _json_list()
     # v0.5：本书 Agent 的改动直接写入（仍留快照/旧版本可撤回）；删除类操作不受此开关影响，永远要确认
     agent_auto_apply: bool = False
+    # v0.9：平台风格档 fanqie（默认）/ qidian / generic，写作提示词与 lint 阈值按档走
+    platform_style: str = "fanqie"
+    # v0.9 书测：{variants:[{style,title,subtitle,hook,cover_prompt}], created_at, model, adopted:int|None}
+    book_test: Optional[dict[str, Any]] = _json_dict_nullable()
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

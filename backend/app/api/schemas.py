@@ -76,6 +76,16 @@ class WritingSettingsIn(BaseModel):
 class RadarConfigIn(BaseModel):
     enabled: bool
     daily_hour: int = Field(ge=0, le=23)
+    auto_report: bool | None = None  # v0.9：刷新成功后自动生成风向标日报；不传表示不改
+
+
+class TrendReportIn(BaseModel):
+    """v0.9：scope = overall 或 category:<male|female>:<题材名>；top_n 每个榜取前 N 本（3–30，不传按 scope 默认 12/15）。"""
+    scope: str = "overall"
+    top_n: int | None = Field(default=None, ge=3, le=30)
+
+
+PlatformStyle = Literal["fanqie", "qidian", "generic"]
 
 
 class BookCreate(BaseModel):
@@ -83,6 +93,7 @@ class BookCreate(BaseModel):
     genre: str = ""
     gender: Gender = "male"
     premise: str | None = None
+    platform_style: PlatformStyle = "fanqie"
 
 
 class BookPatch(BaseModel):
@@ -96,6 +107,7 @@ class BookPatch(BaseModel):
     premise: str | None = None
     banned_tropes: list[dict[str, Any]] | None = None
     agent_auto_apply: bool | None = None
+    platform_style: PlatformStyle | None = None
 
 
 class IdeasGenerate(BaseModel):
@@ -284,6 +296,17 @@ class DetropeIn(BaseModel):
     route: str | None = None
 
 
+class BookTestAdoptIn(BaseModel):
+    """v0.9 书测：选第 index 组（0–3）。fields：title→书名，subtitle→一句话简介，hook→包装简介，cover_prompt→包装封面提示词。"""
+    index: int = Field(ge=0, le=9)
+    fields: list[Literal["title", "subtitle", "hook", "cover_prompt"]] = Field(default_factory=lambda: ["title", "subtitle"])
+
+
+class PatchApplyIn(BaseModel):
+    """v0.9：要应用的审稿补丁下标（review.patches[].index）。"""
+    indices: list[int] = Field(min_length=1, max_length=20)
+
+
 class ChapterUpdate(BaseModel):
     title: str | None = None
     content: str | None = None
@@ -364,7 +387,7 @@ def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:
 def rank_item_out(r: RankItem) -> dict[str, Any]:
     return {"id": r.id, "book_id_ext": r.book_id_ext, "title": r.title, "author": r.author, "category": r.category, "rank": r.rank,
             "read_count": r.read_count, "word_count": r.word_count, "abstract": r.abstract, "tags": list(r.tags or []),
-            "gender": r.gender, "rank_diff": r.rank_diff}
+            "gender": r.gender, "rank_diff": r.rank_diff, "board": r.board if r.board in ("read", "new") else "read"}
 
 
 def book_out(s: Session, b: Book) -> dict[str, Any]:
@@ -375,6 +398,8 @@ def book_out(s: Session, b: Book) -> dict[str, Any]:
         "created_at": iso(b.created_at), "updated_at": iso(b.updated_at), "stats": common.book_stats(s, b.id or 0),
         "premise": b.premise, "versions": len(vs), "last_instruction": str(vs[-1].get("instruction") or "") if vs else "",
         "banned_tropes": list(b.banned_tropes or []), "agent_auto_apply": bool(b.agent_auto_apply),
+        "platform_style": b.platform_style if b.platform_style in ("fanqie", "qidian", "generic") else "fanqie",
+        "has_book_test": bool((b.book_test or {}).get("variants")),
     }
 
 
@@ -423,21 +448,29 @@ def node_out(n: OutlineNode) -> dict[str, Any]:
 LINT_KEYS = ("ai_score", "dialogue_ratio", "repeated_ngrams", "banned_hits", "warnings",
              "avg_sentence_len", "short_sentence_ratio", "bare_dialogue_ratio", "summary_ratio",
              # v0.6 手艺类
-             "intensifiers", "cliche_similes", "measure_errors", "crowd_shots", "dialogue_tics", "catchphrases", "fix_targets")
+             "intensifiers", "cliche_similes", "measure_errors", "crowd_shots", "dialogue_tics", "catchphrases", "fix_targets",
+             # v0.9 平台风格档：platform（fanqie/qidian/generic）、long_paragraphs（超长段落数）
+             "platform", "long_paragraphs")
 
 
 def lint_out(l: dict[str, Any] | None) -> dict[str, Any] | None:
     if not l:
         return None
     defaults: dict[str, Any] = {"repeated_ngrams": [], "banned_hits": [], "warnings": [], "intensifiers": [], "cliche_similes": [],
-                                "measure_errors": [], "dialogue_tics": [], "catchphrases": [], "fix_targets": []}
+                                "measure_errors": [], "dialogue_tics": [], "catchphrases": [], "fix_targets": [], "platform": "generic"}
     return {k: l.get(k, defaults.get(k, 0)) for k in LINT_KEYS}
 
 
 def review_out(r: dict[str, Any] | None) -> dict[str, Any] | None:
     if not r:
         return None
-    return {"scores": r.get("scores", {}), "issues": r.get("issues", []), "passed": bool(r.get("passed"))}
+    out = {"scores": r.get("scores", {}), "issues": r.get("issues", []), "passed": bool(r.get("passed"))}
+    if r.get("reader"):
+        out["reader"] = r["reader"]  # v0.8.5：读者视角打分之前被这里丢掉了
+    # v0.9：审稿补丁 [{index, original, improved, reason, issue_ref, severity, applied}] 与应用记录
+    out["patches"] = list(r.get("patches") or [])
+    out["patch_log"] = list(r.get("patch_log") or [])
+    return out
 
 
 def chapter_out(c: Chapter, with_content: bool = True) -> dict[str, Any]:

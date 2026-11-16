@@ -61,7 +61,8 @@ class Settings(BaseSettings):
     # 雷达
     radar_base_url: str = "https://api-lf.fanqiesdk.com/api/novel/channel/homepage/rank/rank_list/v2/"
     radar_side_types: list[int] = [10, 12, 13]
-    radar_per_board: int = 30  # 网页阅读榜：每个题材榜取前 N 本（10–100）
+    radar_per_board: int = 30  # 网页榜单：每个题材榜取前 N 本（10–100）
+    radar_boards: list[str] = ["read", "new"]  # v0.9：read 阅读榜 / new 新书榜
     radar_timeout: float = 10.0
     radar_interval_s: float = 1.0  # 单次刷新内请求间隔
     radar_user_agent: str = (

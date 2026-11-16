@@ -64,6 +64,8 @@ TASK_ROLE: dict[str, str] = {
     "teardown": "planner",
     "teardown_deep": "reviewer",
     "reskin": "planner",
+    "trend_report": "planner",
+    "book_test": "planner",
     "agent": "agent",
 }
 

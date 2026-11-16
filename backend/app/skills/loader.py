@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from string import Template
 
 _ROOT = Path(__file__).parent
-STAGES = ("ideation", "bible", "outline", "chapter_plan", "writing", "review", "humanize", "package")
+STAGES = ("ideation", "bible", "outline", "chapter_plan", "writing", "review", "humanize", "package", "trend_report")
 
 # 各任务挂载哪些规则包（system 提示词）
 TASK_SKILLS: dict[str, tuple[str, ...]] = {
@@ -39,6 +40,8 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "teardown": (),
     "teardown_deep": (),
     "reskin": ("ideation",),
+    "trend_report": ("trend_report",),
+    "book_test": ("package",),
 }
 
 
@@ -174,10 +177,24 @@ SYSTEM_BASE = (
 )
 
 
-def system_prompt(task: str, extra: str = "") -> str:
+# v0.9 平台风格档：规则包里用 <!-- platform:fanqie --> … <!-- /platform --> 包住只对某个平台生效的小节
+PLATFORMS = ("fanqie", "qidian", "generic")
+PLATFORM_LABEL = {"fanqie": "番茄", "qidian": "起点", "generic": "通用"}
+_PLATFORM_BLOCK = re.compile(r"<!--\s*platform:([a-z,]+)\s*-->(.*?)<!--\s*/platform\s*-->", re.S)
+
+
+def platform_filter(body: str, platform: str | None) -> str:
+    """只保留当前平台的小节（可写 platform:fanqie,qidian）；platform 为空时去掉全部平台小节。"""
+    def keep(m: re.Match[str]) -> str:
+        names = m.group(1).split(",")
+        return m.group(2).strip("\n") if platform and platform in names else ""
+    return re.sub(r"\n{3,}", "\n\n", _PLATFORM_BLOCK.sub(keep, body)).strip()
+
+
+def system_prompt(task: str, extra: str = "", platform: str | None = None) -> str:
     parts = [SYSTEM_BASE]
     for stage in TASK_SKILLS.get(task, ()):
-        parts.append(load_pack(stage).body)
+        parts.append(platform_filter(load_pack(stage).body, platform))
     if extra:
         parts.append(extra)
     return "\n\n".join(parts)

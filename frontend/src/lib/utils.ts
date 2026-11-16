@@ -109,8 +109,18 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   chapter_rewrite: '按要求改写',
   foreshadow_plan: 'AI 规划伏笔',
   cover_prompt: '改封面提示词',
+  radar_report: '生成风向标日报',
+  book_test: '书测',
 }
 export const jobLabel = (kind: string) => JOB_KIND_LABEL[kind] ?? kind
+
+/** v0.9：平台风格档 */
+export const PLATFORM_STYLES: { value: 'fanqie' | 'qidian' | 'generic'; label: string; desc: string }[] = [
+  { value: 'fanqie', label: '番茄', desc: '短段、对白推进、章尾卡点；超过 70 字的段落会提示拆分' },
+  { value: 'qidian', label: '起点', desc: '世界细节可信、配角有智商、伏笔前后呼应，长线博弈可以慢慢铺' },
+  { value: 'generic', label: '通用', desc: '不加平台专属写作要求，人味检查沿用通用阈值' },
+]
+export const platformLabel = (v?: string | null) => PLATFORM_STYLES.find((x) => x.value === (v || 'fanqie'))?.label ?? v ?? '番茄'
 
 export const GENRES_MALE = ['都市高武', '玄幻脑洞', '东方仙侠', '历史脑洞', '末世求生', '都市修真', '游戏体育', '科幻悬疑', '战神赘婿', '传统玄幻']
 export const GENRES_FEMALE = ['豪门总裁', '古言宅斗', '年代重生', '宫斗宅斗', '现言甜宠', '快穿系统', '玄幻言情', '悬疑恋爱', '种田经商', '团宠萌宝']
@@ -124,4 +134,22 @@ export function scoreTone(v: number) {
 
 export function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/** 复制文本：非 HTTPS（局域网访问）时 navigator.clipboard 不可用，退回 execCommand */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true }
+  } catch { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select(); ta.setSelectionRange(0, text.length)
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch { return false }
 }

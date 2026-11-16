@@ -52,6 +52,7 @@ def mock_rank_items(day: date | None = None) -> list[dict[str, Any]]:
                     "abstract": _ABSTRACT_F if gender == "female" else _ABSTRACT_M,
                     "tags": [cat, ["系统", "重生", "爽文", "逆袭", "甜宠", "穿越"][h % 6]],
                     "gender": gender,
+                    "board": "read",
                 })
         pool.sort(key=lambda x: -x["read_count"])
         for i, it in enumerate(pool, 1):
@@ -65,3 +66,45 @@ def mock_items_50(day: date | None = None) -> list[dict[str, Any]]:
     male = [i for i in items if i["gender"] == "male"][:27]
     female = [i for i in items if i["gender"] == "female"][:23]
     return male + female
+
+
+# v0.9：新书榜示例（30 万字以下的新书），同样是虚构书名
+_MALE_NEW: list[tuple[str, list[str]]] = [
+    ("都市脑洞", ["我的外卖箱能通往三天后", "退休金到账，我成了城隍爷", "开局继承一座倒闭游乐园"]),
+    ("悬疑脑洞", ["规则怪谈：夜班保安守则第七条", "我能听见遗物说话", "停尸间的第十三个抽屉"]),
+    ("玄幻脑洞", ["宗门要倒闭，我把灵田包出去了", "被逐出师门后，我开了家修仙驾校", "我的剑灵只会吐槽"]),
+]
+_FEMALE_NEW: list[tuple[str, list[str]]] = [
+    ("现言脑洞", ["离婚冷静期，我听见了老公的心声", "全家读我心后，炮灰剧情崩了", "被赶出豪门，我靠直播算命爆红"]),
+    ("古言脑洞", ["王妃她只想种地发家", "替嫁冲喜，病秧子夫君装不下去了", "重生后我把渣夫送去和亲"]),
+]
+
+
+def mock_new_items(day: date | None = None) -> list[dict[str, Any]]:
+    """新书榜示例：男频 9 + 女频 6 = 15 条，字数都在 30 万以内。"""
+    day = day or date.today()
+    rng = random.Random(int(hashlib.md5(("new" + day.isoformat()).encode()).hexdigest()[:8], 16))
+    items: list[dict[str, Any]] = []
+    for gender, groups in (("male", _MALE_NEW), ("female", _FEMALE_NEW)):
+        pool: list[dict[str, Any]] = []
+        for cat, titles in groups:
+            for t in titles:
+                h = int(hashlib.md5(("new" + t).encode()).hexdigest()[:8], 16)
+                pool.append({
+                    "book_id_ext": f"mocknew{h % 10**8:08d}",
+                    "title": t,
+                    "author": _AUTHORS[h % len(_AUTHORS)],
+                    "category": cat,
+                    "read_count": int((5_000 + h % 80_000) * rng.uniform(0.7, 1.5)),
+                    "word_count": 30_000 + h % 260_000,
+                    "abstract": _ABSTRACT_F if gender == "female" else _ABSTRACT_M,
+                    "tags": [cat, "连载"],
+                    "gender": gender,
+                    "board": "new",
+                    "rank_diff": rng.choice([0, 0, 1, 3, -2, 5]),
+                })
+        pool.sort(key=lambda x: -x["read_count"])
+        for i, it in enumerate(pool, 1):
+            it["rank"] = i
+        items.extend(pool)
+    return items

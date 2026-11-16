@@ -38,14 +38,14 @@ def quote_in_text(quote: str, content: str, min_len: int = 4) -> bool:
     return q in _norm(content)
 
 
-def validate_issues(raw: Any, content: str) -> tuple[list[dict[str, str]], int]:
-    """返回（合法 issues, 被丢弃数）。"""
+def validate_issues(raw: Any, content: str, keep_src: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """返回（合法 issues, 被丢弃数）。keep_src=True 时每条带 _src（模型原始数组里的下标），用来对上补丁的 issue_ref。"""
     items = raw.get("issues") if isinstance(raw, dict) else raw
     if not isinstance(items, list):
         return [], 0
-    kept: list[dict[str, str]] = []
+    kept: list[dict[str, Any]] = []
     dropped = 0
-    for it in items:
+    for src, it in enumerate(items):
         if not isinstance(it, dict):
             dropped += 1
             continue
@@ -60,8 +60,80 @@ def validate_issues(raw: Any, content: str) -> tuple[list[dict[str, str]], int]:
         if not quote_in_text(quote, content):
             dropped += 1
             continue
-        kept.append({"severity": sev, "dimension": dim, "quote": quote.strip(), "comment": str(it.get("comment", ""))[:300]})
+        row: dict[str, Any] = {"severity": sev, "dimension": dim, "quote": quote.strip(), "comment": str(it.get("comment", ""))[:300]}
+        if keep_src:
+            row["_src"] = src
+        kept.append(row)
     return kept, dropped
+
+
+# ------------------------------------------------------------------ v0.9 审稿补丁
+
+MAX_PATCHES = 8
+
+
+def validate_patches(raw: Any, content: str, issues: list[dict[str, Any]], src_map: dict[int, int] | None = None
+                     ) -> tuple[list[dict[str, Any]], int]:
+    """补丁校验：original 必须是正文里逐字存在的连续片段（≥4 字），improved 与 original 不同。
+    issue_ref：模型给的是它自己 issues 数组的下标，经 src_map 换成最终 review.issues 的下标；给的是引文时按 quote 对上。
+    返回（合法补丁, 丢弃数）。每条补丁：{index, original, improved, reason, issue_ref, severity, applied}。"""
+    items = raw.get("patches") if isinstance(raw, dict) else None
+    if not isinstance(items, list):
+        return [], 0
+    out: list[dict[str, Any]] = []
+    dropped = 0
+    seen: set[str] = set()
+    for it in items:
+        if not isinstance(it, dict):
+            dropped += 1
+            continue
+        orig = str(it.get("original") or it.get("original_snippet") or "")
+        new = str(it.get("improved") if it.get("improved") is not None else it.get("improved_snippet") or "")
+        orig_s = orig.strip()
+        if len(orig_s) < 4 or orig_s not in content or orig_s == new.strip() or orig_s in seen:
+            dropped += 1
+            continue
+        seen.add(orig_s)
+        ref = it.get("issue_ref")
+        final: int | None = None
+        if isinstance(ref, bool):
+            ref = None
+        if isinstance(ref, (int, float)) or (isinstance(ref, str) and ref.strip().isdigit()):
+            r = int(ref)
+            final = src_map.get(r) if src_map is not None else (r if 0 <= r < len(issues) else None)
+        elif isinstance(ref, str) and ref.strip():
+            final = next((k for k, x in enumerate(issues) if _norm(ref) in _norm(x["quote"]) or _norm(x["quote"]) in _norm(ref)), None)
+        if final is None:  # 没给或对不上：看 original 落在哪条问题的引文里
+            final = next((k for k, x in enumerate(issues) if _norm(x["quote"]) and (_norm(x["quote"]) in _norm(orig_s) or _norm(orig_s) in _norm(x["quote"]))), None)
+        out.append({"index": len(out), "original": orig_s, "improved": new.strip(), "reason": str(it.get("reason") or it.get("explanation") or "")[:200],
+                    "issue_ref": final, "severity": issues[final]["severity"] if final is not None else None, "applied": False})
+        if len(out) >= MAX_PATCHES:
+            break
+    return out, dropped
+
+
+def apply_patches(content: str, patches: list[dict[str, Any]], indices: list[int] | None = None
+                  ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """按原文逐字匹配、按顺序逐个应用（每个只替换第一次出现）。匹配不到 / 已应用过的跳过并记录原因。
+    返回（新正文, applied[{index, original, improved}], skipped[{index, reason}]）。"""
+    want = list(range(len(patches))) if indices is None else list(dict.fromkeys(int(i) for i in indices))
+    applied: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for i in want:
+        if not 0 <= i < len(patches):
+            skipped.append({"index": i, "reason": "没有这个补丁"})
+            continue
+        p = patches[i]
+        if p.get("applied"):
+            skipped.append({"index": i, "reason": "已经应用过"})
+            continue
+        orig = str(p.get("original") or "")
+        if not orig or orig not in content:
+            skipped.append({"index": i, "reason": "原文里找不到这段（可能已被改过或被前一个补丁改动）"})
+            continue
+        content = content.replace(orig, str(p.get("improved") or ""), 1)
+        applied.append({"index": i, "original": orig, "improved": str(p.get("improved") or "")})
+    return content, applied, skipped
 
 
 def compute_scores(issues: list[dict[str, str]]) -> dict[str, int]:
@@ -193,7 +265,14 @@ def run_review(
         meta={**(meta or {}), "content": content, "number": number},
         temperature=0.2,
     )
-    llm_issues, dropped = validate_issues(raw, content)
+    llm_issues, dropped = validate_issues(raw, content, keep_src=True)
     reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta)
-    issues = deterministic_issues(content, protagonist, required_chars, number, cheat_terms) + llm_issues + reader_issues
-    return build_review(issues, reader), dropped
+    det = deterministic_issues(content, protagonist, required_chars, number, cheat_terms)
+    issues = det + llm_issues + reader_issues
+    src_map = {int(x["_src"]): len(det) + k for k, x in enumerate(llm_issues)}
+    for x in llm_issues:
+        x.pop("_src", None)
+    patches, _ = validate_patches(raw, content, issues, src_map)
+    review = build_review(issues, reader)
+    review["patches"] = patches
+    return review, dropped

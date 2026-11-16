@@ -24,6 +24,14 @@ $content
 
 continuity 与 semantics 的每一条：quote 放后出现的那句矛盾原句，comment 写成“前文「……」，此处「……」，矛盾在于……，改成……”。
 
+另外，对每条 high / mid 问题尽量给一个能直接替换的补丁（patches）：
+- original：从正文原样复制的连续片段（一句到一段，不跨段，不改一个字、不加省略号）。程序会逐字匹配，匹配不到的补丁作废。
+- improved：改好的文字，只改问题所在的那一小段，前后能接上原文。
+- 红线：不改情节结果、战力和数值、人物说过的话的意思与对话结果；不新增人物和设定。
+- reason：为什么这样改（一句话）；issue_ref：它修的是 issues 数组里的第几条（从 0 开始）。
+- 最多 8 个；改不出来就不给，不要硬凑。
+
 严格只输出 JSON：
-{"issues":[{"severity":"high|mid|low","dimension":"hook|pacing|payoff|character|coherence|continuity|semantics","quote":"从正文原样复制的一句","comment":"问题与改法"}]}
-没有问题输出 {"issues":[]}。quote 不在正文里的问题会被丢弃。
+{"issues":[{"severity":"high|mid|low","dimension":"hook|pacing|payoff|character|coherence|continuity|semantics","quote":"从正文原样复制的一句","comment":"问题与改法"}],
+ "patches":[{"original":"正文里原样存在的连续片段","improved":"改后的文字","reason":"为什么这样改","issue_ref":0}]}
+没有问题输出 {"issues":[],"patches":[]}。quote 不在正文里的问题会被丢弃。

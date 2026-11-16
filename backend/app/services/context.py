@@ -27,6 +27,9 @@ MAX_RELATED_OLD = 3          # 回读推荐：与本章实体/伏笔相关的更
 OLDER_INDEX_CHARS = 600      # 更早章节“一句话索引”的总字数预算（长篇记忆压缩）
 PREV_TAIL_CHARS = 300        # 上一章结尾原文，保证章与章之间动作、位置、情绪的衔接
 MAX_GLOBAL_FACTS = 8
+NEXT_OUTLINES = 2            # v0.9：后几章章纲（只用来埋伏笔）
+NEXT_OUTLINE_CHARS = 220     # 每章章纲的字数上限
+NEXT_OUTLINES_BUDGET = 480   # 合计上限
 
 # 人物状态里优先展示、并在写前核对的键（变更声明推荐使用这些键名）
 STATE_KEY_ORDER = ("位置", "处境", "身体", "伤势", "境界", "实力", "持有物品", "情绪", "目标", "已知信息", "关系", "身份", "生死")
@@ -130,7 +133,8 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
                 extra = f"（{'；'.join(parts)}）" if parts else ""
             fixed.append(f"[{c.type}] {c.name}：{c.summary}{extra}")
     fixed.append(style_block(s, bid))
-    prefix = system_prompt("writing_scene", "\n".join(fixed))
+    platform = book.platform_style if getattr(book, "platform_style", None) in ("fanqie", "qidian", "generic") else "fanqie"
+    prefix = system_prompt("writing_scene", "\n".join(fixed), platform=platform)
 
     # ---------- 动态后缀 ----------
     rel = relevant_cards(all_cards, beats, prot)
@@ -191,6 +195,10 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode) -> ContextPack
     if plan_lines:
         parts.append("【本章写作任务】\n" + "\n".join(plan_lines))
 
+    ahead = next_outlines_block(s, bid, node.order)
+    if ahead:
+        parts.append(ahead)
+
     pre = preflight_check(beats, all_cards, facts, opens, node.order)
     if pre:
         parts.append("【写前核对（程序发现，写作时按这里处理）】\n" + "\n".join(f"- {x}" for x in pre))
@@ -240,6 +248,37 @@ def scene_plan_context(s: Session, book: Book, node: OutlineNode, limit: int = 2
             out.append("【上一章结尾原文（第一个场景从这里接）】\n" + chapter_tail(last.content))
     text = "\n".join(out)
     return text[:limit]
+
+
+def next_outlines_block(s: Session, book_id: int, order: int, n: int = NEXT_OUTLINES,
+                        per: int = NEXT_OUTLINE_CHARS, budget: int = NEXT_OUTLINES_BUDGET) -> str:
+    """v0.9：后 n 章的章纲（标题、概要、要埋/推进/回收的伏笔、章末钩子），每章压到 per 字、合计不超过 budget。
+    只用来让本章提前埋线索，提示里写明不得提前写出后面的事件。"""
+    nodes = [x for x in common.outline_nodes(s, book_id) if x.level == "chapter" and order < x.order <= order + n]
+    nodes.sort(key=lambda x: x.order)
+    lines: list[str] = []
+    used = 0
+    for x in nodes:
+        b = x.beats or {}
+        bits = [str(x.summary or b.get("goal") or "").strip()]
+        fs = [f"{ {'plant': '埋', 'advance': '推进', 'resolve': '回收'}.get(str(f.get('action')), '') }「{f.get('desc')}」"
+              for f in (b.get("foreshadow") or []) if isinstance(f, dict) and f.get("desc")]
+        if fs:
+            bits.append("伏笔：" + "、".join(fs[:3]))
+        if b.get("hook_end"):
+            bits.append(f"章末：{b['hook_end']}")
+        body = re.sub(r"\s+", " ", "；".join(p for p in bits if p))
+        line = f"第{x.order}章《{x.title}》：{body}"
+        if len(line) > per:
+            line = line[:per - 1] + "…"
+        if used + len(line) > budget:
+            break
+        lines.append(line)
+        used += len(line)
+    if not lines:
+        return ""
+    return ("【后两章章纲（只用来提前埋线索、留伏笔：可以让相关的人、物、说法在本章自然露一下；"
+            "不得提前写出这些事件，不得剧透结果）】\n" + "\n".join(lines))
 
 
 # ------------------------------------------------------------------ 状态 / 记忆 / 伏笔 / 写前核对

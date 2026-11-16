@@ -1,6 +1,9 @@
-"""番茄网页版「阅读榜」客户端：男频 19 个 + 女频 18 个题材榜，每榜最多 100 本。
+"""番茄网页版榜单客户端：「阅读榜」+「新书榜」，各有男频 19 个 + 女频 18 个题材榜，每榜最多 100 本。
 
-- 数据接口：fanqienovel.com/api/rank/category/list（rank_list_type=3, rankMold=2），匿名可用。
+- 数据接口：fanqienovel.com/api/rank/category/list（rank_list_type=3），匿名可用。
+  rankMold=2 → 阅读榜（30 万字以上，页面路径 /rank/{gender}_2_{cid}）；
+  rankMold=1 → 新书榜（30 万字以下、未断更，页面路径 /rank/{gender}_1_{cid}）。
+  2026-11-16 实测：/rank/1_1_1141 页面内嵌数据与 rankMold=1 返回一致，两者 rankVersion 相同。
 - 书名/作者/简介做了 PUA 字体混淆，用 fanqie_charset 还原。
 - 每个榜带 rankVersion（每日一个版本号）；同一版本重复刷新内容不变，服务层据此去重。
 - 合规：只取公开字段，单次刷新内请求间隔 ≥1s，正常 UA。
@@ -23,6 +26,9 @@ log = logging.getLogger("novelos.radar")
 
 API = "https://fanqienovel.com/api/rank/category/list"
 RANK_PAGE = "https://fanqienovel.com/rank/1_2_1141"
+# 榜单类型 → rankMold
+BOARD_MOLD: dict[str, int] = {"read": 2, "new": 1}
+BOARD_LABEL: dict[str, str] = {"read": "阅读榜", "new": "新书榜"}
 WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 # 页面解析失败时的兜底题材表（2026-11 实测）
@@ -68,7 +74,7 @@ def fetch_boards(c: httpx.Client) -> dict[str, list[tuple[str, str]]]:
     return BOARDS
 
 
-def parse_board(data: dict[str, Any], gender: str, category: str) -> list[dict[str, Any]]:
+def parse_board(data: dict[str, Any], gender: str, category: str, board: str = "read") -> list[dict[str, Any]]:
     out = []
     for k, r in enumerate((data.get("data") or {}).get("book_list") or [], 1):
         if not isinstance(r, dict) or not r.get("bookName"):
@@ -86,41 +92,45 @@ def parse_board(data: dict[str, Any], gender: str, category: str) -> list[dict[s
             "abstract": re.sub(r"\s+", " ", decode(r.get("abstract"))).strip()[:500],
             "tags": [category, "完结" if str(r.get("creationStatus")) == "0" else "连载"],
             "gender": gender,
+            "board": board,
         })
     return out
 
 
-def fetch_rank_lists(per_board: int | None = None, progress=None) -> tuple[list[dict[str, Any]], str]:
-    """返回（全部条目, 榜单版本号）。任何异常向上抛，由调用方回退。"""
+def fetch_rank_lists(per_board: int | None = None, progress=None, boards: list[str] | tuple[str, ...] | None = None
+                     ) -> tuple[list[dict[str, Any]], str]:
+    """返回（全部条目, 榜单版本号）。boards 默认取配置 radar_boards（阅读榜 + 新书榜）。任何异常向上抛，由调用方回退。"""
     s = get_settings()
+    kinds = [b for b in (boards or s.radar_boards) if b in BOARD_MOLD] or ["read"]
     per_board = max(10, min(100, per_board or s.radar_per_board))
     headers = {"User-Agent": WEB_UA, "Accept": "application/json, text/plain, */*", "Referer": "https://fanqienovel.com/rank"}
     items: list[dict[str, Any]] = []
     version = ""
     with httpx.Client(timeout=s.radar_timeout, headers=headers, follow_redirects=True) as c:
         boards = fetch_boards(c)
-        todo = [(g, cid, name) for g in ("male", "female") for cid, name in boards[g]]
-        for n, (g, cid, name) in enumerate(todo):
+        todo = [(bk, g, cid, name) for bk in kinds for g in ("male", "female") for cid, name in boards[g]]
+        for n, (bk, g, cid, name) in enumerate(todo):
             time.sleep(max(1.0, s.radar_interval_s))
             got: list[dict[str, Any]] = []
             for offset in range(0, per_board, 30):
                 r = c.get(API, params={
                     "app_id": 2503, "rank_list_type": 3, "offset": offset, "limit": min(30, per_board - offset),
-                    "category_id": cid, "rank_version": version, "gender": 1 if g == "male" else 0, "rankMold": 2,
+                    "category_id": cid, "rank_version": version, "gender": 1 if g == "male" else 0, "rankMold": BOARD_MOLD[bk],
                 })
                 r.raise_for_status()
                 data = r.json()
                 if data.get("code") not in (0, "0"):
                     raise RuntimeError(f"榜单接口返回 code={data.get('code')}")
                 version = version or str((data.get("data") or {}).get("rankVersion") or "")
-                page = parse_board(data, g, name)
+                page = parse_board(data, g, name, bk)
                 got.extend(page)
                 if len(page) < 30:
                     break
                 time.sleep(max(1.0, s.radar_interval_s))
             items.extend(got[:per_board])
             if progress:
-                progress(10 + int(70 * (n + 1) / len(todo)), f"{'男频' if g == 'male' else '女频'} · {name}（{n + 1}/{len(todo)}）")
+                progress(10 + int(70 * (n + 1) / len(todo)),
+                         f"{'男频' if g == 'male' else '女频'}{BOARD_LABEL[bk]} · {name}（{n + 1}/{len(todo)}）")
     if not items:
         raise RuntimeError("榜单接口没有返回数据")
     return items, version

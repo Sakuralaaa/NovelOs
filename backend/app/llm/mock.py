@@ -595,7 +595,22 @@ def mock_review(meta: dict[str, Any]) -> str:
         issues.append({"severity": "low", "dimension": "hook", "quote": sents[-1], "comment": "章末钩子可以再落到一个具体动作上"})
     # 故意编造一条不在正文里的 quote：程序应当丢弃
     issues.append({"severity": "mid", "dimension": "payoff", "quote": "他一拳打碎了整座山门，众人纷纷跪下。", "comment": "爽点过于夸张"})
-    return _j({"issues": issues})
+    # v0.9 补丁：对 high/mid 问题给逐字可匹配的替换；再混一个原文里没有的补丁，程序应当丢弃
+    patches = []
+    for k, it in enumerate(issues):
+        q = it["quote"]
+        if it["severity"] in ("high", "mid") and q in content:
+            new = q
+            for a, b in sorted(PLAIN_REPLACEMENTS.items(), key=lambda kv: -len(kv[0])):
+                new = new.replace(a, b)
+            for m in ("经过一番", "很快", "于是", "随后"):
+                new = new.replace(m, "")
+            new = new.replace("没有上限", "到顶了").replace("无上限", "到顶了")
+            if new == q:
+                new = q.rstrip("。！？") + "，话音没落，门外又有人敲了两下。"
+            patches.append({"original": q, "improved": new, "reason": it["comment"][:40], "issue_ref": k})
+    patches.append({"original": "这句话不在正文里。", "improved": "x", "reason": "凭空补丁", "issue_ref": 0})
+    return _j({"issues": issues, "patches": patches})
 
 
 def mock_humanize(meta: dict[str, Any]) -> str:
@@ -908,7 +923,77 @@ def mock_reskin(meta: dict[str, Any]) -> str:
     return _j({"ideas": _strip_words(ideas, [str(x) for x in meta.get("banned_keywords") or []])})
 
 
+# ---------------------------------------------------------------- v0.9：风向标日报 / 书测
+
+def mock_trend_report(meta: dict[str, Any]) -> str:
+    """用输入里的真实书名拼一份像样的日报；故意混进一个榜上没有的书名，程序应当删掉它。"""
+    boards: dict[str, list[dict[str, Any]]] = meta.get("boards") or {}
+    movers: dict[str, dict[str, list[dict[str, Any]]]] = meta.get("movers") or {}
+    all_items = [i for rows in boards.values() for i in rows]
+    by_cat: dict[str, list[str]] = {}
+    for i in all_items:
+        by_cat.setdefault(str(i.get("category") or "其他"), []).append(i["title"])
+    hot = [{"word": cat, "why": f"「{cat}」在榜上有 {len(ts)} 本，读者想要开局就有抓手、不受气的感觉", "examples": ts[:2]}
+           for cat, ts in sorted(by_cat.items(), key=lambda kv: -len(kv[1]))[:5]]
+    hot.append({"word": "凭空热词", "why": "没有证据的热词", "examples": ["这本书根本不在榜上"]})
+    out_boards = []
+    for name in meta.get("board_names") or list(boards):
+        rows = boards.get(name) or []
+        mv = movers.get(name) or {}
+        lead = "、".join(f"《{i['title']}》" for i in rows[:2]) or "（无数据）"
+        fresh = (mv.get("new") or mv.get("up") or rows[:1])
+        fresh_t = f"《{fresh[0]['title']}》" if fresh else "榜上新书"
+        cat = str(rows[0].get("category")) if rows else "脑洞"
+        out_boards.append({
+            "board": name, "overview": f"{lead}领跑，{cat}占了前排。",
+            "reader_mood": "想看主角第一章就拿到能用的好处，然后马上找回场子。",
+            "opportunity": f"{fresh_t}的上升说明「{cat}+身份反差」还能起量。",
+            "writing_tips": "第一章三行内出事，金手指当章给一次看得见的收益，章尾卡在新麻烦上门。",
+            "idea_hooks": [{"title": f"{cat}：我把倒闭的铺子开成了顶流", "pitch": "接手一家没人要的铺子，规则漏洞让每单都有离谱回报"},
+                           {"title": "被全家嫌弃后，我靠读心反杀", "pitch": "听得见心声，先知道谁要害她，再一个个摆平"}],
+        })
+    colon = [i["title"] for i in all_items if "：" in i["title"]][:3]
+    comma = [i["title"] for i in all_items if "，" in i["title"]][:3]
+    pats = []
+    if colon:
+        pats.append({"pattern": "《[题材标签]：[开局离谱设定]》", "examples": colon})
+    if comma:
+        pats.append({"pattern": "《[极端处境]，我[反差行为]》", "examples": comma})
+    pats.append({"pattern": "《[凭空句式]》", "examples": ["不存在的书名"]})
+    return _j({
+        "hot_words": hot, "boards": out_boards,
+        "open_directions": [f"{c}+普通人身份反差，开局给一个能立刻兑现的小收益" for c in list(by_cat)[:3]],
+        "title_patterns": pats,
+        "pitfalls": ["切忌前期被反派按在地上摩擦超过三章", "金手指不能有严重负面惩罚，代价要小于收益", "第一章别先讲世界观，三行内要出事"],
+    })
+
+
+BOOK_TEST_STYLES = [
+    ("A", "番茄情绪爽感", "开局", "高饱和暖色，主角正面半身特写，金色光效环绕，表情笃定"),
+    ("B", "悬疑规则脑洞", "规则", "暗色调，冷蓝与猩红光源，破碎的时钟或一张规则纸条，人物剪影"),
+    ("C", "轻松沙雕", "吐槽", "明亮漫画风，夸张的肢体动作和表情，大块纯色背景"),
+    ("D", "起点正剧", "正剧", "苍茫远景，云海孤峰，水墨与金色烫印结合，人物很小"),
+]
+
+
+def mock_book_test(meta: dict[str, Any]) -> str:
+    title = str(meta.get("title") or "未命名作品")
+    genre = str(meta.get("genre") or "都市")
+    cheat = str(meta.get("cheat") or "一本旧账")
+    p = str(meta.get("protagonist") or "主角")
+    names = [f"让你看店，你把{cheat[:4]}开成了神迹？", f"{cheat[:6]}规则：第七条千万别信", f"{p}：我的金手指只会吐槽",
+             title[:4] if len(title) >= 4 else f"{genre}志"]
+    out = []
+    for (code, style, _, cover), name in zip(BOOK_TEST_STYLES, names):
+        out.append({"style": f"{code} {style}", "title": name, "subtitle": f"{p}靠{cheat[:6]}翻身"[:20],
+                    "hook": f"{p}被逼到绝路那天，{cheat}第一次有了反应。",
+                    "cover_prompt": f"{genre}网文封面，竖版 3:4，{cover}，上方留书名位置"})
+    return _j({"variants": out})
+
+
 HANDLERS = {
+    "trend_report": mock_trend_report,
+    "book_test": mock_book_test,
     "ideation": mock_ideation,
     "idea_revise": mock_idea_revise,
     "idea_field": mock_idea_field,
@@ -989,6 +1074,10 @@ def agent_step(messages: list[dict[str, Any]], tools: list[dict[str, Any]], meta
             v = 2 if re.search(r"两个版本|2\s*个版本|多版本", user) else 1
             return call(("write_next_chapter", {"variants": v}), say="好，按章细纲写下一章。")
         return finish("下一章的写作任务已经准备好：")
+    if re.search(r"书测|测书|AB\s*测|测款", user):
+        if "book_test" not in called:
+            return call(("book_test", {}), say="出 4 组书名包装给你挑。")
+        return finish("书测方案出来了：")
     if "封面" in user:
         if "revise_cover_prompt" not in called:
             return call(("get_package", {}), ("revise_cover_prompt", {"instruction": user}), say="先看看现在的包装，再改封面提示词。")

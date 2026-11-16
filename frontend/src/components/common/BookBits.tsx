@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from '@/components/icons'
@@ -10,8 +10,8 @@ import { Field, Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { useJobs } from '@/lib/jobs'
-import type { Book, BookStatus, Gender } from '@/lib/types'
-import { GENRES_FEMALE, GENRES_MALE, STAGES, cn, stageIndex } from '@/lib/utils'
+import type { Book, BookStatus, Gender, PlatformStyle } from '@/lib/types'
+import { GENRES_FEMALE, GENRES_MALE, PLATFORM_STYLES, STAGES, cn, stageIndex } from '@/lib/utils'
 
 // 布面精装配色：藏青、墨绿、赭石、朱砂、黛灰、栗色、靛蓝
 const CLOTH = ['#2c3e57', '#33503f', '#8a5a2b', '#9b3a2c', '#4a4f57', '#5e3a2e', '#2f4a5e']
@@ -61,12 +61,18 @@ export function QuickCreateDialog({ open, onOpenChange, defaults }: { open: bool
   const [genre, setGenre] = useState(defaults?.genre ?? '')
   const [title, setTitle] = useState('')
   const [premise, setPremise] = useState(defaults?.premise ?? '')
+  const [platform, setPlatform] = useState<PlatformStyle>('fanqie')
+  // 每次打开都按传入的默认值重置（例如从风向标「用这个梗开书」带入）
+  useEffect(() => {
+    if (!open) return
+    setGender(defaults?.gender ?? 'male'); setGenre(defaults?.genre ?? ''); setPremise(defaults?.premise ?? ''); setTitle(''); setPlatform('fanqie')
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
   const nav = useNavigate()
   const qc = useQueryClient()
   const { start } = useJobs()
   const genres = gender === 'male' ? GENRES_MALE : GENRES_FEMALE
   const m = useMutation({
-    mutationFn: () => api.createBook({ title: title.trim() || undefined, genre: genre || genres[0], gender, premise: premise.trim() || undefined }),
+    mutationFn: () => api.createBook({ title: title.trim() || undefined, genre: genre || genres[0], gender, premise: premise.trim() || undefined, platform_style: platform }),
     meta: { errorTitle: '建书失败' },
     onSuccess: (book) => {
       qc.invalidateQueries({ queryKey: ['books'] })
@@ -106,8 +112,22 @@ export function QuickCreateDialog({ open, onOpenChange, defaults }: { open: bool
           <Field label="一句话点子">
             <Textarea value={premise} onChange={(e) => setPremise(e.target.value)} placeholder="例如：全球冰封，主角的超市每天零点自动补货。" className="min-h-[72px]" />
           </Field>
+          <PlatformStyleField value={platform} onChange={setPlatform} />
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** v0.9：平台风格档选择（建书表单、作品信息共用） */
+export function PlatformStyleField({ value, onChange }: { value: PlatformStyle; onChange: (v: PlatformStyle) => void }) {
+  const cur = PLATFORM_STYLES.find((p) => p.value === value) ?? PLATFORM_STYLES[0]
+  return (
+    <Field label="平台风格" hint="写作、审稿和人味检查按这一档的读者习惯来">
+      <div className="space-y-1.5">
+        <Segmented block value={value} onChange={onChange} options={PLATFORM_STYLES.map((p) => ({ value: p.value, label: p.value === 'fanqie' ? `${p.label}（默认）` : p.label }))} />
+        <p className="text-[12px] leading-relaxed text-muted-foreground">{cur.label}：{cur.desc}</p>
+      </div>
+    </Field>
   )
 }

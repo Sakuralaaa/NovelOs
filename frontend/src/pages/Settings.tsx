@@ -439,6 +439,13 @@ function RadarCard() {
               <div className="text-[13.5px] font-medium">抓取时间</div>
               <div className="w-[240px]"><Select value={String(c.daily_hour)} onChange={(v) => v && m.mutate({ ...c, daily_hour: Number(v) })} options={Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `每天 ${String(h).padStart(2, '0')}:00` }))} /></div>
             </div>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">刷新后自动生成风向标日报</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">每次榜单刷新成功后，后台用模型总结今日热词、开坑方向和避坑清单（会消耗一次模型调用）</div>
+              </div>
+              <Switch checked={!!c.auto_report} onCheckedChange={(v) => m.mutate({ ...c, auto_report: v })} />
+            </label>
           </div>
         )}
       </CardBody>

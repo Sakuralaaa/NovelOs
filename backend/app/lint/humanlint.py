@@ -18,6 +18,7 @@ from typing import Any
 
 from app.config import LintThresholds
 from app.lint.banned_zh import BANNED_PATTERNS, DESCRIPTOR_WORDS, ENDING_SUMMARY_PATTERNS, SUMMARY_MARKERS, WEAK_ADVERBS
+from app.lint.platform import get_profile
 from app.lint.craft_zh import (
     CATCHPHRASE_MAX, CLICHE_SIMILES, CROWD_MARKERS, CROWD_REACTIONS, CROWD_SHOTS_MAX, DIALOGUE_TIC_MAX, DIALOGUE_TICS,
     INTENSIFIER_MIN_ALLOW, INTENSIFIER_PER_K, INTENSIFIERS, MEASURE_RULES,
@@ -479,6 +480,10 @@ class LintResult:
     dialogue_tics: list[dict[str, Any]] = field(default_factory=list)
     catchphrases: list[dict[str, Any]] = field(default_factory=list)
     fix_targets: list[dict[str, str]] = field(default_factory=list)
+    # v0.9 平台风格档
+    platform: str = "generic"
+    long_paragraphs: list[int] = field(default_factory=list)  # 超过档位字数上限的段落下标（番茄档 >70 字）
+    crowd_max: int = CROWD_SHOTS_MAX
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -502,13 +507,15 @@ class LintResult:
             "dialogue_tics": self.dialogue_tics,
             "catchphrases": self.catchphrases,
             "fix_targets": self.fix_targets,
+            "platform": self.platform,
+            "long_paragraphs": len(self.long_paragraphs),
         }
 
     def craft_problem_count(self) -> int:
         """需要定点修的手艺类问题数（超频强化词、陈词比喻、量词错、口癖/口头禅超频、群众镜头超限）。"""
         return (sum(1 for d in self.intensifiers if d.get("over")) + len(self.cliche_similes) + len(self.measure_errors)
                 + sum(1 for d in self.dialogue_tics if d.get("over")) + sum(1 for d in self.catchphrases if d.get("over"))
-                + (1 if self.crowd_shots > CROWD_SHOTS_MAX else 0))
+                + (1 if self.crowd_shots > self.crowd_max else 0) + (1 if self.long_paragraphs else 0))
 
     def needs_patch(self, th: LintThresholds) -> bool:
         """AI 腔词/总分超阈值 → 定点替换式重写。"""
@@ -533,7 +540,11 @@ def lint_chapter(
     exclude_names: Sequence[str] = (),
     chapter_number: int | None = None,
     catchphrases: dict[str, list[str]] | None = None,
+    platform: str | None = None,
 ) -> LintResult:
+    """platform：v0.9 平台风格档（fanqie / qidian / generic），按档调阈值；不传按 generic（原有阈值）。"""
+    prof = get_profile(platform)
+    th = prof.thresholds(th)
     words = max(count_words(text), 1)
     per_k = 1000.0 / words
     warnings: list[str] = []
@@ -564,6 +575,13 @@ def lint_chapter(
     tics = dialogue_tic_report(text)
     cps = catchphrase_report(text, catchphrases)
     targets = craft_fix_targets(text, intens, cliches, measures, tics, cps)
+    long_paras: list[int] = []
+    if prof.long_para_chars:
+        long_paras = [i for i, p in enumerate(paras) if count_words(p) > prof.long_para_chars]
+        for i in sorted(long_paras, key=lambda i: -count_words(paras[i]))[:prof.long_para_fix_max]:
+            if count_words(paras[i]) <= 240:  # 太长的段落整段交给定点修不稳，只报警告
+                targets.append({"kind": "长段", "word": f"{count_words(paras[i])}字", "quote": paras[i],
+                                "hint": f"这段 {count_words(paras[i])} 字，手机上超过 3 行：按动作/对白拆成 2–3 段（段与段之间空一行），一个字都不改"})
 
     # 分项（满分 100）
     s_banned = min(1.0, banned_density / th.banned_per_k_max) * 30
@@ -589,13 +607,14 @@ def lint_chapter(
         s_extra += min(1.0, (subj - SUBJECT_START_MAX) / 0.3) * 3
     if scv < SENT_CV_MIN:
         s_extra += min(1.0, (SENT_CV_MIN - scv) / SENT_CV_MIN) * 3
-    if waterfall > WATERFALL_RUN_MAX:
+    if waterfall > prof.waterfall_run_max:
         s_extra += 3
     if ending:
         s_extra += 3
     # v0.6 手艺类（合计至多 10 分）：超频强化词、陈词比喻、量词错、口癖/口头禅超频、群众镜头超限
     s_craft = (min(4, sum(1 for d in intens if d["over"])) + min(3, len(cliches)) + min(2, len(measures))
-               + min(2, sum(1 for d in [*tics, *cps] if d["over"])) + (1 if len(crowd) > CROWD_SHOTS_MAX else 0))
+               + min(2, sum(1 for d in [*tics, *cps] if d["over"])) + (1 if len(crowd) > prof.crowd_shots_max else 0)
+               + min(3, len(long_paras) // 2))
     s_extra += min(10, s_craft)
     ai_score = round(
         min(100.0, s_banned + s_ngram + s_uniform + s_punct + s_dialogue + s_short + s_bare + s_summary + s_extra), 1
@@ -617,6 +636,7 @@ def lint_chapter(
         ("无情绪声线", "无情绪声线套句（声音不大却带着、语气毫无波澜）"),
         ("总结收束", "总结收束句（终于明白、才刚刚开始、从这一刻开始）"),
         ("告知式心理", "告知式心理（他感到一丝、显得有些）"),
+        ("书面成语", "书面成语（不可思议、匪夷所思、心乱如麻…），叙述里换成口语或动作"),
     ):
         if cats.get(cat):
             warnings.append(f"{label} {cats[cat]} 处")
@@ -640,7 +660,7 @@ def lint_chapter(
         warnings.append(f"叙述句以“他/她/人名”开头的占 {subj:.0%}，主语单调；换成动作、物件或环境起句，或把连续动作并成一句")
     if scv < SENT_CV_MIN:
         warnings.append(f"句长变异系数 {scv:.2f}，句子长短过于均匀，关键处用短句，过程用长句")
-    if waterfall > WATERFALL_RUN_MAX:
+    if waterfall > prof.waterfall_run_max:
         warnings.append(f"连续 {waterfall} 段都是单句成段（单句段瀑布流），把同一动作链并成完整段落")
     if ending:
         warnings.append(f"章末用总结/升华/空泛预告收尾（「{ending}」），改成断在一个具体的决定、发现或代价上")
@@ -652,8 +672,10 @@ def lint_chapter(
         warnings.append("陈词比喻：" + "、".join(f"{d['word']}×{d['count']}" for d in cliches) + "，换成现场独有的细节")
     for d in measures:
         warnings.append(f"量词搭配：「{d['match']}」，{d['hint']}")
-    if len(crowd) > CROWD_SHOTS_MAX:
-        warnings.append(f"群众/配角反应镜头 {len(crowd)} 处（上限 {CROWD_SHOTS_MAX}），合并或删掉，镜头留给主角和对手")
+    if len(crowd) > prof.crowd_shots_max:
+        warnings.append(f"群众/配角反应镜头 {len(crowd)} 处（上限 {prof.crowd_shots_max}），合并或删掉，镜头留给主角和对手")
+    if long_paras:
+        warnings.append(f"超过 {prof.long_para_chars} 字的段落 {len(long_paras)} 段（番茄档：单段 1–3 行），按动作/对白拆开")
     over_t = [d for d in [*tics, *cps] if d["over"]]
     if over_t:
         warnings.append("口头禅/句末口癖超频：" + "、".join(
@@ -692,6 +714,9 @@ def lint_chapter(
         dialogue_tics=tics,
         catchphrases=cps,
         fix_targets=targets,
+        platform=prof.name,
+        long_paragraphs=long_paras,
+        crowd_max=prof.crowd_shots_max,
     )
 
 

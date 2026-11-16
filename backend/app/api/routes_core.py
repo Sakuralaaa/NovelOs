@@ -6,13 +6,13 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TeardownDeepIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
+    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
@@ -259,20 +259,67 @@ def radar_snapshots(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
     return [snapshot_out(x) for x in s.exec(select(RadarSnapshot).order_by(RadarSnapshot.id.desc()).limit(60))]  # type: ignore[union-attr]
 
 
+BoardQ = Query(None, pattern="^(read|new)$", description="v0.9：read 阅读榜 / new 新书榜；不传为两类合并")
+
+
 @router.get("/radar/latest")
 def radar_latest(
-    gender: str | None = Query(None), category: str | None = Query(None), s: Session = Depends(get_session)
+    gender: str | None = Query(None), category: str | None = Query(None), board: str | None = BoardQ,
+    s: Session = Depends(get_session),
 ) -> dict[str, Any]:
     snap = radar.latest_snapshot(s)
     if snap is None:
-        return {"snapshot": None, "items": []}
-    items = radar.snapshot_items(s, snap.id or 0, gender or None, category or None)
-    return {"snapshot": snapshot_out(snap), "items": [rank_item_out(i) for i in items]}
+        return {"snapshot": None, "items": [], "boards": []}
+    items = radar.snapshot_items(s, snap.id or 0, gender or None, category or None, board=board or None)
+    return {"snapshot": snapshot_out(snap), "items": [rank_item_out(i) for i in items],
+            "boards": sorted(radar.snapshot_boards(s, snap.id or 0))}
 
 
 @router.get("/radar/trends")
-def radar_trends(gender: str | None = Query(None), s: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return radar.compute_trends(s, gender or None)
+def radar_trends(gender: str | None = Query(None), board: str | None = BoardQ, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return radar.compute_trends(s, gender or None, board or None)
+
+
+# ------------------------------------------------------------------ v0.9：风向标日报
+
+@router.get("/radar/report")
+def radar_report_get(scope: str = Query("overall"), s: Session = Depends(get_session)) -> dict[str, Any]:
+    """最新一份日报（该 scope）。没有时 404，detail 里写怎么生成。"""
+    from app.radar import report as trend_report
+
+    try:
+        trend_report.parse_scope(scope)
+    except trend_report.ReportError as e:
+        raise HTTPException(400, str(e)) from e
+    r = trend_report.latest_report(s, scope)
+    if r is None:
+        raise HTTPException(404, f"还没有「{trend_report.scope_label(scope)}」：先刷新榜单，再 POST /api/radar/report 生成")
+    return trend_report.report_out(s, r)
+
+
+@router.post("/radar/report")
+async def radar_report_post(body: TrendReportIn | None = Body(default=None)) -> dict[str, Any]:
+    """提交日报任务（Job，kind=radar_report，ref=trend_report:<scope>）；同 scope 进行中的任务直接返回。result 同 GET /radar/report。"""
+    from app.radar import report as trend_report
+
+    scope = (body.scope if body else "overall").strip() or "overall"
+    try:
+        trend_report.check_can_generate(scope)
+    except trend_report.ReportError as e:
+        raise HTTPException(400, str(e)) from e
+    except LookupError as e:
+        raise HTTPException(409 if "快照" in str(e) else 404, str(e)) from e
+    j = job_out(trend_report.submit_report(scope, body.top_n if body else None))
+    return {**j, "job_id": j["id"]}
+
+
+@router.get("/radar/reports")
+def radar_reports(limit: int = Query(10, ge=1, le=50), scope: str | None = Query(None), full: bool = Query(False),
+                  s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    """历史日报，新的在前。full=false 时不带 report 正文，只带 hot_words（热词列表）。"""
+    from app.radar import report as trend_report
+
+    return [trend_report.report_out(s, r, with_report=full) for r in trend_report.list_reports(s, limit, scope or None)]
 
 
 @router.get("/radar/config")
@@ -282,7 +329,7 @@ def radar_config_get(s: Session = Depends(get_session)) -> dict[str, Any]:
 
 @router.put("/radar/config")
 def radar_config_put(body: RadarConfigIn, s: Session = Depends(get_session)) -> dict[str, Any]:
-    return radar.set_config(s, body.enabled, body.daily_hour)
+    return radar.set_config(s, body.enabled, body.daily_hour, body.auto_report)
 
 
 # ------------------------------------------------------------------ v0.7：榜单仿写（只学结构）

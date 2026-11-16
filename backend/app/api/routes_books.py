@@ -12,8 +12,8 @@ from sqlmodel import Session, select
 from app.api.schemas import (
     AiAsk, BibleApplyIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
     ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
-    AdoptVariantIn, BookCreate, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
-    IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
+    AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
+    IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
 from app.config import get_settings
@@ -48,7 +48,8 @@ def list_books(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
 def create_book(body: BookCreate, s: Session = Depends(get_session)) -> dict[str, Any]:
     st = get_settings()
     b = Book(title=body.title or "未命名作品", genre=body.genre, gender=body.gender, premise=body.premise or "",
-             status="idea", target_words=st.default_target_words, chapter_words=st.default_chapter_words)
+             status="idea", target_words=st.default_target_words, chapter_words=st.default_chapter_words,
+             platform_style=body.platform_style)
     s.add(b)
     s.commit()
     s.refresh(b)
@@ -109,6 +110,36 @@ async def book_revise(book_id: int, body: AiAsk, s: Session = Depends(get_sessio
     """写要求让 AI 改书名 / 一句话简介 / 核心设定。结果是建议（含下游影响），预览后用 /info 采纳。"""
     _book(s, book_id)
     return job_out(submit("book_revise", lambda ctx: book_edit.revise_info(book_id, body.instruction, body.route, ctx), book_id=book_id))
+
+
+# ------------------------------------------------------------------ v0.9 书测
+
+@router.post("/books/{book_id}/book-test")
+async def book_test_generate(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """生成 4 组书测方案（Job，kind=book_test）。result 同 GET book-test。"""
+    from app.services import book_test
+
+    _book(s, book_id)
+    return job_out(submit("book_test", lambda ctx: book_test.generate(book_id, ctx), book_id=book_id))
+
+
+@router.get("/books/{book_id}/book-test")
+def book_test_get(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from app.services import book_test
+
+    _book(s, book_id)
+    return book_test.get(book_id)
+
+
+@router.post("/books/{book_id}/book-test/adopt")
+def book_test_adopt(book_id: int, body: BookTestAdoptIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """采纳一组：书名/一句话简介走作品信息版本栈（可 POST /books/{id}/undo 撤回）。→ {book, package, adopted:{index, variant, applied, before, after}}"""
+    from app.services import book_test
+
+    _book(s, book_id)
+    r = book_test.adopt(book_id, body.index, list(body.fields))
+    s.expire_all()
+    return {"book": book_out(s, _book(s, book_id)), "package": package_out(book_id, s.get(Package, book_id)), "adopted": r}
 
 
 @router.post("/books/{book_id}/info")
@@ -514,6 +545,14 @@ def _chapter_book(s: Session, chapter_id: int) -> int:
 async def review_chapter(chapter_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     bid = _chapter_book(s, chapter_id)
     return job_out(submit("chapter_review", lambda ctx: writing.review_chapter_job(chapter_id, ctx), book_id=bid, lock_book=True))
+
+
+@router.post("/chapters/{chapter_id}/review/patches/apply")
+def apply_review_patches(chapter_id: int, body: PatchApplyIn) -> dict[str, Any]:
+    """v0.9：按下标应用审稿补丁（同步，不调模型）。逐字匹配原文，匹配不到的跳过；旧正文进历史可用 /undo 撤回。
+    → {chapter, applied:[{index, original, improved}], skipped:[{index, reason}]}"""
+    ch, applied, skipped = writing.apply_review_patches(chapter_id, body.indices)
+    return {"chapter": chapter_out(ch), "applied": applied, "skipped": skipped}
 
 
 @router.post("/chapters/{chapter_id}/humanize")

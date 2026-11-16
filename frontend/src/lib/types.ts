@@ -52,7 +52,10 @@ export interface RankItem {
   abstract: string
   tags: string[]
   gender: Gender
+  /** v0.9：阅读榜 / 新书榜（旧数据为 read） */
+  board?: RankBoard
 }
+export type RankBoard = 'read' | 'new'
 export interface RadarSnapshot {
   id: number
   taken_at: string
@@ -70,6 +73,37 @@ export interface TrendTopic {
 export interface RadarConfig {
   enabled: boolean
   daily_hour: number
+  /** v0.9：刷新成功后自动生成风向标日报（PUT 不传表示不改） */
+  auto_report?: boolean
+}
+
+// ---------- v0.9 风向标日报 ----------
+export interface TrendHotWord { word: string; why: string; examples: string[] }
+export interface TrendIdeaHook { title: string; pitch: string }
+export interface TrendBoard {
+  board: string; overview: string; reader_mood: string; opportunity: string; writing_tips: string; idea_hooks: TrendIdeaHook[]
+}
+export interface TrendTitlePattern { pattern: string; examples: string[] }
+export interface TrendReportBody {
+  hot_words: TrendHotWord[]
+  boards: TrendBoard[]
+  open_directions: string[]
+  title_patterns: TrendTitlePattern[]
+  pitfalls: string[]
+  warnings: string[]
+  inputs?: { top_n?: number; books?: number; boards?: Record<string, number>; new_entries?: Record<string, number>; prev_snapshot_id?: number | null }
+}
+export interface TrendReport {
+  id: number
+  snapshot_id: number
+  scope: string
+  created_at: string
+  model: string
+  stale: boolean
+  snapshot: { id: number; taken_at: string; source: RadarSnapshot['source']; version?: string; items_count: number } | null
+  /** full=false 的历史列表没有 report，改为 hot_words */
+  report?: TrendReportBody
+  hot_words?: string[]
 }
 
 export type BookStatus = 'idea' | 'bible' | 'outline' | 'writing' | 'packaging' | 'done'
@@ -93,6 +127,23 @@ export interface Book {
   banned_tropes?: Trope[]
   /** v0.5：本书 Agent 的改动直接写入（仍可撤回；删除类永远要确认） */
   agent_auto_apply?: boolean
+  /** v0.9：平台风格档（默认 fanqie）、是否做过书测 */
+  platform_style?: PlatformStyle
+  has_book_test?: boolean
+}
+export type PlatformStyle = 'fanqie' | 'qidian' | 'generic'
+
+// ---------- v0.9 书测 ----------
+export interface BookTestVariant { style: string; title: string; subtitle: string; hook: string; cover_prompt: string }
+export type BookTestField = 'title' | 'subtitle' | 'hook' | 'cover_prompt'
+export interface BookTest {
+  book_id: number
+  variants: BookTestVariant[]
+  warnings: string[]
+  created_at: string
+  model: string
+  adopted: number | null
+  adopted_fields: BookTestField[]
 }
 
 export interface Trope { name: string; keywords: string[] }
@@ -234,7 +285,21 @@ export interface Review {
   passed: boolean
   /** v0.8.4：读者视角打分（0–10）与一句读后感 */
   reader?: { score: number | null; verdict: string }
+  /** v0.9：审稿补丁（逐字替换）与应用记录 */
+  patches?: ReviewPatch[]
+  patch_log?: PatchLogEntry[]
 }
+export interface ReviewPatch {
+  index: number
+  original: string
+  improved: string
+  reason: string
+  issue_ref: number | null
+  severity: ReviewIssue['severity'] | string
+  applied: boolean
+}
+export interface PatchSkip { index: number; reason: string }
+export interface PatchLogEntry { label: string; at: string; applied: number[]; skipped: PatchSkip[] }
 export interface Lint {
   ai_score: number
   dialogue_ratio: number
@@ -254,6 +319,9 @@ export interface Lint {
   dialogue_tics?: { word: string; count: number; over: boolean }[]
   catchphrases?: { who: string; word: string; count: number; over: boolean }[]
   fix_targets?: { kind: string; word: string; quote: string; hint: string }[]
+  /** v0.9：本次按哪一档检查、超长段落数（番茄档 >70 字） */
+  platform?: PlatformStyle | string
+  long_paragraphs?: number
 }
 export interface ChangeSet {
   new_entities: any[]
@@ -383,7 +451,7 @@ export interface AgentMessage {
   label?: string; kind?: 'read' | 'write'
 }
 export type AgentProposalKind = 'book_info' | 'bible' | 'card_delete' | 'outline_nodes' | 'chapter_rewrite' | 'foreshadow_add'
-  | 'foreshadow_update' | 'foreshadow_delete' | 'package' | 'covers' | 'write_chapter' | 'reskin_ideas'
+  | 'foreshadow_update' | 'foreshadow_delete' | 'package' | 'covers' | 'write_chapter' | 'reskin_ideas' | 'book_test'
 export type AgentProposalStatus = 'pending' | 'applied' | 'rejected' | 'reverted' | 'running' | 'failed'
 export interface AgentProposal {
   id: number; book_id: number; session_id: number; message_id: number | null; kind: AgentProposalKind; kind_label: string
