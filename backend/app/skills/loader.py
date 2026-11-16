@@ -186,23 +186,36 @@ SYSTEM_BASE = (
 
 
 # v0.9 平台风格档：规则包里用 <!-- platform:fanqie --> … <!-- /platform --> 包住只对某个平台生效的小节
-PLATFORMS = ("fanqie", "qidian", "generic")
-PLATFORM_LABEL = {"fanqie": "番茄", "qidian": "起点", "generic": "通用"}
+# v0.11：新增可选档 duanju（短剧分镜）。它继承番茄档的平台小节（短段、快切），
+# 另外在写作/细纲类任务上叠加 rules/duanju.md 规则包（PLATFORM_PACKS）。
+PLATFORMS = ("fanqie", "qidian", "generic", "duanju")
+PLATFORM_LABEL = {"fanqie": "番茄", "qidian": "起点", "generic": "通用", "duanju": "短剧分镜"}
+PLATFORM_BASE: dict[str, str] = {"duanju": "fanqie"}          # 档 → 继承哪个档的 <!-- platform:x --> 小节
+PLATFORM_PACKS: dict[str, str] = {"duanju": "duanju"}          # 档 → 额外叠加的规则包（rules/<name>.md）
+# 叠加规则包只挂在用到 writing / chapter_plan 规则的任务上（写场景、扩写、细纲、改写、增厚、润色…）
+PLATFORM_PACK_STAGES = ("writing", "chapter_plan")
 _PLATFORM_BLOCK = re.compile(r"<!--\s*platform:([a-z,]+)\s*-->(.*?)<!--\s*/platform\s*-->", re.S)
 
 
 def platform_filter(body: str, platform: str | None) -> str:
-    """只保留当前平台的小节（可写 platform:fanqie,qidian）；platform 为空时去掉全部平台小节。"""
+    """只保留当前平台的小节（可写 platform:fanqie,qidian）；platform 为空时去掉全部平台小节。
+    v0.11：duanju 档同时保留它继承的番茄小节（PLATFORM_BASE）。"""
+    wanted = {platform, PLATFORM_BASE.get(platform or "")} - {None, ""}
+
     def keep(m: re.Match[str]) -> str:
         names = m.group(1).split(",")
-        return m.group(2).strip("\n") if platform and platform in names else ""
+        return m.group(2).strip("\n") if wanted and any(n in wanted for n in names) else ""
     return re.sub(r"\n{3,}", "\n\n", _PLATFORM_BLOCK.sub(keep, body)).strip()
 
 
 def system_prompt(task: str, extra: str = "", platform: str | None = None) -> str:
     parts = [SYSTEM_BASE]
-    for stage in TASK_SKILLS.get(task, ()):
+    stages = TASK_SKILLS.get(task, ())
+    for stage in stages:
         parts.append(platform_filter(load_pack(stage).body, platform))
+    pack = PLATFORM_PACKS.get(platform or "")
+    if pack and any(st in PLATFORM_PACK_STAGES for st in stages):  # v0.11 短剧分镜档：叠加专属规则包
+        parts.append(platform_filter(load_pack(pack).body, platform))
     if extra:
         parts.append(extra)
     return "\n\n".join(parts)

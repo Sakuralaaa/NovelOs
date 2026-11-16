@@ -203,7 +203,23 @@ AI_NOTICE = """# AI 申报提示（发布前必读）
 """
 
 
-def build_export(book_id: int) -> tuple[str, bytes]:
+def full_text(book_id: int) -> str:
+    """v0.11 整书 TXT：书名、简介，然后按章「第N章 标题」+ 正文（只含已提交章节，不附加任何额外声明）。"""
+    with session_scope() as s:
+        book: Book = common.get_book(s, book_id)
+        pkg = s.get(Package, book_id)
+        chapters = common.committed_chapters(s, book_id)
+        blurb = ((pkg.blurb if pkg else "") or book.tagline or "").strip()
+        out: list[str] = [book.title, ""]
+        if blurb:
+            out += ["简介", blurb, ""]
+        for c in chapters:
+            out += [f"第{c.number}章 {c.title}".rstrip(), "", c.content.strip(), ""]
+        return "\n".join(out).rstrip() + "\n"
+
+
+def build_export(book_id: int, include_ai_notice: bool = False) -> tuple[str, bytes]:
+    """发布包 zip。v0.11：默认不再附带 AI 申报提示（include_ai_notice=True 时才输出），并附整书 TXT。"""
     with session_scope() as s:
         book: Book = common.get_book(s, book_id)
         pkg = s.get(Package, book_id)
@@ -234,6 +250,7 @@ def build_export(book_id: int) -> tuple[str, bytes]:
         if chapters:
             md += ["## 章节目录"] + [f"- 第{c.number}章 {c.title}（{c.words} 字）" for c in chapters] + [""]
 
+        whole = full_text(book_id)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("建书资料.md", "\n".join(md))
@@ -244,5 +261,8 @@ def build_export(book_id: int) -> tuple[str, bytes]:
             if cover is None:
                 cover = placeholder_cover(book.title, book.genre, 0)
             z.writestr("cover.png", cover)
-            z.writestr("AI申报提示.md", AI_NOTICE)
+            book_safe = re.sub(r'[\\/:*?"<>|\s]+', "_", book.title)[:40] or "book"
+            z.writestr(f"{book_safe}_全书.txt", whole)
+            if include_ai_notice:
+                z.writestr("AI申报提示.md", AI_NOTICE)
         return book.title, buf.getvalue()

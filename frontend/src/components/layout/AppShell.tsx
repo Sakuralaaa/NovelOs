@@ -40,7 +40,7 @@ export function AppShell() {
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3 md:hidden">
-          <button onClick={() => setMobileOpen(true)} className="rounded-md p-1.5 hover:bg-muted" aria-label="打开菜单"><Menu className="h-5 w-5" /></button>
+          <button onClick={() => setMobileOpen(true)} className="focus-ring rounded-md p-2 hover:bg-muted" aria-label="打开菜单"><Menu className="h-5 w-5" /></button>
           <Logo />
         </header>
         <main id="main" className="relative min-h-0 flex-1 overflow-y-auto">

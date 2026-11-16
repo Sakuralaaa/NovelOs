@@ -128,10 +128,10 @@ def numeric_ledger(s: Session, book_id: int, number: int, cards: list[Card] | No
 
 
 def book_platform(s: Session, book_id: int) -> str:
-    """书的平台风格档（v0.9）：fanqie 默认 / qidian / generic。"""
+    """书的平台风格档（v0.9）：fanqie 默认 / qidian / generic；v0.11 加 duanju（短剧分镜）。"""
     b = s.get(Book, book_id)
     ps = getattr(b, "platform_style", None) if b else None
-    return ps if ps in ("fanqie", "qidian", "generic") else "fanqie"
+    return ps if ps in ("fanqie", "qidian", "generic", "duanju") else "fanqie"
 
 
 def book_thresholds(s: Session, book_id: int) -> Any:
@@ -450,9 +450,12 @@ WRITE_NEXT_KIND = "chapter_write_next"
 
 
 def write_next(book_id: int, ctx: JobContext, variants: int | None = None, instruction: str = "",
-               resume: dict[str, Any] | None = None) -> dict[str, Any]:
+               resume: dict[str, Any] | None = None, no_commit: bool = False,
+               allow_pending: list[int] | None = None) -> dict[str, Any]:
     """写下一章。v0.9.4：每完成一步把断点写进 job_checkpoint（拆场景 / 每个场景 / 每个版本 / 建章 / 精修 / 补丁重审），
-    续跑时（resume 或 ctx.resume_state）跳过已完成的步骤，从最后完成的场景接着写。批量写章（_SubContext）不存断点。"""
+    续跑时（resume 或 ctx.resume_state）跳过已完成的步骤，从最后完成的场景接着写。批量写章（_SubContext）不存断点。
+    v0.11 完本模式：no_commit=True 时照常采纳/精修/补丁，但不自动提交（留 reviewing 等人工审批）；
+    allow_pending 里的章号即使未提交也不挡写下一章（精修范围里待审批的章）。默认值保持旧行为。"""
     cp: dict[str, Any] = dict(resume if resume is not None else (getattr(ctx, "resume_state", None) or {}))
     resuming = bool(cp)
     can_cp = callable(getattr(ctx, "checkpoint", None)) and not isinstance(ctx, _SubContext)
@@ -467,19 +470,27 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None, instr
         params = cp.get("params") or {}
         variants = params.get("variants", variants)
         instruction = params.get("instruction", instruction) or ""
+        no_commit = bool(params.get("no_commit", no_commit))
+        allow_pending = params.get("allow_pending", allow_pending)
     if cp.get("chapter_id"):
         return _write_next_after_draft(book_id, ctx, cp, done, save)
 
     with session_scope() as s:
         book = common.get_book(s, book_id)
-        pending = s.exec(
-            select(Chapter).where(Chapter.book_id == book_id, Chapter.status != "committed").order_by(Chapter.number)
-        ).first()
+        skip = [int(x) for x in (allow_pending or [])]
+        q = select(Chapter).where(Chapter.book_id == book_id, Chapter.status != "committed")
+        if skip:
+            q = q.where(Chapter.number.notin_(skip))  # type: ignore[attr-defined]
+        pending = s.exec(q.order_by(Chapter.number)).first()
         if pending is not None:
             raise Conflict(f"第{pending.number}章尚未提交（{pending.status}），请先选定版本并提交")
         settings = writing_settings(s)
     n_var = max(1, min(3, int(variants or settings["default_variants"] or 1)))
     cp["params"] = {"variants": n_var, "instruction": instruction}
+    if no_commit:
+        cp["params"]["no_commit"] = True
+    if allow_pending:
+        cp["params"]["allow_pending"] = [int(x) for x in allow_pending]
 
     node_id = cp.get("node_id") or ensure_next_chapter_node(book_id, ctx)
     cp["node_id"] = node_id
@@ -675,7 +686,13 @@ def _write_next_after_draft(book_id: int, ctx: JobContext, cp: dict[str, Any], d
         assert ch is not None
         passed = bool((ch.review or {}).get("passed"))
         flagged = bool((ch.review or {}).get("flagged"))
-    if passed and settings["auto_commit"]:
+    if (cp.get("params") or {}).get("no_commit"):
+        # v0.11 完本模式精修范围：只写不提交，留 reviewing 等作者人工审批
+        result["committed"] = False
+        result["awaiting_approval"] = True
+        result["review_passed"] = passed
+        result["reason"] = "精修范围内的章节：已写好并自检，等待作者审批后提交"
+    elif passed and settings["auto_commit"]:
         ctx.progress(92, f"第{number}章：原子提交")
         ch2 = commit_chapter(chapter_id)
         result["committed"] = True

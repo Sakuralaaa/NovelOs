@@ -5,13 +5,13 @@ import { cn } from '@/lib/utils'
 export const Tabs = T.Root
 export const TabsContent = T.Content
 export function TabsList({ className, ...p }: React.ComponentProps<typeof T.List>) {
-  return <T.List className={cn('inline-flex h-9 items-center gap-0.5 rounded-lg bg-muted p-[3px]', className)} {...p} />
+  return <T.List className={cn('inline-flex h-9 items-center gap-0.5 rounded-lg bg-muted p-[3px] max-md:h-auto', className)} {...p} />
 }
 export function TabsTrigger({ className, ...p }: React.ComponentProps<typeof T.Trigger>) {
   return (
     <T.Trigger
       className={cn(
-        'focus-ring inline-flex h-full flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-surface data-[state=active]:text-foreground data-[state=active]:shadow-card',
+        'focus-ring inline-flex h-full flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 max-md:min-h-9 text-[13px] font-medium text-muted-foreground transition-all hover:text-foreground data-[state=active]:bg-surface data-[state=active]:text-foreground data-[state=active]:shadow-card',
         className,
       )}
       {...p}
@@ -24,7 +24,7 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
   value: T; onChange: (v: T) => void; options: { value: T; label: React.ReactNode }[]; className?: string; size?: 'sm' | 'md'; block?: boolean
 }) {
   return (
-    <div className={cn(block ? 'flex' : 'inline-flex', 'items-center gap-0.5 rounded-lg bg-muted p-[3px]', size === 'sm' ? 'h-8' : 'h-9', className)} role="tablist">
+    <div className={cn(block ? 'flex' : 'inline-flex', 'items-center gap-0.5 rounded-lg bg-muted p-[3px]', size === 'sm' ? 'h-8' : 'h-9', 'max-md:h-auto', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
@@ -32,7 +32,7 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
           className={cn(
-            'focus-ring inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-all',
+            'focus-ring inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-all max-md:min-h-9',
             block && 'flex-1 justify-center',
             value === o.value ? 'bg-surface text-foreground shadow-card' : 'text-muted-foreground hover:text-foreground',
           )}

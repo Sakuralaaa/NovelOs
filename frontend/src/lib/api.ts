@@ -442,3 +442,83 @@ export const fqk = {
   context: (bookId: number) => ['fanfic', 'context', bookId] as const,
   chapter: (chapterId: number) => ['fanfic', 'chapter', chapterId] as const,
 }
+
+// ---------------------------------------------------------------- v0.11 完本模式 / 质检
+import type {
+  AdaptHistoryItem, AdaptReport, BookCheckHistoryItem, BookCheckReport, CheckFix, DuanjuCheck, HomoReport, IterateInput, PlatformStyleOpt,
+  RangeItem, RefineSummary, WanbenBatch, WanbenIteration, WanbenPlanSummary, WanbenProgress, WanbenSettings, WanbenSettingsInput,
+} from './types'
+
+export const wanbenApi = {
+  settings: (bookId: number) => get<WanbenSettings>(`/books/${bookId}/wanben`),
+  saveSettings: (bookId: number, b: WanbenSettingsInput) => put<WanbenSettings>(`/books/${bookId}/wanben`, b),
+  /** Job（wanben_plan），result = WanbenPlanResult */
+  plan: (bookId: number) => viaJobId(post(`/books/${bookId}/wanben/plan`)),
+  planSummary: (bookId: number) => get<WanbenPlanSummary>(`/books/${bookId}/wanben/plan`),
+  /** Job（wanben_batch）；force：精修待审批时也继续写 */
+  batch: (bookId: number, force = false) => viaJobId(post(`/books/${bookId}/wanben/batch`, { force })),
+  pause: (bookId: number) => post<{ ok: boolean; paused: boolean; running_batch_id: number | null; job_id: number | null; message: string }>(`/books/${bookId}/wanben/batch/pause`),
+  batches: (bookId: number) => get<WanbenBatch[]>(`/books/${bookId}/wanben/batches`),
+  batchDetail: (bookId: number, batchId: number) => get<WanbenBatch>(`/books/${bookId}/wanben/batches/${batchId}`),
+  refine: (bookId: number) => get<RefineSummary>(`/books/${bookId}/wanben/refine`),
+  editRefine: (bookId: number, action: 'add' | 'remove' | 'set', ranges: RangeItem[]) => post<RefineSummary>(`/books/${bookId}/wanben/refine`, { action, ranges }),
+  /** Job（wanben_iterate） */
+  iterate: (bookId: number, b: IterateInput) => viaJobId(post(`/books/${bookId}/wanben/iterate`, b)),
+  stopIterate: (bookId: number) => post<{ ok: boolean; message: string }>(`/books/${bookId}/wanben/iterate/stop`),
+  iterations: (bookId: number, p: { number?: number; chapter_id?: number; status?: 'pending' | 'adopted' | 'discarded' } = {}) => get<WanbenIteration[]>(`/books/${bookId}/wanben/iterations${qs(p)}`),
+  iteration: (bookId: number, id: number) => get<WanbenIteration>(`/books/${bookId}/wanben/iterations/${id}`),
+  adoptIteration: (bookId: number, id: number) => post<{ iteration: WanbenIteration; chapter_id: number; chapter_status: string; words: number }>(`/books/${bookId}/wanben/iterations/${id}/adopt`),
+  discardIteration: (bookId: number, id: number) => post<WanbenIteration>(`/books/${bookId}/wanben/iterations/${id}/discard`),
+  progress: (bookId: number) => get<WanbenProgress>(`/books/${bookId}/wanben/progress`),
+  /** 下载整书 TXT（Blob，兼容 mock） */
+  async exportTxt(bookId: number, fallback: string) {
+    let res: Response
+    try { res = await fetch(`/api/books/${bookId}/wanben/export.txt`, { credentials: 'same-origin' }) } catch { throw new ApiError(0, '无法连接到后端服务') }
+    if (!res.ok) {
+      let msg = `导出失败（${res.status}）`
+      try { const j = await res.json(); if (j?.detail) msg = j.detail } catch { /* ignore */ }
+      throw new ApiError(res.status, msg)
+    }
+    const cd = res.headers.get('Content-Disposition') || ''
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd)
+    const name = m ? decodeURIComponent(m[1]) : fallback
+    const url = URL.createObjectURL(await res.blob())
+    const a = document.createElement('a')
+    a.href = url; a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
+}
+
+export const checkApi = {
+  platformStyles: () => get<{ items: PlatformStyleOpt[] }>('/platform-styles'),
+  /** Job（book_check），result = BookCheckReport */
+  startBookCheck: (bookId: number, llm: boolean) => viaJobId(post(`/books/${bookId}/book-check`, { llm })),
+  bookCheck: (bookId: number, jobId?: number) => get<{ report: BookCheckReport | null }>(`/books/${bookId}/book-check${qs({ job_id: jobId })}`),
+  bookCheckHistory: (bookId: number) => get<{ items: BookCheckHistoryItem[] }>(`/books/${bookId}/book-check/history`),
+  /** 一键修：按问题里的 fix（endpoint/method/body）调用已有接口；返回 Job 时交给轮询 */
+  runFix: (fix: CheckFix) => request<any>(fix.method.toUpperCase(), fix.endpoint.replace(/^\/api(?=\/)/, ''), fix.body ?? {}),
+  startAdapt: (bookId: number, b: { start?: number; end?: number; llm?: boolean }) => viaJobId(post(`/books/${bookId}/adaptability`, b)),
+  adapt: (bookId: number, jobId?: number) => get<{ report: AdaptReport | null }>(`/books/${bookId}/adaptability${qs({ job_id: jobId })}`),
+  adaptHistory: (bookId: number) => get<{ items: AdaptHistoryItem[] }>(`/books/${bookId}/adaptability/history`),
+  duanjuCheck: (chapterId: number) => post<DuanjuCheck>(`/chapters/${chapterId}/duanju-check`),
+  /** llm=false：同步 {mode:'sync', report}；llm=true：{mode:'job', job} */
+  homogeneity: (target: 'book' | 'idea', id: number, llm = false) =>
+    post<{ mode: 'sync'; report: HomoReport } | { mode: 'job'; job: Job }>(`/${target === 'book' ? 'books' : 'ideas'}/${id}/homogeneity`, { llm }),
+}
+
+export const wqk = {
+  settings: (bookId: number) => ['wanben', bookId, 'settings'] as const,
+  progress: (bookId: number) => ['wanben', bookId, 'progress'] as const,
+  batches: (bookId: number) => ['wanben', bookId, 'batches'] as const,
+  batch: (bookId: number, id: number) => ['wanben', bookId, 'batch', id] as const,
+  refine: (bookId: number) => ['wanben', bookId, 'refine'] as const,
+  iterations: (bookId: number) => ['wanben', bookId, 'iterations'] as const,
+  iteration: (bookId: number, id: number) => ['wanben', bookId, 'iteration', id] as const,
+  bookCheck: (bookId: number, jobId?: number) => ['book-check', bookId, jobId ?? 'latest'] as const,
+  bookCheckHistory: (bookId: number) => ['book-check', bookId, 'history'] as const,
+  adapt: (bookId: number, jobId?: number) => ['adaptability', bookId, jobId ?? 'latest'] as const,
+  adaptHistory: (bookId: number) => ['adaptability', bookId, 'history'] as const,
+  platformStyles: ['platform-styles'] as const,
+  duanju: (chapterId: number) => ['duanju', chapterId] as const,
+}

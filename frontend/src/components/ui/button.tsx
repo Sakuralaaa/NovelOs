@@ -15,13 +15,14 @@ const variants: Record<Variant, string> = {
   danger: 'bg-danger text-white hover:bg-danger/90',
   link: 'text-primary underline-offset-4 hover:underline px-0 h-auto',
 }
+// v0.11：390 宽等窄屏（< md）下小尺寸按钮的可点区域至少 36px 高（图标按钮同时至少 36px 宽）；桌面尺寸不变
 const sizes: Record<Size, string> = {
-  xs: 'h-7 px-2 text-xs gap-1 rounded-sm',
-  sm: 'h-8 px-3 text-[13px] gap-1.5 rounded-md',
+  xs: 'h-7 px-2 text-xs gap-1 rounded-sm max-md:min-h-9 max-md:px-2.5',
+  sm: 'h-8 px-3 text-[13px] gap-1.5 rounded-md max-md:min-h-9',
   md: 'h-9 px-3.5 text-sm gap-2 rounded-md',
   lg: 'h-10 px-5 text-[14px] gap-2 rounded-lg',
   icon: 'h-9 w-9 rounded-md',
-  'icon-sm': 'h-7 w-7 rounded-sm',
+  'icon-sm': 'h-7 w-7 rounded-sm max-md:min-h-9 max-md:min-w-9',
 }
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {

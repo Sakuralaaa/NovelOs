@@ -25,6 +25,7 @@ import { DiffView } from '@/components/chapter/DiffView'
 import { AigcPanel, useSha256 } from '@/components/aigc/Aigc'
 import { CostButton } from '@/components/cost/CostButton'
 import { FanficChapterPanel } from '@/components/FanficChapterPanel'
+import { DuanjuPanel } from '@/components/chapter/DuanjuPanel'
 import { useBook } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { useDebouncedCallback } from '@/hooks/useDebounced'
@@ -446,7 +447,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
 
   const panel = (
     <Tabs value={tab} onValueChange={setTab} className="flex h-full flex-col">
-      <div className="border-b px-4 py-3"><TabsList className="w-full"><TabsTrigger value="review">审稿</TabsTrigger><TabsTrigger value="lint">人味</TabsTrigger><TabsTrigger value="aigc">AI 率</TabsTrigger><TabsTrigger value="changes">变更</TabsTrigger></TabsList></div>
+      <div className="border-b px-4 py-3"><TabsList className="w-full"><TabsTrigger value="review">审稿</TabsTrigger><TabsTrigger value="lint">人味</TabsTrigger><TabsTrigger value="aigc">AI 率</TabsTrigger><TabsTrigger value="changes">变更</TabsTrigger><TabsTrigger value="duanju">短剧</TabsTrigger></TabsList></div>
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <TabsContent value="review" className="focus:outline-none"><ReviewPanel review={ch.review} onQuote={locateQuote} onReview={runReview} reviewing={!!reviewJob} activeQuote={focusQuote?.q}
           onApplyPatches={(ix) => applyPatches.mutate(ix)} applyingPatches={applyPatches.isPending}
@@ -464,6 +465,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             disabled={hasVariants ? '先采纳一个版本再检测' : rewriting ? '改写任务进行中' : false} />
         </TabsContent>
         <TabsContent value="changes" className="focus:outline-none"><ChangesPanel changes={ch.changes} /></TabsContent>
+        <TabsContent value="duanju" className="focus:outline-none"><DuanjuPanel chapterId={ch.id} unsaved={saveState !== 'saved'} onLocate={locateQuote} /></TabsContent>
       </div>
     </Tabs>
   )
@@ -636,7 +638,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
       </div>
 
       {panelOpen && <aside className="hidden w-[336px] shrink-0 border-l bg-surface/60 xl:block">{panel}</aside>}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="审稿 · 人味 · AI 率" width={400}><div className="-mx-6 -my-5 h-[calc(100dvh-80px)]">{panel}</div></Sheet>
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="审稿 · 人味 · AI 率 · 短剧" width={400}><div className="-mx-6 -my-5 h-[calc(100dvh-80px)]">{panel}</div></Sheet>
     </div>
   )
 }

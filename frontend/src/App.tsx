@@ -23,6 +23,8 @@ const Chapters = lazy(() => import('@/pages/book/Chapters'))
 const Foreshadows = lazy(() => import('@/pages/book/Foreshadows'))
 const PackagePage = lazy(() => import('@/pages/book/Package'))
 const AgentPage = lazy(() => import('@/pages/book/Agent'))
+const WanbenPage = lazy(() => import('@/pages/book/Wanben'))
+const BookCheckPage = lazy(() => import('@/pages/book/BookCheck'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
 const TeardownPage = lazy(() => import('@/pages/Teardown'))
@@ -72,6 +74,8 @@ export function App() {
                 <Route path="books/:bookId/foreshadows" element={<S><Foreshadows /></S>} />
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
+                <Route path="books/:bookId/wanben" element={<S><WanbenPage /></S>} />
+                <Route path="books/:bookId/check" element={<S><BookCheckPage /></S>} />
                 <Route path="teardown" element={<S><TeardownPage /></S>} />
                 <Route path="teardown/:id" element={<S><TeardownPage /></S>} />
                 <Route path="fanfic" element={<S><FanficPage /></S>} />

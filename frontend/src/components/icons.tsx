@@ -117,6 +117,11 @@ import {
   ProhibitIcon,
   ChartBarIcon,
   HourglassIcon,
+  PlayIcon,
+  PauseIcon,
+  FlagCheckeredIcon,
+  StethoscopeIcon,
+  FilmSlateIcon,
 } from '@phosphor-icons/react'
 
 export type IconCmp = PhIcon
@@ -250,3 +255,8 @@ export const Gauge = wrap(GaugeIcon, 'Gauge')
 export const Prohibit = wrap(ProhibitIcon, 'Prohibit')
 export const ChartBar = wrap(ChartBarIcon, 'ChartBar')
 export const Hourglass = wrap(HourglassIcon, 'Hourglass')
+export const Play = wrap(PlayIcon, 'Play')
+export const Pause = wrap(PauseIcon, 'Pause')
+export const FlagCheckered = wrap(FlagCheckeredIcon, 'FlagCheckered')
+export const Stethoscope = wrap(StethoscopeIcon, 'Stethoscope')
+export const FilmSlate = wrap(FilmSlateIcon, 'FilmSlate')

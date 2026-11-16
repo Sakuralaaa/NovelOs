@@ -25,7 +25,7 @@ export function DialogContent({ className, children, title, desc, footer, wide }
             <D.Title className="text-base font-semibold tracking-tight">{title}</D.Title>
             {desc ? <D.Description className="mt-1 text-[13px] text-muted-foreground">{desc}</D.Description> : <D.Description className="sr-only">对话框</D.Description>}
           </div>
-          <D.Close className="focus-ring -mr-2 rounded-md p-1.5 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></D.Close>
+          <D.Close className="focus-ring -mr-2 rounded-md p-1.5 text-muted-foreground hover:bg-muted max-md:p-2.5"><X className="h-4 w-4" /></D.Close>
         </div>
         <div className="max-h-[65vh] overflow-y-auto px-6 py-4">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t px-6 py-3.5">{footer}</div>}
@@ -51,7 +51,7 @@ export function Sheet({ open, onOpenChange, title, desc, children, footer, width
               <D.Title className="text-base font-semibold tracking-tight">{title}</D.Title>
               {desc ? <D.Description className="mt-0.5 text-[13px] text-muted-foreground">{desc}</D.Description> : <D.Description className="sr-only">抽屉</D.Description>}
             </div>
-            <D.Close className="focus-ring -mr-2 rounded-md p-1.5 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></D.Close>
+            <D.Close className="focus-ring -mr-2 rounded-md p-1.5 text-muted-foreground hover:bg-muted max-md:p-2.5"><X className="h-4 w-4" /></D.Close>
           </div>
           <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
           {footer && <div className="flex justify-end gap-2 border-t px-6 py-3.5">{footer}</div>}

@@ -439,10 +439,15 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
 
 
 def next_chapter_node(s: Session, book_id: int) -> OutlineNode | None:
+    # v0.11：已经建了章（草稿/待审批，还没提交）的细纲节点也跳过——完本模式允许精修范围的章待审批时继续往后写；
+    # 旧流程里有未提交章节时 write_next 会先拦下，行为不变
+    from app.models.tables import Chapter
+
+    used = select(Chapter.outline_node_id).where(Chapter.book_id == book_id, Chapter.outline_node_id != None)  # noqa: E711
     return s.exec(
         select(OutlineNode)
         .where(OutlineNode.book_id == book_id, OutlineNode.level == "chapter", OutlineNode.status != "written",
-               OutlineNode.chapter_id == None)  # noqa: E711
+               OutlineNode.chapter_id == None, OutlineNode.id.notin_(used))  # type: ignore[union-attr]  # noqa: E711
         .order_by(OutlineNode.order)
     ).first()
 

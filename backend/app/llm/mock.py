@@ -1213,6 +1213,10 @@ from app.llm.mock_fanfic import FANFIC_HANDLERS  # noqa: E402  v0.10 同人：�
 
 HANDLERS.update(FANFIC_HANDLERS)
 
+from app.llm.mock_wanben import WANBEN_HANDLERS  # noqa: E402  v0.11 完本模式：字数倒推卷纲
+
+HANDLERS.update(WANBEN_HANDLERS)
+
 
 def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) -> str:
     fn = HANDLERS.get(task)

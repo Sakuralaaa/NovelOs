@@ -134,7 +134,9 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
                 extra = f"（{'；'.join(parts)}）" if parts else ""
             fixed.append(f"[{c.type}] {c.name}：{c.summary}{extra}")
     fixed.append(style_block(s, bid))
-    platform = book.platform_style if getattr(book, "platform_style", None) in ("fanqie", "qidian", "generic") else "fanqie"
+    from app.skills.loader import PLATFORMS  # v0.11：含可选档 duanju（短剧分镜）
+
+    platform = book.platform_style if getattr(book, "platform_style", None) in PLATFORMS else "fanqie"
     prefix = system_prompt("writing_scene", "\n".join(fixed), platform=platform)
 
     # ---------- 动态后缀 ----------

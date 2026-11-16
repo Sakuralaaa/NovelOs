@@ -142,6 +142,11 @@ class Book(SQLModel, table=True):
     approval_mode: str = ""
     # v0.10 同人：{source_id, source_title, fidelity, direction, extra_source_ids, notes, copyright_ack_at, attached_at}；None 表示原创书
     fanfic: Optional[dict[str, Any]] = _json_dict_nullable()
+    # v0.11 完本模式：serial（连载，默认，旧书迁移后也是 serial）/ wanben（完本）
+    mode: str = "serial"
+    # v0.11 完本设置：{target_words, chapter_words, batch_size, refine_scope, golden_chapters, refine_ranges,
+    #   pause_on_unapproved_refine, auto_continue}；None 表示没设置过（读时按默认值补齐）
+    wanben: Optional[dict[str, Any]] = _json_dict_nullable()
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -389,3 +394,46 @@ class JobCheckpoint(SQLModel, table=True):
     state: Optional[dict[str, Any]] = _json_dict_nullable()
     resumes: int = 0  # 已续跑次数
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.11 完本模式
+
+class WanbenBatch(SQLModel, table=True):
+    """完本模式的一批连写：批次范围、状态与批末抽检报告（report）。"""
+    __tablename__ = "wanben_batch"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    job_id: Optional[int] = Field(default=None, index=True)
+    seq: int = 1  # 本书第几批（从 1 开始）
+    start_no: int = 0  # 计划起始章号
+    end_no: int = 0  # 计划结束章号
+    # running / done（写满本批）/ stopped（遇到需要作者处理的情况停下）/ paused（作者暂停）/ failed（异常）
+    status: str = "running"
+    stop_reason: str = ""  # refine_pending / pending_chapter / review_failed / awaiting_adopt / paused / target_reached / error
+    message: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    chapter_ids: list[int] = _json_list()
+    report: Optional[dict[str, Any]] = _json_dict_nullable()
+    created_at: datetime = Field(default_factory=utcnow)
+    finished_at: Optional[datetime] = None
+
+
+class WanbenIteration(SQLModel, table=True):
+    """完本模式的章节迭代：每轮对一章产出一个新版本（不落正文），作者对比后采纳或丢弃。"""
+    __tablename__ = "wanben_iteration"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    chapter_id: int = Field(index=True)
+    number: int = 0
+    job_id: Optional[int] = None
+    round: int = 1  # 这一章的第几轮迭代（全局累计）
+    method: str = "patch"  # patch（定点修）/ rewrite（整章重写）
+    instruction: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    base_content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    words: int = 0
+    review: Optional[dict[str, Any]] = _json_dict_nullable()
+    lint: Optional[dict[str, Any]] = _json_dict_nullable()
+    # {before:{overall, reader}, after:{overall, reader}, delta:{overall, reader}}
+    scores: Optional[dict[str, Any]] = _json_dict_nullable()
+    status: str = "pending"  # pending（待采纳）/ adopted / discarded
+    created_at: datetime = Field(default_factory=utcnow)

@@ -62,6 +62,12 @@ export const CARD_TYPES: { key: CardType; label: string; hint: string }[] = [
 export const cardTypeLabel = (t: CardType) => CARD_TYPES.find((x) => x.key === t)?.label ?? t
 
 export const JOB_KIND_LABEL: Record<string, string> = {
+  wanben_plan: '完本规划',
+  wanben_batch: '完本连写',
+  wanben_iterate: '章节迭代',
+  book_check: '整书体检',
+  adaptability: '短剧可改编度',
+  homogeneity: '同质化自查',
   agent_run: 'Agent 处理中',
   fanfic_source: '提炼原著设定',
   fanfic_ooc: 'OOC 检查',
@@ -130,10 +136,11 @@ export const JOB_KIND_LABEL: Record<string, string> = {
 export const jobLabel = (kind: string) => JOB_KIND_LABEL[kind] ?? kind
 
 /** v0.9：平台风格档 */
-export const PLATFORM_STYLES: { value: 'fanqie' | 'qidian' | 'generic'; label: string; desc: string }[] = [
+export const PLATFORM_STYLES: { value: 'fanqie' | 'qidian' | 'generic' | 'duanju'; label: string; desc: string }[] = [
   { value: 'fanqie', label: '番茄', desc: '短段、对白推进、章尾卡点；超过 70 字的段落会提示拆分' },
   { value: 'qidian', label: '起点', desc: '世界细节可信、配角有智商、伏笔前后呼应，长线博弈可以慢慢铺' },
   { value: 'generic', label: '通用', desc: '不加平台专属写作要求，人味检查沿用通用阈值' },
+  { value: 'duanju', label: '短剧分镜', desc: '在番茄档基础上：开场直接切冲突、多对白少独白、景物一句带过、章末卡在揭露前一刻，方便改编竖屏短剧' },
 ]
 export const platformLabel = (v?: string | null) => PLATFORM_STYLES.find((x) => x.value === (v || 'fanqie'))?.label ?? v ?? '番茄'
 

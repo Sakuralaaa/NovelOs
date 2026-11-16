@@ -208,10 +208,10 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     z = client.get(f"/api/books/{bid}/export")
     assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
     names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
-    assert "建书资料.md" in names and "cover.png" in names and "AI申报提示.md" in names
+    assert "建书资料.md" in names and "cover.png" in names
+    assert "AI申报提示.md" not in names  # v0.11：发布包默认不再附带 AI 申报提示
     assert len([n for n in names if n.startswith("chapters/") and n.endswith(".txt")]) == 4
-    notice = zipfile.ZipFile(io.BytesIO(z.content)).read("AI申报提示.md").decode()
-    assert "如实勾选" in notice
+    assert any(n.endswith("_全书.txt") for n in names)  # v0.11：附整书 TXT
 
     jobs = client.get("/api/jobs", params={"book_id": bid}).json()
     assert jobs and jobs[0]["id"] > jobs[-1]["id"]

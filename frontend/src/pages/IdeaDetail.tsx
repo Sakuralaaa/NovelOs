@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { TropeAlert } from '@/components/common/AiAsk'
 import { ReskinSource } from '@/components/radar/ReskinSource'
+import { HomogeneityButton } from '@/components/check/Homogeneity'
 import { useChannels } from '@/hooks/queries'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
@@ -136,6 +137,7 @@ export default function IdeaDetail() {
           {!locked && !!idea.versions && (
             <Button variant="ghost" size="sm" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={undo.isPending} disabled={!!reviseJob} onClick={() => undo.mutate()} title={idea.last_instruction ? `撤回：${idea.last_instruction}` : undefined}>撤回</Button>
           )}
+<HomogeneityButton target="idea" id={idea.id} size="sm" />
           <Button variant="ghost" size="sm" icon={<Trash2 className="h-3.5 w-3.5" />} loading={rm.isPending} onClick={() => rm.mutate()} className="hover:text-danger">删除</Button>
           {locked && idea.book_id ? (
             <Link to={`/books/${idea.book_id}`} className="flex h-9 items-center gap-1.5 rounded-md bg-success-soft px-3.5 text-[13px] font-medium text-success">已建书，去看看 <ArrowUpRight className="h-3.5 w-3.5" /></Link>

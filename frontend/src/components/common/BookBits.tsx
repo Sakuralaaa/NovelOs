@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
-import { api } from '@/lib/api'
+import { api, checkApi, wqk } from '@/lib/api'
 import { useJobs } from '@/lib/jobs'
 import type { Book, BookStatus, Gender, PlatformStyle } from '@/lib/types'
 import { GENRES_FEMALE, GENRES_MALE, PLATFORM_STYLES, STAGES, cn, stageIndex } from '@/lib/utils'
@@ -119,14 +119,26 @@ export function QuickCreateDialog({ open, onOpenChange, defaults }: { open: bool
   )
 }
 
-/** v0.9：平台风格档选择（建书表单、作品信息共用） */
+/** v0.9：平台风格档选择（建书表单、作品信息共用）；v0.11 选项来自 GET /platform-styles（含可选档「短剧分镜」） */
 export function PlatformStyleField({ value, onChange }: { value: PlatformStyle; onChange: (v: PlatformStyle) => void }) {
-  const cur = PLATFORM_STYLES.find((p) => p.value === value) ?? PLATFORM_STYLES[0]
+  const q = useQuery({ queryKey: wqk.platformStyles, queryFn: checkApi.platformStyles, staleTime: 3600_000, retry: false })
+  const opts = (q.data?.items?.length ? q.data.items : PLATFORM_STYLES.map((p) => ({ id: p.value, label: p.label, optional: p.value === 'duanju' })))
+    .map((o) => ({ ...o, desc: PLATFORM_STYLES.find((p) => p.value === o.id)?.desc ?? '' }))
+  const cur = opts.find((p) => p.id === value) ?? opts[0]
   return (
     <Field label="平台风格" hint="写作、审稿和人味检查按这一档的读者习惯来">
       <div className="space-y-1.5">
-        <Segmented block value={value} onChange={onChange} options={PLATFORM_STYLES.map((p) => ({ value: p.value, label: p.value === 'fanqie' ? `${p.label}（默认）` : p.label }))} />
-        <p className="text-[12px] leading-relaxed text-muted-foreground">{cur.label}：{cur.desc}</p>
+        <div role="radiogroup" className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-[3px] sm:grid-cols-4">
+          {opts.map((o) => (
+            <button key={o.id} type="button" role="radio" aria-checked={value === o.id} onClick={() => onChange(o.id as PlatformStyle)}
+              className={cn('focus-ring inline-flex h-[30px] items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 text-[13px] font-medium transition-all',
+                value === o.id ? 'bg-surface text-foreground shadow-card' : 'text-muted-foreground hover:text-foreground')}>
+              {o.id === 'fanqie' ? `${o.label}（默认）` : o.label}
+              {o.optional && <span className="rounded bg-primary-soft px-1 text-[10.5px] text-primary">可选</span>}
+            </button>
+          ))}
+        </div>
+        {cur && <p className="text-[12px] leading-relaxed text-muted-foreground">{cur.label}：{cur.desc || '按这一档的读者习惯写作与审稿'}</p>}
       </div>
     </Field>
   )

@@ -189,7 +189,7 @@ export interface Book {
   approval_mode?: ApprovalMode
   approval_mode_explicit?: boolean
 }
-export type PlatformStyle = 'fanqie' | 'qidian' | 'generic'
+export type PlatformStyle = 'fanqie' | 'qidian' | 'generic' | 'duanju'
 
 // ---------- v0.9 书测 ----------
 export interface BookTestVariant { style: string; title: string; subtitle: string; hook: string; cover_prompt: string }
@@ -801,3 +801,145 @@ export interface FanficOverlap {
 export interface ChapterFanficMeta { chapter_id: number; ooc: OocResult | null; overlap: FanficOverlap | null }
 /** v0.10：book_out 新字段（原创书为 null）——接口合并，补到 Book 上 */
 export interface Book { fanfic?: BookFanfic | null }
+
+// ---------------------------------------------------------------- v0.11 完本模式
+export type BookMode = 'serial' | 'wanben'
+export type RefineScope = 'first_n' | 'all' | 'custom' | 'none'
+/** 区间：[a,b]，单章写成 [n,n]；提交时也可写 n 或 "a-b" */
+export type RangeItem = number | string | [number, number] | number[]
+export interface WanbenVolume {
+  node_id: number; order: number; title: string; summary: string
+  start: number | null; end: number | null; crisis: string; climax_chapter: number | null; closure: string
+  finale?: { resolution?: string; payoffs?: string[]; endings?: string[]; last_chapter_beat?: string; last_chapter?: number }
+}
+export interface WanbenPlanSummary { planned: boolean; total_chapters: number | null; ending: string; planned_at: string | null; volumes: WanbenVolume[] }
+export interface WanbenSettings {
+  book_id: number; mode: BookMode
+  target_words: number; chapter_words: number; batch_size: number
+  refine_scope: RefineScope; golden_chapters: number; refine_ranges: [number, number][]
+  pause_on_unapproved_refine: boolean; auto_continue: boolean
+  presets: number[]; total_chapters: number; refine_numbers: number[]; refine_count: number; reader_threshold: number
+  plan: WanbenPlanSummary
+}
+export type WanbenSettingsInput = Partial<Pick<WanbenSettings, 'mode' | 'target_words' | 'chapter_words' | 'batch_size' | 'refine_scope' | 'golden_chapters' | 'pause_on_unapproved_refine' | 'auto_continue'>> & { refine_ranges?: RangeItem[] }
+export interface WanbenPlanDiff {
+  order: number; node_id: number; action: 'added' | 'updated' | 'unchanged' | 'removed'
+  before?: WanbenVolume | null; after?: WanbenVolume; changed?: string[]
+}
+export interface WanbenPlanResult {
+  total_chapters: { before: number | null; after: number }; volumes: WanbenVolume[]; diff: WanbenPlanDiff[]
+  warnings: string[]; chapter_words: number; target_words: number
+}
+export type BatchStatus = 'running' | 'done' | 'stopped' | 'paused' | 'failed'
+export type BatchStopReason = '' | 'refine_pending' | 'pending_chapter' | 'review_failed' | 'awaiting_adopt' | 'paused' | 'target_reached' | 'error'
+export interface BatchConsistency { kind: 'name' | 'number' | 'power' | 'continuity' | string; severity: 'high' | 'mid' | 'low' | string; quote: string; comment: string }
+export interface BatchChapterCheck {
+  number: number; chapter_id: number; title: string; status: string; in_refine: boolean
+  words: number; words_target: number; words_ok: boolean
+  opening: { head: string; conflict: boolean; hits: string[] }
+  climax: { planned: string; type: string; found: boolean; position: number | null; quote: string }
+  hook: { planned: string; type: string; tail: string; ok: boolean; comment: string }
+  consistency: BatchConsistency[]
+  review_overall: number | null; review_passed: boolean; reader_score: number | null; reader_below_threshold: boolean
+  failed: string[]; passed: boolean
+}
+export interface BatchSummary {
+  count: number; words: number; passed: number; failed: number; committed: number
+  awaiting_approval: number[]; reader_avg: number | null; reader_below_threshold: number[]; consistency_issues: number
+}
+export interface WanbenBatch {
+  id: number; book_id: number; job_id: number | null; seq: number; start_no: number; end_no: number
+  status: BatchStatus; stop_reason: BatchStopReason; message: string; chapter_ids: number[]
+  created_at: string | null; finished_at: string | null
+  summary?: BatchSummary | null
+  report?: { chapters: BatchChapterCheck[]; summary: BatchSummary; reader_threshold: number; generated_at: string } | null
+}
+export interface WanbenProgress {
+  book_id: number; mode: BookMode; words: number; pending_words: number; target_words: number; ratio: number
+  chapters_committed: number; chapters_written: number; chapters_total: number; chapters_remaining: number
+  current_volume: { order: number; title: string; start: number | null; end: number | null; node_id: number } | null
+  planned: boolean; paused: boolean; running_batch_id: number | null; last_batch: WanbenBatch | null
+}
+export interface RefineChapter {
+  number: number; chapter_id: number | null; title: string; status: string; approved: boolean; words: number
+  review_overall: number | null; review_passed: boolean | null; reader_score: number | null; reader_below_threshold: boolean
+  iterations_pending: number
+}
+export interface RefineSummary {
+  book_id: number; refine_scope: RefineScope; golden_chapters: number; refine_ranges: [number, number][]
+  pause_on_unapproved_refine: boolean; numbers: number[]; total: number; written: number; approved: number
+  pending: number[]; unwritten: number; reader_below_threshold: number[]; all_approved: boolean; reader_threshold: number
+  chapters: RefineChapter[]
+}
+export type IterMethod = 'auto' | 'patch' | 'rewrite'
+export interface IterScore { overall: number | null; reader: number | null; passed: boolean | null; issues: number }
+export interface WanbenIteration {
+  id: number; book_id: number; chapter_id: number; number: number; job_id: number | null; round: number
+  method: 'patch' | 'rewrite'; instruction: string; words: number
+  scores: { before: IterScore; after: IterScore; delta: { overall: number | null; reader: number | null } } | null
+  status: 'pending' | 'adopted' | 'discarded'; created_at: string | null; stale?: boolean
+  content?: string; base_content?: string; review?: Review | null; lint?: Record<string, any> | null
+}
+export interface IterateInput {
+  start?: number; end?: number; numbers?: number[]; ranges?: RangeItem[]
+  instruction?: string; method?: IterMethod; rounds?: number; route?: string | null
+}
+
+// ---------------------------------------------------------------- v0.11 质检：整书体检 / 可改编度 / 短剧 / 同质化
+export type Severity = 'high' | 'mid' | 'low'
+export interface CheckFix { action: 'set_title' | 'humanize' | 'thicken' | 'rewrite' | string; method: 'POST' | 'PUT' | string; endpoint: string; body: Record<string, any> }
+export interface BookCheckIssue {
+  id: number; type: string; type_label: string; severity: Severity; layer: 'rule' | 'llm'
+  chapter: number | null; chapter_id: number | null; related_chapters: number[]
+  evidence: string; suggestion: string; fixable: boolean; fix: CheckFix | null; verified?: boolean
+}
+export type BookCheckVerdict = 'ready' | 'fix_first' | 'not_ready'
+export interface BookCheckReport {
+  book_id: number; kind: 'book_check'; verdict: BookCheckVerdict; verdict_label: string; score: number
+  issues: BookCheckIssue[]
+  stats: {
+    chapters: number; empty_chapters: number; committed_chapters: number; total_words: number; avg_words: number; min_words: number; max_words: number
+    short_chapters: number; word_tier: { total_words: number; tier: string; label: string; reference: number[]; to_next: number }
+    duplicate_pairs: { chapters: [number, number]; ratio: number; longest: number }[]; top_phrases: { text: string; chapters: number }[]
+    open_foreshadows: number; ending: { closed: boolean; cliff: boolean; last_chapter?: number; tail?: string }
+    watering_chapters?: number; numeric_conflicts?: number; avg_dialogue_ratio?: number
+    issues_total: number; issues_truncated: number; by_severity: Record<Severity, number>; by_type: Record<string, number>; fixable: number
+    [k: string]: any
+  }
+  foreshadows_open: { id: number; desc: string; status: string; planted_ch: number | null; last_ch: number | null; tier?: string; plan_resolve_ch?: number | null }[]
+  llm: { used: boolean; ending?: { rushed?: boolean; score: number; comment: string; evidence: string } | null; mainline?: { drift?: boolean; score: number; comment: string; evidence: string } | null; summary?: string; segments?: number; sent_chars?: number; final_state?: any }
+  platform: string; job_id: number; checked_at: string | null
+}
+export interface BookCheckHistoryItem {
+  job_id: number; created_at: string | null; updated_at: string | null; verdict: BookCheckVerdict | null; score: number | null
+  by_severity: Record<Severity, number> | null; chapters: number | null; total_words: number | null; llm_used: boolean
+}
+export type AdaptDim = 'persona' | 'conflict' | 'reversal' | 'shootability' | 'dialogue' | 'episodes'
+export interface AdaptChapterMetric {
+  chapter: number; chapter_id: number; words: number; dialogue_ratio: number; conflict_per_k: number; reversal_per_k: number
+  scenes: number; episodes: number; opening_ok: boolean; ending_cliff: boolean; monologue_ratio: number; scenery_ratio: number
+}
+export interface AdaptReport {
+  book_id: number; kind: 'adaptability'; range: { start: number; end: number; chapters: number }
+  score: number; dimensions: Record<AdaptDim, { label: string; score: number; rule_score: number; llm_score: number | null; comment: string }>
+  episodes_per_chapter: number; episodes_total: number; persona_tags: string[]; suggestions: string[]
+  chapter_notes: { chapter: number; episodes: number | null; note: string }[]; chapters: AdaptChapterMetric[]; llm_used: boolean
+  job_id?: number; checked_at?: string | null
+}
+export interface AdaptHistoryItem { job_id: number; created_at: string | null; updated_at: string | null; score: number | null; range: AdaptReport['range'] | null; episodes_per_chapter: number | null; llm_used: boolean }
+export interface DuanjuIssue { type: 'opening_slow' | 'monologue' | 'scenery' | 'ending_flat' | string; severity: Severity; evidence: string; suggestion: string }
+export interface DuanjuCheck {
+  chapter_id: number; number: number; opening_ok: boolean; opening_has_dialogue: boolean; opening_has_action: boolean
+  monologue_ratio: number; scenery_ratio: number; ending_cliff: boolean; dialogue_ratio: number; issues: DuanjuIssue[]
+}
+export interface HomoSimilar {
+  rank_item_id: number; book_id_ext: string; title: string; author: string; category: string; rank: number; board: string; gender: string
+  read_count: number; score: number; overlaps: string[]; shared_tropes: string[]; title_overlap: string[]; abstract: string; llm_note?: string
+}
+export interface HomoReport {
+  target: { type: 'book' | 'idea'; id: number; title: string }; kind: 'homogeneity'
+  snapshot: { id: number; taken_at: string | null; items_compared: number; top_n: number } | null
+  similar: HomoSimilar[]; max_score: number; level: 'high' | 'mid' | 'low' | 'unknown'; suggestions: string[]
+  llm: { overall: string; suggestions: string[] } | null
+}
+export interface PlatformStyleOpt { id: PlatformStyle | string; label: string; optional: boolean }

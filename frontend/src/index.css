@@ -66,6 +66,12 @@
   h1, h2, h3 { font-family: theme('fontFamily.serif'); letter-spacing: 0.01em; }
   ::selection { background: hsl(var(--primary) / 0.22); }
   :focus-visible { outline: none; }
+  /* v0.11：窄屏（390 宽手机）上所有按钮 / 标签页的可点区域至少 36px 高；复选框用外扩的透明热区。桌面不受影响 */
+  @media (max-width: 767px) {
+    button:not([role='switch']):not([role='checkbox']):not([data-sonner-toast] *):not(.tap-exempt), [role='tab'] { min-height: 36px; }
+    button[role='checkbox'] { position: relative; }
+    button[role='checkbox']::after { content: ''; position: absolute; inset: -10px; }
+  }
   *::-webkit-scrollbar { width: 10px; height: 10px; }
   *::-webkit-scrollbar-thumb { background: hsl(var(--foreground) / 0.12); border-radius: 999px; border: 3px solid transparent; background-clip: content-box; }
   *::-webkit-scrollbar-thumb:hover { background-color: hsl(var(--foreground) / 0.22); }

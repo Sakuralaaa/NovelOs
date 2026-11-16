@@ -138,7 +138,7 @@ export function AgentChat({ bookId, variant = 'page', autoFocus }: { bookId: num
         )}
         <Tip content="打开后：无冲突、非删除的改动直接写入（写入前留快照/旧版本，可撤回）。删除类操作永远要你确认。">
           <label className="flex cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-1 text-[12.5px] text-muted-foreground hover:bg-muted">
-            <Switch checked={!!book.data?.agent_auto_apply} onCheckedChange={(v) => autoApply.mutate(v)} className="scale-[0.85]" />
+            <Switch checked={!!book.data?.agent_auto_apply} onCheckedChange={(v) => autoApply.mutate(v)} className="md:scale-[0.85]" />
             自动采纳
           </label>
         </Tip>

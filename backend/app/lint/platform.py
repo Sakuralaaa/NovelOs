@@ -79,6 +79,8 @@ PROFILES: dict[str, PlatformProfile] = _Profiles()
 
 def get_profile(platform: str | None) -> PlatformProfile:
     ps = profiles()
+    if platform == "duanju":  # v0.11 短剧分镜档沿用番茄档的 lint 阈值
+        platform = "fanqie"
     return ps.get(platform or "generic", ps["generic"])
 
 

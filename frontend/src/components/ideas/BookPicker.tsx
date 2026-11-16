@@ -111,13 +111,30 @@ export function BookPicker({ selected, onToggle, max = 3, single, initial }: {
 export interface TextDoc { title: string; text: string; chapters: ImitateExtract['chapters']; from: 'upload' | 'paste'; total?: number; truncated?: boolean }
 
 /** 上传 TXT（后端识别章节）或粘贴正文 */
-export function TextSource({ mode, value, onChange, maxChars }: { mode: 'upload' | 'paste'; value: TextDoc | null; onChange: (d: TextDoc | null) => void; maxChars?: number }) {
+/** live：粘贴/输入后立即把当前正文交给 onChange（不用先点「使用这段正文」），章节识别在后台静默进行 */
+export function TextSource({ mode, value, onChange, maxChars, live }: { mode: 'upload' | 'paste'; value: TextDoc | null; onChange: (d: TextDoc | null) => void; maxChars?: number; live?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [paste, setPaste] = useState(value?.from === 'paste' ? value.text : '')
   const [title, setTitle] = useState(value?.from === 'paste' ? value.title : '')
   const [showAll, setShowAll] = useState(false)
   const n = bareLen(paste)
+  // live 模式：正文一变就交出去（标题取输入框），停顿 900ms 后后台识别章节，识别期间正文又变了就丢弃结果
+  const liveSeq = useRef(0)
+  const liveSet = (text: string, t: string) => {
+    if (!live) return
+    const seq = ++liveSeq.current
+    if (!bareLen(text)) { onChange(null); return }
+    onChange({ title: t.trim(), text, chapters: [], from: 'paste' })
+    window.setTimeout(async () => {
+      if (seq !== liveSeq.current) return
+      try {
+        const r = await api.imitateExtract(text)
+        if (seq !== liveSeq.current) return
+        onChange({ title: t.trim(), text, chapters: r.chapters ?? [], from: 'paste', total: r.total_chapters, truncated: r.truncated })
+      } catch { /* 识别失败不影响使用：按一整段处理 */ }
+    }, 900)
+  }
 
   const upload = async (f?: File | null) => {
     if (!f) return
@@ -161,14 +178,18 @@ export function TextSource({ mode, value, onChange, maxChars }: { mode: 'upload'
   }
   return (
     <div className="space-y-3">
-      <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="书名（可选）" className="h-10" />
-      <Textarea rows={8} value={paste} onChange={(e) => { setPaste(e.target.value); if (value?.from === 'paste') onChange(null) }}
+      <Input value={title} onChange={(e) => { setTitle(e.target.value); if (live && value?.from === 'paste') onChange({ ...value, title: e.target.value.trim() }) }} placeholder="书名（可选）" className="h-10" />
+      <Textarea rows={8} value={paste} onChange={(e) => { setPaste(e.target.value); if (live) liveSet(e.target.value, title); else if (value?.from === 'paste') onChange(null) }}
         placeholder={'把正文粘贴到这里，章节标题单独成行效果最好，例如：\n第一章 xxx\n正文……'} className="min-h-[200px] font-serif text-[13.5px]" />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className={cn('num text-[12px]', maxChars && n > maxChars ? 'font-medium text-danger' : 'text-muted-foreground')}>{n.toLocaleString('zh-CN')}{maxChars ? ` / ${maxChars.toLocaleString('zh-CN')}` : ''} 字</span>
-        <Button size="sm" variant={value?.from === 'paste' ? 'soft' : 'primary'} className="h-9" disabled={!n} loading={busy} icon={value?.from === 'paste' ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />} onClick={() => void detect()}>
-          {value?.from === 'paste' ? '已使用这段正文' : '使用这段正文'}
-        </Button>
+        {live ? (
+          n > 0 && <span className="inline-flex items-center gap-1 text-[12px] text-success"><Check className="h-3.5 w-3.5" />{value?.chapters.length ? `识别出 ${value.total ?? value.chapters.length} 章，可以直接开始` : '可以直接开始'}</span>
+        ) : (
+          <Button size="sm" variant={value?.from === 'paste' ? 'soft' : 'primary'} className="h-9" disabled={!n} loading={busy} icon={value?.from === 'paste' ? <Check className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />} onClick={() => void detect()}>
+            {value?.from === 'paste' ? '已使用这段正文' : '使用这段正文'}
+          </Button>
+        )}
       </div>
       {value?.from === 'paste' && value.chapters.length > 0 && <ChapterList doc={value} showAll={showAll} onToggle={() => setShowAll((x) => !x)} maxChars={maxChars} />}
     </div>

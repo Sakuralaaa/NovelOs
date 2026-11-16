@@ -127,7 +127,7 @@ function SourcePanel() {
           )}
         </>
       ) : (
-        <TextSource key={src} mode={src} value={doc && doc.from === src ? doc : null} onChange={setDoc} />
+        <TextSource key={src} mode={src} live={src === 'paste'} value={doc && doc.from === src ? doc : null} onChange={setDoc} />
       )}
       {tooLong && <p className="text-[12px] text-danger">正文超过 {TEXT_LIMIT.toLocaleString('zh-CN')} 字，请删减后再拆</p>}
 

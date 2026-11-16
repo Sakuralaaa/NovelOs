@@ -10,6 +10,7 @@ import type {
 } from '@/lib/types'
 import { analyzeText } from '@/lib/textAnalysis'
 import { countWords } from '@/lib/utils'
+import { WANBEN_RESUMABLE, registerWanbenMocks } from './wanben'
 import { FEMALE_CATS, MALE_CATS, STYLE_SAMPLE, THICKEN_MAP, buildChapterText, coverDataUrl, makeRankItems } from './data'
 
 const now = () => new Date().toISOString()
@@ -1861,7 +1862,7 @@ on('PUT', '/books/:id/writing-settings', (m, b) => {
 on('POST', '/jobs/:id/resume', (m) => {
   const j = must(db.jobs.find((x) => x.id === +m[1]), '任务')
   if (!(j.status === 'interrupted' || j.status === 'failed')) throw new HttpErr(409, `任务状态为 ${j.status}，不能续跑`)
-  if (j.kind !== 'chapter_write_next') throw new HttpErr(409, '这类任务暂不支持续跑')
+  if (j.kind !== 'chapter_write_next' && !WANBEN_RESUMABLE.includes(j.kind)) throw new HttpErr(409, '这类任务暂不支持续跑')
   if (!j.checkpoint) throw new HttpErr(409, '没有断点，无法续跑')
   const stage = j.checkpoint.stage
   Object.assign(j, {
@@ -1871,3 +1872,6 @@ on('POST', '/jobs/:id/resume', (m) => {
   })
   return pub(j)
 })
+
+// ---------------- v0.11 完本模式 / 质检（mock，见 ./wanben.ts） ----------------
+registerWanbenMocks({ on, db: db as any, createJob, HttpErr, must, bookOf, nid, now, ago, writeOne, mkReview, mkLint, countWords, chHist, recalc })

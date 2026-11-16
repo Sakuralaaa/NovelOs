@@ -172,7 +172,7 @@ class ImitateExtractIn(BaseModel):
     filename: str | None = None
 
 
-PlatformStyle = Literal["fanqie", "qidian", "generic"]
+PlatformStyle = Literal["fanqie", "qidian", "generic", "duanju"]  # v0.11：duanju 短剧分镜（可选档）
 
 
 class FanficSpec(BaseModel):
@@ -549,7 +549,7 @@ def book_out(s: Session, b: Book) -> dict[str, Any]:
         "created_at": iso(b.created_at), "updated_at": iso(b.updated_at), "stats": common.book_stats(s, b.id or 0),
         "premise": b.premise, "versions": len(vs), "last_instruction": str(vs[-1].get("instruction") or "") if vs else "",
         "banned_tropes": list(b.banned_tropes or []), "agent_auto_apply": bool(b.agent_auto_apply),
-        "platform_style": b.platform_style if b.platform_style in ("fanqie", "qidian", "generic") else "fanqie",
+        "platform_style": b.platform_style if b.platform_style in ("fanqie", "qidian", "generic", "duanju") else "fanqie",
         "has_book_test": bool((b.book_test or {}).get("variants")),
         "approval_mode": common.approval_mode(b), "approval_mode_explicit": b.approval_mode in ("auto", "review"),
         "fanfic": b.fanfic or None,  # v0.10 同人设置；原创书为 null

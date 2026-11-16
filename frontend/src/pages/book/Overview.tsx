@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
-  AlertTriangle, ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, RotateCcw, Waypoints, Wand2, X,
+  AlertTriangle, ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, FlagCheckered, Stethoscope, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, RotateCcw, Waypoints, Wand2, X,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,8 @@ import { BatchWriteButton, WriteNextButton } from '@/components/common/WriteActi
 import { BookCrumb } from './_shared'
 import { CompletenessCard, UsageCard } from '@/components/book/Completeness'
 import { FanficInfoCard } from '@/components/fanfic/FanficInfoCard'
+import { AttachFanficDialog } from '@/components/fanfic/AttachFanficDialog'
+import { HomogeneityButton } from '@/components/check/Homogeneity'
 import { BookWritingSettings } from '@/components/book/BookWritingSettings'
 import { useBook, useJobsList } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
@@ -38,6 +40,7 @@ export default function BookOverview() {
   const { data: jobs } = useJobsList(id)
   const [sel, setSel] = useState<number | null>(null)
   const [edit, setEdit] = useState(false)
+  const [attach, setAttach] = useState(false)
 
   useEffect(() => setSel(null), [book?.status])
   if (isLoading) return <div className="page"><Skeleton className="h-40 rounded-2xl" /><Skeleton className="mt-6 h-48 rounded-2xl" /></div>
@@ -62,6 +65,10 @@ export default function BookOverview() {
           <div className="mt-4 flex flex-wrap gap-2">
             <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setEdit(true)}>编辑信息</Button>
             <Link to={`/books/${id}/chapters`}><Button size="sm" icon={<FileText className="h-3.5 w-3.5" />}>打开章节</Button></Link>
+            <Link to={`/books/${id}/wanben`}><Button size="sm" icon={<FlagCheckered className="h-3.5 w-3.5" />}>完本模式</Button></Link>
+            <Link to={`/books/${id}/check`}><Button size="sm" icon={<Stethoscope className="h-3.5 w-3.5" />}>体检</Button></Link>
+            <HomogeneityButton target="book" id={id} size="sm" />
+            {!book.fanfic && <Button size="sm" variant="ghost" icon={<BookOpenCheck className="h-3.5 w-3.5" />} onClick={() => setAttach(true)}>设为同人</Button>}
           </div>
         </div>
       </div>
@@ -131,7 +138,8 @@ export default function BookOverview() {
         </CardBody>
       </Card>
 
-      <EditBookDialog book={book} open={edit} onOpenChange={setEdit} />
+      <EditBookDialog book={book} open={edit} onOpenChange={setEdit} onAttachFanfic={() => { setEdit(false); setAttach(true) }} />
+      {!book.fanfic && <AttachFanficDialog bookId={id} open={attach} onOpenChange={setAttach} />}
     </div>
   )
 }
@@ -213,7 +221,7 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
   )
 }
 
-function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolean; onOpenChange: (o: boolean) => void }) {
+function EditBookDialog({ book, open, onOpenChange, onAttachFanfic }: { book: Book; open: boolean; onOpenChange: (o: boolean) => void; onAttachFanfic?: () => void }) {
   const init = () => ({ title: book.title, tagline: book.tagline, premise: book.premise ?? '', target_words: book.target_words, chapter_words: book.chapter_words,
     tropes: (book.banned_tropes ?? []).map((t) => t.name), platform_style: (book.platform_style ?? 'fanqie') as PlatformStyle })
   const [f, setF] = useState(init)
@@ -257,6 +265,13 @@ function EditBookDialog({ book, open, onOpenChange }: { book: Book; open: boolea
             </div>
             <PlatformStyleField value={f.platform_style} onChange={(v) => setF({ ...f, platform_style: v })} />
             <Field label="本书额外禁用的套路" hint="全局列表在「设置」里改"><TagInput value={f.tropes} onChange={(v) => setF({ ...f, tropes: v })} placeholder="例如：赘婿、系统签到（回车添加，生成时避开，命中会标黄）" /></Field>
+            {!book.fanfic && onAttachFanfic && (
+              <button type="button" onClick={onAttachFanfic} className="flex min-h-[44px] w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left transition hairline hover:bg-subtle">
+                <BookOpenCheck className="h-4.5 w-4.5 shrink-0 text-primary" style={{ width: 18, height: 18 }} />
+                <span className="min-w-0 flex-1"><span className="block text-[13.5px] font-medium">设为同人书</span><span className="block text-xs text-muted-foreground">绑定原著资料，之后写大纲、写章、审稿都按原著设定来</span></span>
+                <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
