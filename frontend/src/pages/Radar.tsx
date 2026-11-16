@@ -14,6 +14,7 @@ import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { ImitatePanel } from '@/components/radar/ImitatePanel'
 import { TrendReportView } from '@/components/radar/TrendReport'
+import { TrendBriefCard, boardScope } from '@/components/radar/TrendBrief'
 import { BookDetailDrawer } from '@/components/radar/BookDetailDrawer'
 import { BoardTag, ShelfCard } from '@/components/radar/ShelfCard'
 import { api, qk } from '@/lib/api'
@@ -78,6 +79,8 @@ export default function RadarPage() {
       return `榜单已更新${parts ? `：${parts}` : ''}${j.result?.report_job_id ? '，风向标日报生成中' : ''}`
     },
   })
+  /** v0.9.2：仿写立项 → 立项向导（预选这本书） */
+  const toWizard = (i: RankItem) => nav(`/ideas/new?path=imitate&book=${encodeURIComponent(i.book_id_ext)}&gender=${i.gender}&board=${i.board ?? board}`, { state: { item: i } })
   const toIdeas = (genre: string, g: Gender = gender) => nav(`/ideas?genre=${encodeURIComponent(genre)}&gender=${g}&from_trends=1`)
 
   return (
@@ -130,6 +133,11 @@ export default function RadarPage() {
           <Chip active={!category} onClick={() => setCategory('')}>全部<span className="num opacity-55">{items.length}</span></Chip>
           {cats.map(([c, n]) => <Chip key={c} active={category === c} onClick={() => setCategory(c)}>{c}<span className="num opacity-55">{n}</span></Chip>)}
         </div>
+        {!latest.isLoading && items.length > 0 && (
+          <div className="border-b bg-subtle/30 p-3 sm:p-4 md:px-5">
+            <TrendBriefCard key={boardScope(gender, board, category || undefined)} scope={boardScope(gender, board, category || undefined)} />
+          </div>
+        )}
 
         {latest.isLoading ? (
           <div className="space-y-2 p-5">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-11" />)}</div>
@@ -138,12 +146,12 @@ export default function RadarPage() {
         ) : !shown.length ? (
           <EmptyState className="m-5 border-0" kind="radar" title={snap ? `这份快照里没有${BOARD_LABEL[board]}数据` : '还没有榜单数据'} action={<Button variant="primary" loading={!!job} onClick={refresh}>刷新榜单</Button>} />
         ) : view === 'table' ? (
-          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={(i) => setImitate(i)} onOpen={setDetail} />
+          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={toWizard} onOpen={setDetail} />
         ) : (
           <div className="grid grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-2 md:gap-4 md:p-5">
             {shown.map((i, k) => (
               <ShelfCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1}
-                onOpen={() => setDetail(i)} onAnalyze={() => setImitate(i, 'teardown')} onImitate={() => setImitate(i, 'reskin')} />
+                onOpen={() => setDetail(i)} onAnalyze={() => setImitate(i, 'teardown')} onImitate={() => toWizard(i)} />
             ))}
           </div>
         )}
@@ -155,7 +163,7 @@ export default function RadarPage() {
       </Card>
       </>}
 
-      <BookDetailDrawer item={detail} onClose={() => setDetail(null)} onImitate={(i) => setImitate(i, 'reskin')} onAnalyze={(i) => setImitate(i, 'teardown')} />
+      <BookDetailDrawer item={detail} onClose={() => setDetail(null)} onImitate={toWizard} onAnalyze={(i) => setImitate(i, 'teardown')} />
       <ImitatePanel item={imitate?.item ?? null} focus={imitate?.focus} onClose={() => setImitateState(null)} />
     </div>
   )
@@ -266,7 +274,7 @@ function RankTable({ items, byBoard, onIdea, onImitate, onOpen }: { items: RankI
               <td className="pr-5 text-right">
                 <div className="flex justify-end gap-1.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                   <Button size="xs" variant="ghost" onClick={() => onIdea(i)}>出选题</Button>
-                  <Button size="xs" variant="soft" icon={<Feather className="h-3.5 w-3.5" />} onClick={() => onImitate(i)}>仿写这本</Button>
+                  <Button size="xs" variant="soft" icon={<Feather className="h-3.5 w-3.5" />} onClick={() => onImitate(i)}>仿写立项</Button>
                 </div>
               </td>
             </tr>

@@ -108,13 +108,27 @@ export interface RadarConfig {
   /** v0.9：刷新成功后自动生成风向标日报（PUT 不传表示不改） */
   auto_report?: boolean
 }
+/** v0.9.2：GET/PUT /api/radar/report/config（自动日报开关仍是 RadarConfig.auto_report） */
+export interface RadarReportConfig {
+  /** 风向标读取每榜前 N 本（后端 3–50，默认 30） */
+  radar_report_top_n: number
+  /** 刷新后自动生成的风向标范围，如 overall / board:male:read */
+  radar_report_auto_scopes: string[]
+}
 
 // ---------- v0.9 风向标日报 ----------
 export interface TrendHotWord { word: string; why: string; examples: string[] }
 export interface TrendIdeaHook { title: string; pitch: string }
 export interface TrendBoard {
   board: string; overview: string; reader_mood: string; opportunity: string; writing_tips: string; idea_hooks: TrendIdeaHook[]
+  /** v0.9.2：后端给字符串（可能为空），兼容数组 */
+  risks?: string | string[]
 }
+/** v0.9.2 灵感卡：主角/机制/开局 = 最小立项单元 */
+export interface TrendInspiration {
+  title: string; logline: string; protagonist?: string; mechanism?: string; opening?: string; selling_points?: string[]; board?: string
+}
+export interface TrendPlotDevice { name: string; desc: string }
 export interface TrendTitlePattern { pattern: string; examples: string[] }
 export interface TrendReportBody {
   hot_words: TrendHotWord[]
@@ -123,6 +137,15 @@ export interface TrendReportBody {
   title_patterns: TrendTitlePattern[]
   pitfalls: string[]
   warnings: string[]
+  // ---- v0.9.2（旧报告可能缺）----
+  headline?: string
+  summary?: string
+  inspirations?: TrendInspiration[]
+  opening_hooks?: string[]
+  plot_devices?: TrendPlotDevice[]
+  writing_advice?: string
+  risk_alerts?: string[]
+  meta?: { top_n?: number; books?: number; books_read?: number; [k: string]: any }
   inputs?: { top_n?: number; books?: number; boards?: Record<string, number>; new_entries?: Record<string, number>; prev_snapshot_id?: number | null }
 }
 export interface TrendReport {
@@ -215,6 +238,21 @@ export interface IdeaSource {
   self_check: ReskinSelfCheck[]
   overlap: { count: number; title?: number; segments: string[] }
   warnings: string[]
+}
+
+// ---------- v0.9.2 立项向导 ----------
+export type IdeaSeedSourceType = 'trend_report' | 'rank_book' | 'paste' | 'fusion' | 'manual'
+export interface IdeaSeed {
+  title: string; logline: string; protagonist?: string; mechanism?: string; opening?: string; selling_points?: string[]
+  genre?: string; gender?: Gender
+  source: { type: IdeaSeedSourceType; ref?: string; report_id?: number; book_id_ext?: string }
+}
+export interface FusionRef { book_id_ext?: string; title?: string; text?: string; weight: number }
+export interface FusionResult { ideas: Idea[]; dropped: number; warnings: string[]; idea_ids?: number[] }
+export interface ImitateExtract {
+  title_guess: string; chapters: { title: string; chars: number }[]; text: string
+  /** 后端：chapters 只列前 10 章；text 为前 10 章 ≤20000 字 */
+  total_chapters?: number; text_chars?: number; truncated?: boolean; encoding?: string
 }
 
 // ---------- v0.7 榜单仿写 ----------

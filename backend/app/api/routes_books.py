@@ -13,7 +13,7 @@ from app.api.schemas import (
     AiAsk, BibleApplyIn, ChapterAigcIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
     ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
     AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
-    IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
+    IdeaFusionIn, IdeaOrganizeIn, IdeaRevise, IdeaSeedIn, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
 from app.config import get_settings
@@ -182,6 +182,45 @@ async def book_sync(book_id: int, body: SyncIn, s: Session = Depends(get_session
 async def ideas_generate(body: IdeasGenerate) -> dict[str, Any]:
     params = body.model_dump()
     return job_out(submit("ideas_generate", lambda ctx: planning.generate_ideas(params, ctx)))
+
+
+# v0.9.2：榜单 → 立项（种子立项 / 一键整理 / 多本熔炉）。调模型的都走 Job（Cloudflare 100 秒限制）。
+
+def _job_with_id(j: Job) -> dict[str, Any]:
+    out = job_out(j)
+    return {**out, "job_id": out["id"]}
+
+
+@router.post("/ideas/from-seed")
+async def ideas_from_seed(body: IdeaSeedIn) -> dict[str, Any]:
+    """expand=false：同步把种子映射成 Idea → {idea}；expand=true：Job（kind=idea_seed）→ result {idea, idea_id}。"""
+    from app.services import seed_ideas
+
+    data = body.model_dump()
+    if not body.expand:
+        return seed_ideas.seed_direct(data)
+    seed_ideas.check_seed(data)
+    ref = f"idea_seed:{body.source.type}:{body.source.book_id_ext or body.source.report_id or ''}"
+    return _job_with_id(submit("idea_seed", lambda ctx: seed_ideas.seed_expand(data, ctx), ref=ref))
+
+
+@router.post("/ideas/organize")
+async def ideas_organize(body: IdeaOrganizeIn) -> dict[str, Any]:
+    """一键整理作者粘贴的零散想法（≤5000 字）→ Job（kind=idea_organize）→ result {idea, idea_id}。"""
+    from app.services import seed_ideas
+
+    text = seed_ideas.check_organize_text(body.text)
+    return _job_with_id(submit("idea_organize", lambda ctx: seed_ideas.organize(text, body.genre, body.gender, ctx)))
+
+
+@router.post("/ideas/fusion")
+async def ideas_fusion(body: IdeaFusionIn) -> dict[str, Any]:
+    """多本熔炉（1–3 本，权重归一化）→ Job（kind=idea_fusion）→ result {ideas, idea_ids, dropped, warnings}。粘贴原文不入库。"""
+    from app.services import seed_ideas
+
+    refs = [r.model_dump() for r in body.refs]
+    seed_ideas.resolve_fusion_refs(refs)  # 同步校验：书不存在 404、原文超限 400
+    return _job_with_id(submit("idea_fusion", lambda ctx: seed_ideas.fusion(refs, body.notes, body.n, ctx)))
 
 
 @router.get("/ideas")

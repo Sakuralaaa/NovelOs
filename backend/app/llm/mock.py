@@ -960,7 +960,35 @@ def mock_trend_report(meta: dict[str, Any]) -> str:
     if comma:
         pats.append({"pattern": "《[极端处境]，我[反差行为]》", "examples": comma})
     pats.append({"pattern": "《[凭空句式]》", "examples": ["不存在的书名"]})
+    for b, rows in zip(out_boards, [boards.get(n) or [] for n in (meta.get("board_names") or list(boards))]):
+        b["risks"] = "跟风的书已经很多，开局没有新机制的会被直接划走。"
+    names = list(meta.get("board_names") or list(boards)) or ["男频阅读"]
+    seeds = [("夜班殡葬师", "遗物能报出死者没说完的话", "灵堂里一只旧怀表突然开口"),
+             ("欠债的修表匠", "修好一件旧物就返还十倍寿命", "催债的人砸门那一刻表针倒转"),
+             ("被退学的体育生", "每输一场都能结算一次天赋", "校队选拔当天被当众除名"),
+             ("替班的电台主播", "深夜来电的人都在求他改结局", "午夜热线打进来一个已故的声音"),
+             ("小镇饭馆的帮厨", "做对一道菜就解锁一位食客的秘密", "开张第一天来了个不付钱的老人"),
+             ("落榜的考古学徒", "摸过的碎片会拼出古人的遗嘱", "工地挖出的陶片在他手里发烫")]
+    insp = []
+    for k, (who, mech, opening) in enumerate(seeds):
+        insp.append({"title": f"{who}的第{k + 1}笔账", "logline": f"{who}被逼到绝路，{mech}。", "protagonist": f"{who}，嘴硬心软，欠着一屁股债",
+                     "mechanism": mech, "opening": opening, "selling_points": ["开局就兑现", "收益看得见", "身份反差大"],
+                     "board": names[k % len(names)]})
+    first = all_items[0] if all_items else None
+    if first:  # 故意混进两条：和榜上书重名、照抄榜上简介（程序应当删掉）
+        insp.append({"title": first["title"], "logline": "重名的灵感", "selling_points": ["a", "b", "c"]})
+        if len(str(first.get("abstract") or "")) >= 12:
+            insp.append({"title": "照抄简介的灵感", "logline": str(first["abstract"])[:30], "selling_points": ["a", "b", "c"]})
     return _j({
+        "headline": "身份反差与即时兑现双线并行，弱起点强结算最吃香",
+        "summary": f"今天{names[0]}榜前排被身份反差题材占住。新上榜的书都在第一章就给收益，开新书要把兑现提前。",
+        "inspirations": insp,
+        "opening_hooks": ["第一句就让主角欠下一笔还不起的账", "三百字内让金手指当众失灵一次再兑现", "第一章末尾让最看不起他的人上门求助"],
+        "plot_devices": [{"name": "倒计时结算", "desc": "每章末尾给一个结算时间点，读者追着看结果"},
+                         {"name": "规则反噬", "desc": "反派用规则压人，主角反用规则打回去"},
+                         "身份错位：所有人都认错了主角是谁"],
+        "writing_advice": "开局别讲世界观，先给冲突；金手指第一次用就要有可比较的收益；每三章换一个对手。",
+        "risk_alerts": ["同类开局已经很多，前三章没有新机制会被划走", "系统面板别一次列满", "不要写真实地名和机构的负面情节"],
         "hot_words": hot, "boards": out_boards,
         "open_directions": [f"{c}+普通人身份反差，开局给一个能立刻兑现的小收益" for c in list(by_cat)[:3]],
         "title_patterns": pats,
@@ -1033,7 +1061,62 @@ def mock_polish_voice(meta: dict[str, Any]) -> str:
     return res if res != text else text.replace("。", "。\n\n", 1)
 
 
+# ---------------------------------------------------------------- v0.9.2：种子立项 / 一键整理 / 多本熔炉
+
+def mock_idea_seed(meta: dict[str, Any]) -> str:
+    seed = meta.get("seed") or {}
+    genre = str(meta.get("genre") or seed.get("genre") or "都市脑洞")
+    title = str(seed.get("title") or "未命名种子")
+    who = str(seed.get("protagonist") or "主角")
+    mech = str(seed.get("mechanism") or "一个只有他能用的规则")
+    out = {"title": title, "logline": str(seed.get("logline") or f"{who}靠{mech}翻身。"),
+           "selling_points": list(seed.get("selling_points") or [])[:3] or ["开局即兑现", "金手指越用越强", "身份反差"],
+           "hook": str(seed.get("opening") or f"第一章开头，{who}被堵在门口。"),
+           "expectations": ["机制一级级解锁", "查清开局变故的真相"], "endgame": f"弄清{mech[:10]}的来历，坐上最高那张桌子",
+           "arc": ["在小地方站稳脚跟", "走出去压服一州的对手", "卷入上层之争", "直面机制背后的旧秩序"], "genre": genre,
+           "change": "补齐了长线阶段和终局", "self_check": [{"aspect": "书名", "kept": True, "note": "沿用种子书名"},
+                                                     {"aspect": "长线", "kept": False, "note": "种子没有，补了四个阶段"}]}
+    return _j(_strip_words(out, [str(x) for x in meta.get("banned_keywords") or []]))
+
+
+def mock_idea_organize(meta: dict[str, Any]) -> str:
+    text = str(meta.get("text") or "")
+    m = re.search(r"书名[:：]\s*《?([^》\n]{1,30})》?", text)
+    title = m.group(1).strip() if m else "整理后的选题"
+    body = re.sub(r"书名[:：][^\n]*\n?", "", text).strip()
+    first = re.split(r"[。！？\n]", body)[0][:80] if body else "一个还没写完的想法"
+    phrases = [p for p in re.split(r"[，。、；！？\s]+", first) if 2 <= len(p) <= 12][:3]
+    return _j({"title": title, "logline": first + "。", "selling_points": ["开局就有冲突", "设定越挖越深", "主角当场回击"],
+               "hook": f"第一章：{first[:40]}", "expectations": ["设定的真相", "主角翻身"], "endgame": "把开局欠下的账一笔笔讨回来",
+               "arc": ["站稳脚跟", "走出小地方", "卷入大局", "直面真相"], "genre": str(meta.get("genre") or "都市脑洞"),
+               "kept_core": phrases, "added": ["长线阶段", "终局"], "conflicts": []})
+
+
+def mock_idea_fusion(meta: dict[str, Any]) -> str:
+    n = int(meta.get("n") or 3)
+    refs = meta.get("refs") or []
+    genre = str(meta.get("genre") or "都市脑洞")
+    sets = [("旧码头", "退役潜水员", "海底的旧钟每敲一下就换一次运气"), ("雾川县", "代课老师", "批改作业能看见学生十年后的样子"),
+            ("灰港城", "夜班保安", "巡逻打卡点会刷新隐藏任务"), ("沈家老宅", "上门修灯的电工", "灯亮的房间里时间走得慢"),
+            ("外门", "烧火杂役", "灶火能炼出别人丢掉的天赋")]
+    ideas = []
+    for k in range(n):
+        place, who, mech = sets[k % len(sets)]
+        ideas.append({"title": f"{who}在{place}捡到了第{k + 1}次机会", "logline": f"{who}在{place}被人看不起，{mech}。",
+                      "selling_points": ["开局就兑现", "机制新鲜", "每阶段换地图"], "hook": f"第一章，{who}在{place}被当众刁难。",
+                      "expectations": ["机制解锁", "把账讨回来"], "endgame": f"坐上{place}背后的牌桌",
+                      "arc": [f"在{place}站稳", "走出去", "卷入大局", "直面旧秩序"], "genre": genre,
+                      "borrowed": [{"ref": f"参考{r.get('index')}", "what": "爽点节奏"} for r in refs[:2]], "changed": ["人名地名全部换掉"]})
+    src = next((str(r.get("text") or r.get("abstract") or "") for r in refs if len(str(r.get("text") or r.get("abstract") or "")) >= 16), "")
+    if src and n >= 2:  # 故意让最后一个照抄参考原文，程序应当丢弃
+        ideas[-1]["logline"] = src[:20] + "。"
+    return _j({"ideas": _strip_words(ideas, [str(x) for x in meta.get("banned_keywords") or []])})
+
+
 HANDLERS = {
+    "idea_seed": mock_idea_seed,
+    "idea_organize": mock_idea_organize,
+    "idea_fusion": mock_idea_fusion,
     "radar_book_ai": mock_radar_book_ai,
     "polish_voice": mock_polish_voice,
     "trend_report": mock_trend_report,

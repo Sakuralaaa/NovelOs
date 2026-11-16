@@ -1,5 +1,28 @@
 # 更新日志
 
+## v0.9.2（2026-11-16）
+
+### 风向标日报升级（榜单 → 立项）
+- 日报新增 `headline`（≤40 字定调）、`summary`、每个榜的 `risks`、`inspirations`（4–6 张灵感卡：书名、一句话钩子、主角、核心机制、第一章开局、3 个卖点、借的哪个榜）、`opening_hooks`、`plot_devices`、`writing_advice`、`risk_alerts`。旧字段全部保留，旧报告照常可读。
+- 灵感卡与榜上书重名的删掉；与榜上书名+完整简介做 8 字 n-gram 比对，过相似的删掉并记 `warnings`。`idea_hooks` 模型没给时由灵感卡派生（title / pitch=logline）。
+- 每榜读的样本改为前 N 本，N 由新配置 `radar_report_top_n` 控制（默认 30，原来总榜 12、题材 15）；进提示词的简介截到 80 字。报告 `meta` 记录 `top_n` 与实际读的本数 `books_read`。
+- 新 scope：`board:<g>:<read|new>`（只读一个总榜）、`category:<g>:<read|new>:<题材>`（题材的单个榜）；旧写法 `category:<g>:<题材>` 保持阅读榜+新书榜。`GET /api/radar/report/latest` 为 `GET /api/radar/report` 的别名。
+- 日报配置 `GET/PUT /api/radar/report/config`：`radar_report_top_n`、`radar_report_auto_scopes`（默认 `["overall"]`）。自动日报开关仍是 `auto_report`，开启后按 auto_scopes 各生成一份；刷新结果新增 `report_job_ids`。
+
+### 立项
+- 种子立项 `POST /api/ideas/from-seed`：`expand=false` 不调模型，种子直接存成选题（评分留空）；`expand=true` 走任务，planner 扩成完整选题（同一套 Idea 结构、禁用套路清单与复核打分），并和参考书做来源自检。`Idea.source` 带 `type`（trend_report / rank_book / paste / fusion / manual）与 `ref`；建书时种子里的主角、核心机制并进 premise。
+- 一键整理 `POST /api/ideas/organize`（任务）：把作者粘贴的零散想法（≤5000 字）整理成完整选题，不改作者核心设定，记录 `kept_core` / `added` / `conflicts`。
+- 多本熔炉 `POST /api/ideas/fusion`（任务）：1–3 本参考（榜单书 / 书名 / 粘贴原文），权重归一化，按权重融合结构、卖点、风格产出原创选题；结果与每本参考的书名、简介、原文做 8 字 n-gram 比对，过相似丢弃计 `dropped`。粘贴原文不入库。
+
+### 仿写立项 TXT
+- `POST /api/radar/imitate/extract`（multipart file 或 JSON text，同步、不入库）：识别 utf-8 / gb18030（含 BOM），按「第X章 / 第X回 / Chapter N / 序章」切章，返回书名猜测、前 10 章目录与字数、前 10 章拼接正文（≤20000 字），可直接喂深度拆解与换皮。
+
+### 提示词
+- 新增 `prompts/idea_seed.md`、`idea_organize.md`、`idea_fusion.md`；`prompts/trend_report.md` 与 `rules/trend_report.md` 增加灵感卡、开篇钩子、剧情装置与风险提醒的要求。
+
+### 其它
+- 版本号 0.9.2。
+
 ## v0.9.1（2026-11-16）
 
 ### 榜单书架化

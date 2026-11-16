@@ -115,6 +115,10 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   foreshadow_plan: 'AI 规划伏笔',
   cover_prompt: '改封面提示词',
   radar_report: '生成风向标日报',
+  idea_seed: '灵感立项',
+  idea_from_seed: '灵感立项',
+  idea_organize: '一键整理选题',
+  idea_fusion: '多本熔炉',
   book_test: '书测',
 }
 export const jobLabel = (kind: string) => JOB_KIND_LABEL[kind] ?? kind

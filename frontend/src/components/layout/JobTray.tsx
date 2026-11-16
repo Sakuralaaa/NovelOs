@@ -15,7 +15,7 @@ export function JobTray() {
   if (!jobs.length) return null
   const running = jobs.filter((j) => !j.doneAt)
   return (
-    <div className={cn('pointer-events-none fixed right-4 z-40', agentFab ? 'bottom-[76px] md:bottom-[92px] md:right-7' : 'bottom-4')} style={{ width: 340, maxWidth: 'calc(100vw - 2rem)' }}>
+    <div className={cn('job-tray pointer-events-none fixed right-4 z-40', agentFab ? 'bottom-[76px] md:bottom-[92px] md:right-7' : 'bottom-4')} style={{ width: 340, maxWidth: 'calc(100vw - 2rem)' }}>
       <motion.div layout initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="pointer-events-auto overflow-hidden rounded-xl bg-popover shadow-pop hairline">
         <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left">
           <span className="flex items-center gap-2 text-[13px] font-semibold">

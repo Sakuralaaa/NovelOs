@@ -101,10 +101,66 @@ class RadarConfigIn(BaseModel):
     auto_report: bool | None = None  # v0.9：刷新成功后自动生成风向标日报；不传表示不改
 
 
+class RadarReportConfigIn(BaseModel):
+    """v0.9.2：日报配置（GET/PUT /api/radar/report/config）；不传的项不改。"""
+    radar_report_top_n: int | None = Field(default=None, ge=3, le=50)  # 每榜读前 N 本
+    radar_report_auto_scopes: list[str] | None = Field(default=None, max_length=8)  # 自动日报 scope 列表（需 auto_report 开）
+
+
 class TrendReportIn(BaseModel):
-    """v0.9：scope = overall 或 category:<male|female>:<题材名>；top_n 每个榜取前 N 本（3–30，不传按 scope 默认 12/15）。"""
+    """scope = overall / board:<g>:<read|new> / category:<g>:<read|new>:<题材> / category:<g>:<题材>（旧，视为 read）；
+    top_n 每个榜取前 N 本（3–50，不传用配置 radar_report_top_n，默认 30）。"""
     scope: str = "overall"
-    top_n: int | None = Field(default=None, ge=3, le=30)
+    top_n: int | None = Field(default=None, ge=3, le=50)
+
+
+# ------------------------------------------------------------------ v0.9.2：种子立项 / 一键整理 / 多本熔炉
+
+SeedSourceType = Literal["trend_report", "rank_book", "paste", "fusion", "manual"]
+
+
+class SeedSourceIn(BaseModel):
+    type: SeedSourceType = "manual"
+    ref: str | None = Field(default=None, max_length=200)
+    report_id: int | None = None
+    book_id_ext: str | None = Field(default=None, max_length=40)
+
+
+class IdeaSeedIn(BaseModel):
+    title: str = Field(min_length=1, max_length=60)
+    logline: str = Field(min_length=1, max_length=500)
+    protagonist: str | None = Field(default=None, max_length=300)
+    mechanism: str | None = Field(default=None, max_length=300)
+    opening: str | None = Field(default=None, max_length=500)
+    selling_points: list[str] | None = Field(default=None, max_length=8)
+    genre: str | None = Field(default=None, max_length=30)
+    gender: Gender | None = None
+    source: SeedSourceIn = Field(default_factory=SeedSourceIn)
+    expand: bool = False
+
+
+class IdeaOrganizeIn(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    genre: str | None = Field(default=None, max_length=30)
+    gender: Gender | None = None
+
+
+class FusionRefIn(BaseModel):
+    book_id_ext: str | None = Field(default=None, max_length=40)
+    title: str | None = Field(default=None, max_length=60)
+    text: str | None = Field(default=None, max_length=40000)  # 去空白后 ≤20000 字，服务端再查
+    weight: float = Field(default=1.0, gt=0, le=100)
+
+
+class IdeaFusionIn(BaseModel):
+    refs: list[FusionRefIn] = Field(min_length=1, max_length=3)
+    notes: str | None = Field(default=None, max_length=1000)
+    n: int = Field(default=3, ge=1, le=5)
+
+
+class ImitateExtractIn(BaseModel):
+    text: str = Field(min_length=1)
+    filename: str | None = None
 
 
 PlatformStyle = Literal["fanqie", "qidian", "generic"]

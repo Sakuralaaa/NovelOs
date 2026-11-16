@@ -515,6 +515,74 @@ function TropesCard() {
   )
 }
 
+const AUTO_SCOPES = [
+  { value: 'overall', label: '总榜' },
+  { value: 'board:male:read', label: '男频阅读' }, { value: 'board:male:new', label: '男频新书' },
+  { value: 'board:female:read', label: '女频阅读' }, { value: 'board:female:new', label: '女频新书' },
+]
+
+/** v0.9.2：/api/radar/report/config（读取本数 + 自动生成范围），局部更新 */
+function ReportConfigRows({ autoOn }: { autoOn: boolean }) {
+  const q = useQuery({ queryKey: qk.radarReportConfig, queryFn: api.radarReportConfig, retry: false })
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: api.saveRadarReportConfig,
+    meta: { errorTitle: '保存失败' },
+    onSuccess: (d) => { qc.setQueryData(qk.radarReportConfig, d); toast.success('风向标设置已保存') },
+  })
+  if (q.isLoading) return <div className="px-5 py-3"><Skeleton className="h-12" /></div>
+  if (!q.data) return <div className="px-5 py-3.5 text-[12.5px] text-muted-foreground">风向标设置读取失败{(q.error as any)?.message ? `：${(q.error as any).message}` : ''}</div>
+  const c = q.data
+  const cur = c.radar_report_auto_scopes ?? ['overall']
+  return (
+    <>
+      <TopNRow value={c.radar_report_top_n ?? 30} busy={m.isPending} onSave={(n) => m.mutate({ radar_report_top_n: n })} />
+      <div className={cn('px-5 py-3.5', !autoOn && 'opacity-60')}>
+        <div className="text-[13.5px] font-medium">自动生成的风向标范围</div>
+        <div className="mt-0.5 text-[12px] text-muted-foreground">刷新出新榜单后按勾选的范围各生成一份{!autoOn && '（先打开上面的自动生成）'}；题材风向标在榜单页手动生成</div>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {AUTO_SCOPES.map((o) => {
+            const on = cur.includes(o.value)
+            return (
+              <button key={o.value} type="button" aria-pressed={on} disabled={m.isPending}
+                onClick={() => m.mutate({ radar_report_auto_scopes: on ? cur.filter((x) => x !== o.value) : [...cur, o.value] })}
+                className={cn('inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-[13px] transition', on ? 'border-primary bg-primary-soft font-medium text-primary' : 'text-foreground/75 hover:border-foreground/25')}>
+                {on && <Check className="h-3.5 w-3.5" strokeWidth={2.5} />}{o.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </>
+  )
+}
+
+/** 后端 radar_report_top_n 允许 3–50（任务要求 10–100，按后端实际上限收紧） */
+const TOP_N_MIN = 10
+const TOP_N_MAX = 50
+
+function TopNRow({ value, busy, onSave }: { value: number; busy: boolean; onSave: (n: number) => void }) {
+  const [v, setV] = useState(String(value))
+  useEffect(() => setV(String(value)), [value])
+  const n = Number(v)
+  const bad = !Number.isInteger(n) || n < TOP_N_MIN || n > TOP_N_MAX
+  const commit = () => { if (!bad && n !== value) onSave(n); else if (bad) setV(String(value)) }
+  return (
+    <div className="flex min-h-[60px] flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 py-3">
+      <div className="min-w-0">
+        <div className="text-[13.5px] font-medium">风向标读取每榜前 N 本</div>
+        <div className="mt-0.5 text-[12px] text-muted-foreground">{TOP_N_MIN}–{TOP_N_MAX}，默认 30；越多越全面，也越费 token</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input type="number" inputMode="numeric" min={TOP_N_MIN} max={TOP_N_MAX} step={5} value={v} onChange={(e) => setV(e.target.value)} onBlur={commit}
+          onKeyDown={(e) => e.key === 'Enter' && commit()} className={cn('num h-10 w-[96px] text-center', bad && 'border-danger/60')} aria-label="每榜前 N 本" />
+        <span className="text-[13px] text-muted-foreground">本</span>
+        {!bad && n !== value && <Button size="sm" variant="primary" className="h-9" loading={busy} onClick={commit}>保存</Button>}
+      </div>
+    </div>
+  )
+}
+
 function RadarCard() {
   const q = useQuery({ queryKey: qk.radarConfig, queryFn: api.radarConfig })
   const qc = useQueryClient()
@@ -545,6 +613,7 @@ function RadarCard() {
               </div>
               <Switch checked={!!c.auto_report} onCheckedChange={(v) => m.mutate({ ...c, auto_report: v })} />
             </label>
+            <ReportConfigRows autoOn={!!c.auto_report} />
           </div>
         )}
       </CardBody>

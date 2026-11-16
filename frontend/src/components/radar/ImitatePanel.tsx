@@ -187,7 +187,7 @@ function SectionTitle({ n, title, extra }: { n: number; title: string; extra?: R
 }
 
 /** 后台任务进度：进度文字 + 进度条（来自 Job.progress / Job.message） */
-function JobProgress({ message, progress, className }: { message: string; progress: number; className?: string }) {
+export function JobProgress({ message, progress, className }: { message: string; progress: number; className?: string }) {
   return (
     <div className={cn('rounded-lg bg-primary-soft/60 px-3 py-2', className)}>
       <div className="flex items-center gap-2 text-[12.5px] text-primary">
@@ -202,11 +202,11 @@ function JobProgress({ message, progress, className }: { message: string; progre
   )
 }
 
-function ErrorLine({ text, className }: { text: string; className?: string }) {
+export function ErrorLine({ text, className }: { text: string; className?: string }) {
   return <p className={cn('break-words rounded-lg bg-danger-soft/60 px-3 py-2 text-[12.5px] text-danger', className)}>{text}</p>
 }
 
-function Thinking({ text, sub, rows = 3, progress, message }: { text: string; sub?: string; rows?: number; progress?: number; message?: string }) {
+export function Thinking({ text, sub, rows = 3, progress, message }: { text: string; sub?: string; rows?: number; progress?: number; message?: string }) {
   return (
     <div className="rounded-xl border bg-surface p-4">
       <div className="flex items-center gap-2 text-[13px] font-medium text-primary"><Loader2 className="h-4 w-4 animate-spin" />{text}</div>
@@ -220,7 +220,7 @@ function Thinking({ text, sub, rows = 3, progress, message }: { text: string; su
   )
 }
 
-function TeardownCards({ td }: { td: TeardownCore }) {
+export function TeardownCards({ td }: { td: TeardownCore }) {
   const gf = td.golden_finger ?? { type: '', delivery: '' }
   return (
     <div className="space-y-3">
@@ -288,9 +288,10 @@ export function Warnings({ items, className }: { items?: string[]; className?: s
 
 // ---------------- 深度拆解 ----------------
 
-function DeepSection({ itemId, deep }: { itemId: number; deep: DeepTeardown | null }) {
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState('')
+export function DeepSection({ itemId, deep, initialText, num = 2 }: { itemId: number; deep: DeepTeardown | null; initialText?: string; num?: number }) {
+  const [open, setOpen] = useState(!!initialText)
+  const [text, setText] = useState(initialText ?? '')
+  useEffect(() => { if (initialText) { setText(initialText); setOpen(true) } }, [initialText])
   const m = useDeepTeardown(itemId)
   const busy = m.busy
   const n = useMemo(() => bare(text), [text])
@@ -301,7 +302,7 @@ function DeepSection({ itemId, deep }: { itemId: number; deep: DeepTeardown | nu
 
   return (
     <div className="mt-7">
-      <SectionTitle n={2} title="深度拆解" extra={deep && <Badge tone="success" dot>已拆 {deep.chapters.length} 章</Badge>} />
+      <SectionTitle n={num} title="深度拆解" extra={deep && <Badge tone="success" dot>已拆 {deep.chapters.length} 章</Badge>} />
       {deep && <DeepResult deep={deep} />}
 
       <div className={cn('rounded-xl border bg-surface', deep && 'mt-3')}>
@@ -423,7 +424,7 @@ function Tile({ label, value, sub }: { label: string; value: React.ReactNode; su
 
 // ---------------- 换皮选题 ----------------
 
-function IdeasSection({ busy, error, result, progress, message, onRun, onOpen, onAll }: {
+export function IdeasSection({ busy, error, result, progress, message, onRun, onOpen, onAll }: {
   busy: boolean; error: string | null; result: ReskinResult | null; progress: number; message: string
   onRun: () => void; onOpen: (i: Idea) => void; onAll: () => void
 }) {

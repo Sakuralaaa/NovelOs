@@ -6,7 +6,7 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo, BibleItem, BibleOp, BibleProposal, BookInfo,
   ForeshadowPlanItem, Impact, OutlineSyncItem, Trope, TropeHit,
   Book, Card, Channel, Chapter, ChapterVariant, Foreshadow, Idea, Job, Lint, OutlineNode, Package,
-  RadarConfig, RadarSnapshot, Review, Routing, Style, Teardown,
+  RadarConfig, RadarSnapshot, Review, Routing, Style, Teardown, TrendReportBody,
 } from '@/lib/types'
 import { analyzeText } from '@/lib/textAnalysis'
 import { countWords } from '@/lib/utils'
@@ -21,7 +21,8 @@ const nid = () => ++seq
 const db = {
   channels: [] as (Omit<Channel, 'api_key_masked'> & { api_key: string })[],
   routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, agent: null, image_mode: 'images' } as Routing,
-  radarConfig: { enabled: true, daily_hour: 8 } as RadarConfig,
+  radarConfig: { enabled: true, daily_hour: 8, auto_report: true } as RadarConfig,
+  reportConfig: { radar_report_top_n: 30, radar_report_auto_scopes: ['overall', 'board:male:read'] },
   writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1 },
   zhuque: { zhuque_configured: true, zhuque_key_tail: '9fQ2', zhuque_base_url: 'https://ai-gateway.edgeone.link', zhuque_auto_check: false, zhuque_usage: { calls: 12, tokens: 38210 } },
   snapshots: [{ id: 1, taken_at: ago(60 * 5), source: 'mock', items_count: 60 }] as RadarSnapshot[],
@@ -297,8 +298,12 @@ on('POST', '/radar/refresh', () => createJob('radar_refresh', null, 4200, ['连�
 }))
 on('GET', '/radar/snapshots', () => db.snapshots)
 on('GET', '/radar/latest', (_m, _b, u) => {
-  const g = u.searchParams.get('gender'), c = u.searchParams.get('category')
-  return { snapshot: db.snapshots[0] ?? null, items: db.items.filter((i) => (!g || i.gender === g) && (!c || i.category === c)) }
+  const g = u.searchParams.get('gender'), c = u.searchParams.get('category'), bd = u.searchParams.get('board')
+  // v0.9.2 mock：新书榜 = 每 3 本取 1 本、重新排名
+  let items = db.items.filter((i) => (!g || i.gender === g))
+  if (bd === 'new') items = items.filter((_, k) => k % 3 === 1).map((i, k) => ({ ...i, board: 'new' as const, rank: k + 1 }))
+  else items = items.map((i) => ({ ...i, board: 'read' as const }))
+  return { snapshot: db.snapshots[0] ?? null, items: items.filter((i) => !c || i.category === c), boards: ['new', 'read'] }
 })
 on('GET', '/radar/trends', () => [...MALE_CATS, ...FEMALE_CATS].map((cat, i) => {
   const its = db.items.filter((x) => x.category === cat)
@@ -422,6 +427,178 @@ on('POST', '/radar/books/:id/ai', (m, b) => {
     return { kind, book_id_ext: it.book_id_ext, ref_title: it.title, candidates: pool.slice(0, n), dropped, warnings: dropped ? [`已丢弃「${head}之后」：和原书名/简介有 1 处连续 8 字相同`] : [] }
   })
   return { ...j, job_id: j.id }
+})
+// ---------------- v0.9.2 风向标（scope：overall / board:<g>:<read|new> / category:<g>:<read|new>:<name>）----------------
+type MReport = { id: number; snapshot_id: number; scope: string; created_at: string; model: string; stale: boolean; snapshot: any; report: TrendReportBody }
+const reports: MReport[] = []
+const normScope = (s: string) => { const m = /^category:(male|female):(?!read:|new:)(.+)$/.exec(s); return m ? `category:${m[1]}:read:${m[2]}` : s }
+function scopeBoards(scope: string): string[] {
+  const m = /^(board|category):(male|female):(read|new)/.exec(scope)
+  if (!m) return ['男频阅读榜', '男频新书榜', '女频阅读榜', '女频新书榜']
+  return [`${m[2] === 'male' ? '男频' : '女频'}${m[3] === 'new' ? '新书榜' : '阅读榜'}`]
+}
+function mkReportBody(scope: string, legacy = false, salt = 0): TrendReportBody {
+  const female = scope.includes(':female')
+  const cat = /^category:[a-z]+:[a-z]+:(.+)$/.exec(scope)?.[1]
+  const words = female ? ['清醒大女主', '年代致富', '假千金反杀', '团宠萌宝', '先婚后爱', '马甲文'] : ['中式怪诞', '规则出题人', '国家公器入局', '神明食材化', '系统反向打工', '末世基建']
+  const boards = scopeBoards(scope).map((b, k) => ({
+    board: b,
+    overview: `${b}${cat ? `的「${cat}」` : ''}头部被${words[(k + salt) % 6]}与${words[(k + 2 + salt) % 6]}占据，新上榜作品普遍在前三章就交代金手指。`,
+    reader_mood: b.includes('女') ? '读者厌倦了无脑虐，更想看女主清醒止损、靠能力赢回主动权。' : '读者想要“合理的强”：金手指要有代价，打脸要有铺垫，讨厌降智反派。',
+    opportunity: b.includes('新书') ? '新书榜上「职业 + 规则」的组合还没有头部，空位明显。' : '阅读榜长尾里“国家/组织入局”的视角稀缺，适合差异化切入。',
+    writing_tips: '开篇 300 字内给冲突，第 1 章末露出金手指，第 2 章第一次兑现。',
+    idea_hooks: [{ title: female ? '退婚后我成了首富亲妈' : '我在诡异世界当出题人', pitch: female ? '被退婚当天，她发现自己是首富失散二十年的亲生母亲的女儿' : '全球被拉进规则怪谈，主角却是那个出题的人' }],
+    ...(legacy ? {} : { risks: '同质化：系统流开局过多，慎写真实机构名称' }),
+  }))
+  const base: TrendReportBody = {
+    hot_words: words.map((w, i) => ({ word: w, why: `${w}相关作品本周新上榜 ${3 + ((i + salt) % 4)} 本`, examples: [] })),
+    boards,
+    open_directions: ['民俗职业 + 规则怪谈：殡葬、扎纸、守夜人', '把“国家队”写成主角的后援而非对手', '女频：年代背景下的技术流致富'],
+    title_patterns: [
+      { pattern: '规则怪谈：从[民俗职业/身份]开始[颠覆/收容]不可名状', examples: ['规则怪谈：从扎纸匠开始收容神明'] },
+      { pattern: '开局[一个反常身份]，我[反向操作]', examples: ['开局诡异出题人，我给怪物送分'] },
+      { pattern: '[时代]：我靠[冷门技能]养活全家', examples: ['八零：我靠修收音机养活全家'] },
+      { pattern: '被[身份]后，我成了[更高身份]', examples: [] },
+    ],
+    pitfalls: ['金手指出现超过第 3 章，追读断崖', '反派降智只为给主角送脸', '规则怪谈只堆规则不给解法', '前 10 章换三次地图'],
+    warnings: legacy ? [] : ['热词「神明食材化」只在 2 本书出现，置信度低'],
+  }
+  if (legacy) return base
+  return {
+    ...base,
+    headline: female ? '清醒止损压过虐恋，年代技术流成新蓝海' : '「中式怪诞 × 规则出题」接棒系统流，国家入局成爽点新支点',
+    summary: female ? '女频头部的情绪价值从“被偏爱”转向“自己赢”，年代题材里技术流致富的书追读最稳；虐恋开局的新书普遍掉榜。'
+      : '男频阅读榜前排被规则怪谈与中式民俗包围，主角从“被规则折磨”变成“制定规则的人”；新书里国家公器入局的设定明显增加，爽点从个人打脸扩展到集体胜利。',
+    inspirations: [
+      { title: female ? '八零：我靠修收音机养活全家' : '诡异世界：我是唯一的出题人', logline: female ? '下岗女工带着全家在八零年代靠修电器起家' : '全球副本的规则，都是我昨晚随手写的', protagonist: female ? '纺织厂下岗女工，手巧嘴硬，带着两个弟弟' : '失业的中学数学老师，擅长出刁钻题', mechanism: female ? '前世维修知识 + 年代信息差' : '出题即生效：他写下的规则会成为副本法则', opening: female ? '下岗名单贴出来那天，她把厂里的废收音机全收了' : '第一道题出完，全班同学被拉进了副本', selling_points: ['身份反转', '规则爽点', '智斗'], board: scopeBoards(scope)[0] },
+      { title: female ? '假千金她靠玄学杀疯了' : '我把神明做成了火锅', logline: female ? '被赶出豪门那天，她算出了全家人的死期' : '诸神降临，他是唯一能把神明处理成食材的厨子', protagonist: female ? '被抱错的假千金，道观长大，嘴毒心软' : '老街火锅店第三代传人', mechanism: female ? '看相算命 + 真千金反向求助' : '食神图谱：吃掉神明部件获得权柄', opening: female ? '真千金进门第一天，她说：“你印堂发黑，三日内有血光之灾”' : '一只神明的触手伸进了后厨', selling_points: ['猎奇', '美食', '升级'] },
+      { title: '殡仪馆夜班：我能看见死者最后七秒', logline: '每具遗体都会给他留下一道题', protagonist: '殡仪馆夜班化妆师', mechanism: '触碰遗体看到死者最后 7 秒', opening: '第一晚，遗体睁眼说了一个车牌号', selling_points: ['悬疑破案', '中式怪诞', '单元剧'] },
+      { title: '国家队请我出山', logline: '异能复苏，国家给他的编号是 001', protagonist: '退伍后开小卖部的老兵', mechanism: '国家后援通联：每完成任务解锁一项国家级支援', opening: '一辆没有牌照的车停在小卖部门口', selling_points: ['国家入局', '热血', '集体胜利'] },
+    ],
+    opening_hooks: ['开局即规则：第一句话就是一条副本规则', '身份反差：最不该出现在这里的人出现了', '倒计时：三日内必须解决的死局', '反常识：怪物在向主角求饶'],
+    plot_devices: [
+      { name: '逻辑天平', desc: '每次违反规则都要付出等价代价，让爽点可计算' },
+      { name: '战术代差爆破', desc: '用现代知识碾压古旧体系，一章一次小爆点' },
+      { name: '民俗禁忌倒挂', desc: '把禁忌变成主角的武器' },
+      { name: '国家后援通联', desc: '个人困境升级为集体行动，给大场面' },
+    ],
+    writing_advice: '前三章每章主角亲自压一次对手；金手指第 1 章末露出、第 2 章兑现。\n规则类设定先给读者一条能验证的小规则，再放大。',
+    risk_alerts: ['规则怪谈赛道同质化严重，书名避开“规则怪谈”四字开头', '涉及国家机构时不要写真实部门名称', '神明食材化题材注意不要写得过于血腥'],
+    meta: { scope, top_n: db.reportConfig.radar_report_top_n, books_read: boards.length * db.reportConfig.radar_report_top_n },
+  }
+}
+function addReport(scope: string, legacy = false, minsAgo = 0, salt = 0, stale = false) {
+  const r: MReport = { id: nid(), snapshot_id: db.snapshots[0]?.id ?? 1, scope, created_at: ago(minsAgo), model: 'mock', stale, snapshot: db.snapshots[0] ?? null, report: mkReportBody(scope, legacy, salt) }
+  reports.unshift(r); return r
+}
+// 种子：总榜（新字段）、男频阅读榜 3 期（含旧格式往期）、女频阅读榜只有旧格式；其余 scope 404
+addReport('overall', true, 60 * 24 * 4)
+addReport('overall', false, 60 * 3)
+addReport('board:male:read', true, 60 * 24 * 4, 1)
+addReport('board:male:read', false, 60 * 24 * 2, 2, true)
+addReport('board:male:read', false, 60 * 2)
+addReport('board:female:read', true, 60 * 5)
+const latestOf = (scope: string) => reports.filter((r) => r.scope === normScope(scope)).sort((a, b) => b.id - a.id)[0]
+const checkScope = (s: string) => { if (!/^(overall|board:(male|female):(read|new)|category:(male|female):((read|new):)?.+)$/.test(s)) throw new HttpErr(400, `不认识的 scope：${s}`) }
+const reportLatest = (_m: any, _b: any, u: URL) => {
+  const scope = u.searchParams.get('scope') || 'overall'; checkScope(scope)
+  const r = latestOf(scope); if (!r) throw new HttpErr(404, '还没有这个范围的风向标'); return r
+}
+on('GET', '/radar/report/latest', reportLatest)
+on('GET', '/radar/report', reportLatest)
+on('GET', '/radar/reports', (_m, _b, u) => {
+  const scope = u.searchParams.get('scope'); const full = u.searchParams.get('full') === 'true'; const limit = +(u.searchParams.get('limit') || 10)
+  return reports.filter((r) => !scope || r.scope === normScope(scope)).sort((a, b) => b.id - a.id).slice(0, limit)
+    .map((r) => (full ? r : { ...r, report: undefined, hot_words: r.report.hot_words.map((h) => h.word) }))
+})
+on('POST', '/radar/report', (_m, b) => {
+  const scope = normScope(b?.scope || 'overall'); checkScope(scope)
+  const j = createJob('radar_report', null, 3600, ['读取榜单快照…', `读每榜前 ${db.reportConfig.radar_report_top_n} 本…`, '总结热词与读者情绪…', '生成灵感卡与工具箱…'], () => {
+    reports.forEach((r) => { if (r.scope === scope) r.stale = false })
+    return addReport(scope, false, 0, reports.length)
+  }, `trend_report:${scope}`)
+  return { ...j, job_id: j.id }
+})
+
+// ---------------- v0.9.2 立项向导 ----------------
+function seedIdea(b: any, extra: Partial<Idea> = {}): Idea {
+  const gender = b.gender || 'male'
+  const idea: Idea = {
+    id: nid(), book_id: null, title: String(b.title || '未命名选题').replace(/^《|》$/g, ''), logline: b.logline || '', genre: b.genre || (gender === 'female' ? '年代重生' : '都市高武'),
+    selling_points: (b.selling_points?.length ? b.selling_points : ['高概念', '爽点明确', '人设新']).slice(0, 5),
+    hook: b.opening || b.hook || '开局即危机，主角当场做出反常选择。',
+    scores: { heat: 78, novelty: 72, fit: 74, overall: 74 }, chosen: false, ...extra,
+  }
+  db.ideas.unshift(idea); return idea
+}
+on('POST', '/ideas/from-seed', (_m, b) => {
+  if (!b?.title || !b?.logline) throw new HttpErr(422, 'title 与 logline 必填')
+  if (!b.expand) return { idea: seedIdea(b) }
+  const j = createJob('idea_seed', null, 3000, ['读取灵感卡…', '补全钩子与卖点…', '规划主线阶段…', '评分…'], () => ({
+    idea: seedIdea(b, {
+      hook: b.opening ? `${b.opening}——${b.protagonist ? `${b.protagonist}当场` : '主角当场'}做出了没人想到的选择。` : '开局即危机。',
+      arc: ['立足：用金手指解决第一个死局', '扩张：机制升级，卷入更大的势力', '对决：规则背后的出题者现身', '终局：改写世界规则'],
+      endgame: '揭开机制的来历，成为新的规则制定者', expectations: ['每章一个小爽点', '三章一个大反转'],
+    }),
+  }), `seed:${b.source?.type ?? 'manual'}`)
+  return { job_id: j.id }
+})
+on('POST', '/ideas/organize', (_m, b) => {
+  const text = String(b?.text || '').trim()
+  if (text.replace(/\s/g, '').length < 10) throw new HttpErr(400, '想法太短了，至少写 10 个字')
+  const first = text.split(/[\n。！？]/).find((x) => x.trim()) || text
+  const j = createJob('idea_organize', null, 2800, ['理解你的想法…', '提炼书名与一句话卖点…', '补全钩子与主线…', '评分…'], () => ({
+    idea: seedIdea({ title: first.slice(0, 12).replace(/[，,：:]/g, ''), logline: first.slice(0, 40), genre: b.genre, gender: b.gender, selling_points: ['设定新', '悬念足', '可持续'] }, {
+      arc: ['开局：能力觉醒与第一案', '发展：卷入更大的局', '高潮：真相反转', '结局：亲手了结'], endgame: '查清能力来历，了结二十年旧案',
+    }),
+  }), 'organize')
+  return { job_id: j.id }
+})
+on('POST', '/ideas/fusion', (_m, b) => {
+  const refs = (b?.refs ?? []) as { book_id_ext?: string; title?: string; text?: string; weight: number }[]
+  if (!refs.length || refs.length > 3) throw new HttpErr(400, '熔炉需要 1–3 本参考书')
+  const titles = refs.map((r) => r.title || db.items.find((i) => i.book_id_ext === r.book_id_ext)?.title || '参考书')
+  const n = Math.max(1, Math.min(5, b.n || 3))
+  const j = createJob('idea_fusion', null, 4200, ['九维度拆解参考书…', '按权重提取卖点…', '融合配方…', '生成选题并做相似自检…'], () => {
+    const pool = [
+      { title: '我在殡仪馆给神明化妆', logline: '每位来客都是落难的神，而他是唯一能让神体面离开的人', sp: ['中式怪诞', '单元剧', '身份反差'] },
+      { title: '规则之外：国家给我发了个编号', logline: '规则副本降临，国家把唯一的“出题人”编进了特别行动队', sp: ['国家入局', '规则爽点', '集体胜利'] },
+      { title: '八零年代修神仙', logline: '修电器的年轻人发现，送来修理的收音机里住着神仙', sp: ['年代', '奇幻', '温情'] },
+      { title: '我的火锅店只接待诸神', logline: '深夜十二点后，老街火锅店的客人都不是人', sp: ['美食', '猎奇', '经营'] },
+      { title: '诡异复苏：我负责出题', logline: '全世界都在答题，只有他知道答案', sp: ['智斗', '高概念', '逆袭'] },
+    ]
+    const ideas = pool.slice(0, n).map((p, k) => seedIdea({ title: p.title, logline: p.logline, selling_points: p.sp }, { scores: { heat: 80 - k * 3, novelty: 76 - k * 4, fit: 72 - k * 2, overall: 76 - k * 3 } }))
+    // 最后一个不入库：演示「保存并打开」
+    const loose = n >= 3 ? { ...ideas[ideas.length - 1], id: 0 } : null
+    if (loose) db.ideas = db.ideas.filter((x) => x.id !== ideas[ideas.length - 1].id)
+    return { ideas: loose ? [...ideas.slice(0, -1), loose] : ideas, dropped: n >= 3 ? 1 : 0, warnings: [`融合自：${titles.map((t, k) => `${t} ${refs[k].weight}%`).join(' + ')}`] }
+  }, 'fusion')
+  return { job_id: j.id }
+})
+function splitChapters(text: string) {
+  const lines = text.split(/\r?\n/)
+  const out: { title: string; chars: number }[] = []
+  let cur: { title: string; chars: number } | null = null
+  for (const l of lines) {
+    if (/^\s*第[一二三四五六七八九十百千零\d]+[章节回]/.test(l)) { cur = { title: l.trim(), chars: 0 }; out.push(cur) }
+    else if (cur) cur.chars += l.replace(/\s/g, '').length
+  }
+  return out
+}
+on('POST', '/radar/imitate/extract', (_m, b) => {
+  const text = String(b?.__file_text ?? b?.text ?? '')
+  if (!text.trim()) throw new HttpErr(400, '没有读到正文')
+  const name = String(b?.__file_name || '').replace(/\.txt$/i, '')
+  const chs = splitChapters(text)
+  const body = text.length > 20000 ? text.slice(0, 20000) : text
+  return { title_guess: name || text.split(/\n/)[0].slice(0, 16), encoding: 'utf-8', total_chapters: chs.length, chapters: chs.length ? chs.slice(0, 10) : [{ title: '全文', chars: text.replace(/\s/g, '').length }], text: body, text_chars: body.replace(/\s/g, '').length, truncated: body.length < text.length }
+})
+
+on('GET', '/radar/report/config', () => db.reportConfig)
+on('PUT', '/radar/report/config', (_m, b) => {
+  if (b.radar_report_top_n !== undefined) { const n = Number(b.radar_report_top_n); if (!Number.isInteger(n) || n < 3 || n > 50) throw new HttpErr(422, 'radar_report_top_n 需在 3–50'); db.reportConfig.radar_report_top_n = n }
+  if (b.radar_report_auto_scopes !== undefined) { (b.radar_report_auto_scopes as string[]).forEach(checkScope); db.reportConfig.radar_report_auto_scopes = [...new Set(b.radar_report_auto_scopes as string[])] }
+  return db.reportConfig
 })
 on('GET', '/radar/config', () => db.radarConfig)
 on('PUT', '/radar/config', (_m, b) => (db.radarConfig = { ...db.radarConfig, ...b }))
@@ -1103,7 +1280,11 @@ export function installMock() {
     if (!url.pathname.startsWith('/api/')) return real(input, init)
     const method = (init?.method || 'GET').toUpperCase()
     const path = url.pathname.slice(4)
-    const body = init?.body ? JSON.parse(String(init.body)) : {}
+    let body: any = {}
+    if (typeof FormData !== 'undefined' && init?.body instanceof FormData) {
+      const f = init.body.get('file') as File | null
+      body = { __file_name: f?.name ?? '', __file_text: f ? await f.text() : '' }
+    } else if (init?.body) body = JSON.parse(String(init.body))
     await new Promise((r) => setTimeout(r, 120 + Math.random() * 160))
     for (const [mth, re, h] of routes) {
       const m = path.match(re)

@@ -38,6 +38,47 @@ def set_config(s: Session, enabled: bool, daily_hour: int, auto_report: bool | N
     return cfg
 
 
+# v0.9.2：日报配置单独存（GET/PUT /api/radar/report/config），不改 /api/radar/config 的返回形状
+REPORT_CONFIG_KEY = "radar_report_config"
+
+
+def get_report_config(s: Session) -> dict[str, Any]:
+    from app.config import get_settings
+
+    st = get_settings()
+    cfg = {"radar_report_top_n": max(3, min(50, int(st.radar_report_top_n))),
+           "radar_report_auto_scopes": list(st.radar_report_auto_scopes or ["overall"])}
+    return {**cfg, **(kv_get(s, REPORT_CONFIG_KEY, {}) or {})}
+
+
+def clean_auto_scopes(scopes: list[str]) -> list[str]:
+    """校验自动日报 scope 列表（格式不对抛 ValueError → 400），去重保序，最多 8 个。"""
+    from app.radar import report as trend_report
+
+    out: list[str] = []
+    for sc in scopes:
+        sc = str(sc or "").strip()
+        if not sc:
+            continue
+        trend_report.scope_info(sc)
+        if sc not in out:
+            out.append(sc)
+    if len(out) > 8:
+        raise ValueError("自动日报最多 8 个 scope")
+    return out
+
+
+def set_report_config(s: Session, top_n: int | None = None, auto_scopes: list[str] | None = None) -> dict[str, Any]:
+    """不传的项不改。"""
+    stored = dict(kv_get(s, REPORT_CONFIG_KEY, {}) or {})
+    if top_n is not None:
+        stored["radar_report_top_n"] = max(3, min(50, int(top_n)))
+    if auto_scopes is not None:
+        stored["radar_report_auto_scopes"] = clean_auto_scopes(auto_scopes)
+    kv_set(s, REPORT_CONFIG_KEY, stored)
+    return get_report_config(s)
+
+
 def board_of(it: Any) -> str:
     """旧数据没有 board（或迁移补成空串）一律当阅读榜。"""
     b = it.get("board") if isinstance(it, dict) else getattr(it, "board", None)
@@ -129,18 +170,31 @@ def _maybe_cache_covers(items: list[dict[str, Any]]) -> None:
 
 
 def _maybe_auto_report(cfg: dict[str, Any], snapshot_id: int, out: dict[str, Any]) -> None:
-    """开启自动日报且这份快照还没有总览日报时，提交 radar_report 任务（job id 写进刷新结果）。"""
+    """开启自动日报时，对 radar_report_auto_scopes（默认只有 overall）里这份快照还没有日报的 scope 各提交一个 radar_report 任务。
+    job id 写进刷新结果：report_job_ids {scope: id}；overall 的另写 report_job_id（兼容 v0.9）。"""
     if not cfg.get("auto_report") or not snapshot_id:
         return
     from app.radar import report as trend_report
 
     try:
         with session_scope() as s:
-            if trend_report.latest_report(s, "overall", snapshot_id=snapshot_id) is not None:
-                return
-        out["report_job_id"] = trend_report.submit_report("overall").id
-    except Exception as e:  # noqa: BLE001  日报失败不影响刷新本身
-        log.warning("自动提交风向标日报失败：%s", e)
+            scopes = get_report_config(s).get("radar_report_auto_scopes") or ["overall"]
+    except Exception:  # noqa: BLE001
+        scopes = ["overall"]
+    ids: dict[str, int] = {}
+    for scope in scopes:
+        try:
+            with session_scope() as s:
+                if trend_report.latest_report(s, scope, snapshot_id=snapshot_id) is not None:
+                    continue
+            trend_report.check_can_generate(scope)
+            ids[scope] = trend_report.submit_report(scope).id
+        except Exception as e:  # noqa: BLE001  日报失败不影响刷新本身
+            log.warning("自动提交风向标日报（%s）失败：%s", scope, e)
+    if ids:
+        out["report_job_ids"] = ids
+    if "overall" in ids:
+        out["report_job_id"] = ids["overall"]
 
 
 def latest_snapshot(s: Session, offset: int = 0) -> RadarSnapshot | None:

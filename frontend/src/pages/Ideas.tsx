@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw, RefreshCw } from '@/components/icons'
+import { ArrowRight, ClipboardPaste, Feather, Layers3, Plus, ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw, RefreshCw } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ export default function Ideas() {
   const [gender, setGender] = useState<Gender>((sp.get('gender') as Gender) || 'male')
   const [fromTrends, setFromTrends] = useState(sp.get('from_trends') !== '0')
   const [count, setCount] = useState(3)
+  const nav = useNavigate()
   const [fresh, setFresh] = useState<number[]>([])
   const { start } = useJobs()
   const job = useActiveJob('ideas')
@@ -55,7 +56,8 @@ export default function Ideas() {
 
   return (
     <div className="page">
-      <PageHeader title="选题" />
+      <PageHeader title="选题" actions={<Button variant="primary" size="lg" icon={<Plus className="h-4 w-4" />} onClick={() => nav('/ideas/new')}>新建立项</Button>} />
+      <WizardEntry onPick={(k) => nav(`/ideas/new?path=${k}`)} />
 
       <Card className="overflow-hidden">
         <div className="grid gap-5 p-5 md:grid-cols-[1fr_auto] md:p-6">
@@ -236,5 +238,30 @@ function ClearIdeas({ count }: { count: number }) {
           footer={<><Button variant="ghost" onClick={() => setOpen(false)}>取消</Button><Button variant="danger" loading={m.isPending} onClick={() => m.mutate()}>删除</Button></>} />
       </Dialog>
     </>
+  )
+}
+
+/** v0.9.2 立项向导入口：四条路径的紧凑胶囊卡 */
+const ENTRIES = [
+  { key: 'spark', title: '灵感生成', desc: '按题材与热点抽卡', icon: <Wand2 className="h-4 w-4" /> },
+  { key: 'imitate', title: '仿写立项', desc: '榜单书拆解换皮', icon: <Feather className="h-4 w-4" /> },
+  { key: 'organize', title: '一键整理', desc: '粘贴想法成选题', icon: <ClipboardPaste className="h-4 w-4" /> },
+  { key: 'fusion', title: '多本熔炉', desc: '1–3 本融合卖点', icon: <Layers3 className="h-4 w-4" /> },
+]
+function WizardEntry({ onPick }: { onPick: (k: string) => void }) {
+  return (
+    <div className="mb-5 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+      {ENTRIES.map((e) => (
+        <button key={e.key} onClick={() => onPick(e.key)}
+          className="card-hover group flex min-h-[60px] items-center gap-3 rounded-xl border bg-surface px-3.5 py-3 text-left shadow-card active:scale-[0.99]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">{e.icon}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[14px] font-semibold">{e.title}</span>
+            <span className="block truncate text-[12px] text-muted-foreground">{e.desc}</span>
+          </span>
+          <ArrowRight className="hidden h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-primary sm:block" />
+        </button>
+      ))}
+    </div>
   )
 }

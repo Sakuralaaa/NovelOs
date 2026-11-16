@@ -6,13 +6,13 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    AigcDetectIn, ChannelIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
+    AigcDetectIn, ChannelIn, RadarReportConfigIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
@@ -310,6 +310,12 @@ def radar_trends(gender: str | None = Query(None), board: str | None = BoardQ, s
 
 # ------------------------------------------------------------------ v0.9：风向标日报
 
+@router.get("/radar/report/latest")
+def radar_report_latest(scope: str = Query("overall"), s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.9.2：同 GET /radar/report（别名）。"""
+    return radar_report_get(scope, s)
+
+
 @router.get("/radar/report")
 def radar_report_get(scope: str = Query("overall"), s: Session = Depends(get_session)) -> dict[str, Any]:
     """最新一份日报（该 scope）。没有时 404，detail 里写怎么生成。"""
@@ -396,6 +402,48 @@ def radar_config_get(s: Session = Depends(get_session)) -> dict[str, Any]:
 @router.put("/radar/config")
 def radar_config_put(body: RadarConfigIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     return radar.set_config(s, body.enabled, body.daily_hour, body.auto_report)
+
+
+@router.get("/radar/report/config")
+def radar_report_config_get(s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.9.2 → {radar_report_top_n, radar_report_auto_scopes}。"""
+    return radar.get_report_config(s)
+
+
+@router.put("/radar/report/config")
+def radar_report_config_put(body: RadarReportConfigIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.9.2：局部更新；scope 格式不对 400。"""
+    return radar.set_report_config(s, body.radar_report_top_n, body.radar_report_auto_scopes)
+
+
+# ------------------------------------------------------------------ v0.9.2：仿写立项 TXT
+
+@router.post("/radar/imitate/extract")
+async def radar_imitate_extract(request: Request) -> dict[str, Any]:
+    """multipart（file=TXT）或 JSON {text, filename?} → 同步返回 {title_guess, encoding, total_chapters, chapters:[{title, chars}],
+    text(前 10 章拼接，≤20000 字), text_chars, truncated}。不入库，不调模型。"""
+    from app.services import imitate_txt
+
+    ctype = request.headers.get("content-type", "")
+    try:
+        if ctype.startswith("multipart/form-data"):
+            form = await request.form()
+            f = form.get("file")
+            if f is None or isinstance(f, str):
+                if isinstance(form.get("text"), str) and form.get("text"):
+                    return imitate_txt.extract(text=str(form.get("text")))
+                raise HTTPException(400, "请上传 TXT 文件（字段名 file）")
+            data = await f.read(imitate_txt.MAX_BYTES + 1)
+            return imitate_txt.extract(data=data, filename=f.filename)
+        try:
+            body = await request.json()
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, "请求体要么是 multipart（file=TXT），要么是 JSON {text}") from e
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str):
+            raise HTTPException(400, "JSON 里要有 text 字段")
+        return imitate_txt.extract(text=body["text"], filename=body.get("filename") if isinstance(body.get("filename"), str) else None)
+    except imitate_txt.ExtractError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 # ------------------------------------------------------------------ v0.7：榜单仿写（只学结构）

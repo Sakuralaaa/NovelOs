@@ -346,6 +346,19 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
     return {"idea_ids": ids}
 
 
+def _seed_premise(idea: Idea) -> str:
+    """v0.9.2：种子立项时作者给的主角 / 核心机制（Idea 没有对应字段，记在 source.seed）并进建书 premise。"""
+    seed = (idea.source or {}).get("seed") if isinstance(idea.source, dict) else None
+    if not isinstance(seed, dict):
+        return ""
+    out = ""
+    if seed.get("protagonist"):
+        out += f"\n主角：{seed['protagonist']}"
+    if seed.get("mechanism"):
+        out += f"\n核心机制：{seed['mechanism']}"
+    return out
+
+
 def adopt_idea(idea_id: int) -> Book:
     with session_scope() as s:
         idea = s.get(Idea, idea_id)
@@ -360,7 +373,7 @@ def adopt_idea(idea_id: int) -> Book:
             title=idea.title, genre=idea.genre, gender=idea.gender, tagline=idea.hook,
             premise=f"{idea.logline}\n卖点：{'；'.join(idea.selling_points)}" + (f"\n长期期待：{'；'.join(idea.expectations)}" if idea.expectations else "")
             + (f"\n终局目标：{idea.endgame}" if idea.endgame else "")
-            + (f"\n长线阶段：{' → '.join(idea.arc)}" if idea.arc else ""), status="bible",
+            + (f"\n长线阶段：{' → '.join(idea.arc)}" if idea.arc else "") + _seed_premise(idea), status="bible",
             target_words=st.default_target_words, chapter_words=st.default_chapter_words,
         )
         s.add(book)

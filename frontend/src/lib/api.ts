@@ -4,6 +4,7 @@ import type {
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankBoard, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
   BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport, RadarAiKind, RadarBookDetail, ZhuqueSettings, ZhuqueSettingsInput,
+  IdeaSeed, FusionRef, ImitateExtract, RadarReportConfig,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -29,12 +30,13 @@ function qs(params: Record<string, string | number | boolean | undefined | null>
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   let res: Response
+  const form = typeof FormData !== 'undefined' && body instanceof FormData
   try {
     res = await fetch(`/api${url}`, {
       method,
       credentials: 'same-origin',
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: body !== undefined && !form ? { 'Content-Type': 'application/json' } : undefined,
+      body: body === undefined ? undefined : form ? (body as FormData) : JSON.stringify(body),
     })
   } catch {
     throw new ApiError(0, '无法连接到后端服务，请确认 NovelOS 后端已启动')
@@ -111,10 +113,21 @@ export const api = {
   /** board 不传时两类榜合并统计 */
   radarTrends: (gender?: Gender, board?: RankBoard) => get<TrendTopic[]>(`/radar/trends${qs({ gender, board })}`),
   // v0.9：风向标日报（生成走 Job，kind=radar_report）
-  radarReport: (scope = 'overall') => get<TrendReport>(`/radar/report${qs({ scope })}`),
+  /** v0.9.2：GET /radar/report/latest?scope=；后端还没这个路由（FastAPI 默认 404 Not Found）时退回 v0.9 的 /radar/report */
+  radarReport: async (scope = 'overall') => {
+    try {
+      return await get<TrendReport>(`/radar/report/latest${qs({ scope })}`)
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 405 || (e.status === 404 && /^(Not Found|请求失败)/.test(e.message)))) return get<TrendReport>(`/radar/report${qs({ scope })}`)
+      throw e
+    }
+  },
   radarReports: (p: { limit?: number; scope?: string; full?: boolean } = {}) => get<TrendReport[]>(`/radar/reports${qs(p)}`),
   generateRadarReport: (b: { scope?: string; top_n?: number } = {}) => post<Job & { job_id?: number }>('/radar/report', b),
   radarConfig: () => get<RadarConfig>('/radar/config'),
+  /** v0.9.2：风向标读取本数与自动生成范围（独立接口，局部更新） */
+  radarReportConfig: () => get<RadarReportConfig>('/radar/report/config'),
+  saveRadarReportConfig: (b: Partial<RadarReportConfig>) => put<RadarReportConfig>('/radar/report/config', b),
   saveRadarConfig: (b: RadarConfig) => put<RadarConfig>('/radar/config', b),
   // v0.7：榜单仿写（同步接口）
   teardown: (itemId: number) => get<Teardown>(`/radar/items/${itemId}/teardown`),
@@ -141,6 +154,20 @@ export const api = {
   updateBook: (id: number, b: Partial<Book>) => patch<Book>(`/books/${id}`, b),
   deleteBook: (id: number) => del<void>(`/books/${id}`),
 
+  // v0.9.2 立项向导
+  /** expand=false：同步存为选题，返回 {idea} */
+  ideaFromSeed: (b: IdeaSeed) => post<{ idea: Idea }>('/ideas/from-seed', { ...b, expand: false }),
+  /** expand=true：后台补全再存，Job.result = {idea} */
+  ideaFromSeedJob: (b: IdeaSeed) => viaJobId(post('/ideas/from-seed', { ...b, expand: true })),
+  organizeIdea: (b: { text: string; genre?: string; gender?: Gender }) => viaJobId(post('/ideas/organize', b)),
+  /** Job.result = {ideas, dropped, warnings} */
+  fusionIdeas: (b: { refs: FusionRef[]; notes?: string; n?: number }) => viaJobId(post('/ideas/fusion', b)),
+  /** 上传 TXT（multipart file）或 {text}：识别章节 */
+  imitateExtract: (src: File | string) => {
+    if (typeof src === 'string') return post<ImitateExtract>('/radar/imitate/extract', { text: src })
+    const fd = new FormData(); fd.append('file', src)
+    return request<ImitateExtract>('POST', '/radar/imitate/extract', fd)
+  },
   generateIdeas: (b: { genre?: string; gender?: Gender; from_trends: boolean; count: number }) => post<Job>('/ideas/generate', b),
   ideas: () => get<Idea[]>('/ideas'),
   deleteIdea: (id: number) => del<{ ok: boolean }>(`/ideas/${id}`),
@@ -289,6 +316,7 @@ export const qk = {
   bookTest: (bookId: number) => ['book-test', bookId] as const,
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
+  radarReportConfig: ['radar', 'report-config'] as const,
   teardown: (itemId: number) => ['radar', 'teardown', itemId] as const,
   radarBookDetail: (ext: string) => ['radar', 'book-detail', ext] as const,
   zhuque: ['settings', 'zhuque'] as const,

@@ -354,3 +354,117 @@ Aigc：
 
 ### 版本
 - `GET /api/health` → `version: "0.9.1"`。
+
+
+## v0.9.2 榜单 → 立项：日报升级、按榜日报、种子立项、一键整理、多本熔炉、仿写 TXT
+
+所有调模型的接口都返回 Job（返回体同 Job，另带 `job_id` 同 `id`），结果在 `Job.result`；用 `GET /api/jobs/{id}` 轮询。
+
+### 风向标日报 schema 升级
+`TrendReport.report` 保留 v0.9 的全部字段（`hot_words`、`boards[].overview/reader_mood/opportunity/writing_tips/idea_hooks`、`open_directions`、`title_patterns`、`pitfalls`、`warnings`、`inputs`），旧报告原样返回（没有下列新字段，前端按缺省处理）。新增：
+```json
+{"headline": "灵异职业化与系统返还双主线，弱起点强结算最吃香",
+ "summary": "2–3 句总述",
+ "boards": [{"board": "男频阅读", "overview": "", "reader_mood": "", "opportunity": "", "writing_tips": "",
+             "risks": "风险提醒（字符串，可能为空）",
+             "idea_hooks": [{"title": "", "pitch": ""}]}],
+ "inspirations": [{"title": "", "logline": "一句话钩子", "protagonist": "", "mechanism": "", "opening": "第一章开局",
+                   "selling_points": ["", "", ""], "board": "男频阅读"}],
+ "opening_hooks": ["开篇钩子写法"],
+ "plot_devices": [{"name": "倒计时结算", "desc": ""}],
+ "writing_advice": "整体写作建议",
+ "risk_alerts": ["风险提醒"],
+ "meta": {"scope": "overall", "top_n": 30, "books_read": 96, "abstract_chars": 80},
+ "inputs": {"top_n": 30, "books": 110, "books_read": 96, "boards": {"男频阅读": 30}, "new_entries": {}, "prev_snapshot_id": 2}}
+```
+- `headline` ≤40 字；`summary` ≤300 字。`inspirations` 目标 4–6 条（最多 6；不足 4 条时 `warnings` 里有记录）；`board` 可省略（模型没写或不是本次 scope 的榜）。每条 `selling_points` 最多 3 条。
+- 灵感卡查重：和榜上书重名的删掉；与榜上书名+完整简介做 v0.7 的 8 字 n-gram 比对，有 ≥1 处连续 8 字相同就删，记一条 `warnings`。
+- `idea_hooks` 兼容：模型给了就用模型的；某个榜没给时由归到该榜的 `inspirations` 派生（`title`、`pitch=logline`）；单榜日报（board / category 带榜）所有灵感卡都算这个榜。
+- `opening_hooks` ≤5、`plot_devices` ≤5、`risk_alerts` ≤6。
+- `meta.top_n` 为每榜读的本数上限，`meta.books_read` 为实际读进各榜的不同书数；`inputs.books` 仍为输入里出现过的全部书名数（含新上榜/升幅榜）。
+
+### 报告 scope
+| scope | 读哪些榜 |
+|---|---|
+| `overall` | 四个总榜（男频阅读/男频新书/女频阅读/女频新书），各按在读取前 N 本 |
+| `board:<male\|female>:<read\|new>` | 只读该频道该榜（跨题材按在读取前 N 本），`boards` 只有一项 |
+| `category:<male\|female>:<read\|new>:<题材名>` | 该题材的该榜，按名次取前 N 本，`boards` 只有一项 |
+| `category:<male\|female>:<题材名>` | 旧写法，保持 v0.9 行为：该题材阅读榜 + 新书榜 |
+
+- `POST /api/radar/report` body `{scope?, top_n?: 3–50}`（不传 top_n 用配置 `radar_report_top_n`，默认 30）→ Job（`kind=radar_report`，`ref=trend_report:<scope>`）。scope 格式错 400；没有快照 409；题材不在最新快照 / 该频道没有该榜 404。
+- `GET /api/radar/report?scope=…`，以及别名 `GET /api/radar/report/latest?scope=…` → TrendReport；没有 404。
+- `GET /api/radar/reports?scope=…&limit=&full=` 照旧。
+- 报告按请求时的 scope 字符串存，查询按同一字符串匹配。
+
+> 偏离说明：任务说明里写「旧的 `category:<gender>:<name>` 视为 read」，但 v0.9 的旧写法一直是「阅读榜 + 新书榜」（已有测试与历史报告都按这个），为了旧报告和旧前端不变，旧写法保持两榜；要只看阅读榜请用 `category:<g>:read:<题材>`。
+
+### 日报配置
+- `GET /api/radar/report/config` → `{radar_report_top_n: int(3–50，默认 30), radar_report_auto_scopes: string[]（默认 ["overall"]）}`。
+- `PUT /api/radar/report/config` body 任选 `{radar_report_top_n?, radar_report_auto_scopes?: string[]（≤8 个）}` → 同 GET。局部更新；scope 格式不对 400；重复项去掉。
+- 自动日报开关仍是 `/api/radar/config` 的 `auto_report`（该接口形状不变）。开启时，每次刷新出新快照后，对 `radar_report_auto_scopes` 里这份快照还没有日报、且在快照里存在的 scope 各提交一个任务。刷新 `Job.result` 新增 `report_job_ids: {scope: job_id}`；`report_job_id` 仍是 overall 那个（若有）。
+- 环境变量默认值：`NOVELOS_RADAR_REPORT_TOP_N`、`NOVELOS_RADAR_REPORT_AUTO_SCOPES`（存库的值优先）。
+
+> 偏离说明：这两个配置放在独立接口 `/api/radar/report/config`，没有并进 `/api/radar/config`（避免改变旧接口返回形状）。
+
+### 种子立项
+`POST /api/ideas/from-seed` body：
+```json
+{"title": "必填 ≤60", "logline": "必填 ≤500", "protagonist": "可选", "mechanism": "可选", "opening": "可选",
+ "selling_points": ["可选，≤8 条"], "genre": "可选", "gender": "male|female（可选）",
+ "source": {"type": "trend_report|rank_book|paste|fusion|manual", "ref": "可选 ≤200", "report_id": 1, "book_id_ext": "可选"},
+ "expand": false}
+```
+- `expand=false`：同步、不调模型 → `{idea: Idea}`。映射：`title`（去书名号，≤40）、`logline`、`selling_points`（前 4 条）、`hook ← opening`、`genre`、`gender`（不传时取参考书的频道，否则 male）；`expectations/arc` 为空、`endgame` 为空串、`scores` 留空（Idea 里显示为 0）。
+- `expand=true`：Job（`kind=idea_seed`）→ `result {idea: Idea, idea_id}`。planner 按 `/ideas/generate` 的 Idea 结构与禁用套路清单扩写，并做复核打分。
+- `source.book_id_ext` 给了但榜单里没有 → 404；`source.report_id` 给了但日报不存在 → 404；`source.type` 不在枚举内 → 422。
+- 建书（`POST /api/ideas/{id}/adopt`）时，种子的 `protagonist` / `mechanism` 会并进书的 `premise`（「主角：…」「核心机制：…」）。
+
+Idea.source（种子立项）：
+```json
+{"type": "trend_report", "kind": "trend_report", "ref": "灵感卡#2 | trend_report#<report_id> | rank_book:<book_id_ext> | null",
+ "report_id": 1, "book_id_ext": "…",
+ "seed": {"title": "", "logline": "", "protagonist": "", "mechanism": "", "opening": "", "selling_points": [], "genre": ""},
+ "expanded": true,
+ "change": "相对种子改了什么（仅 expand）",
+ "self_check": [{"aspect": "书名", "kept": true, "note": ""}],
+ "overlap": [{"ref": "《参考书》", "count": 1, "segments": ["…"]}],
+ "warnings": ["和《…》的书名/简介有 1 处连续 8 字相同…", "命中禁用套路：…"]}
+```
+`ref` 不传时按 report_id / book_id_ext 自动生成。`overlap` 只在有参考书（book_id_ext）时出现。所有 v0.9.2 的 Idea.source 都带 `type` 与 `ref`；`kind` 与 v0.7 的 `source.kind` 兼容（换皮选题仍是 `kind:"reskin"`，没有 `type`）。
+
+### 一键整理
+- `POST /api/ideas/organize` body `{text: 1–5000 字, genre?, gender?}` → Job（`kind=idea_organize`）→ `result {idea: Idea, idea_id}`。超过 5000 字 422；全是空白 400。
+- 不改作者的核心设定（主角、名字、机制、世界规则、关系、结局），只理顺、补齐缺的字段；作者给了书名就用。
+- Idea.source：`{type:"paste", kind:"organize", ref:"原文前 60 字摘录", chars, kept_core:[], added:[], conflicts:[], warnings:[]}`。`warnings` 可能有「作者原有设定在整理稿里没找到原词，请核对」。原文只存前 60 字摘录。
+
+### 多本熔炉
+- `POST /api/ideas/fusion` body `{refs: [{book_id_ext?, title?, text?(去空白后 ≤20000 字), weight: >0}] (1–3 本), notes?: ≤1000, n?: 1–5（默认 3）}` → Job（`kind=idea_fusion`）。
+- 同步校验：refs 为空或多于 3 本 422；weight ≤0 422；某本既没有 book_id_ext 也没有 title、text 400；book_id_ext 不在榜单 404；text 超过 20000 字 400。
+- `weight` 归一化（合计 1，保留 3 位小数）。`book_id_ext` 取最新那条榜单记录的书名/简介/标签/题材，以及 v0.7 已有的拆解 / 深度拆解（有就带）。`text` 只在本次使用，不入库（每本最多 6000 字进提示词，查重用全文）。
+- `Job.result`：
+```json
+{"ideas": [Idea], "idea_ids": [1, 2], "dropped": 1,
+ "warnings": ["已丢弃《…》：和参考2《…》有 1 处连续 8 字相同（…）", "《…》：书名和《…》连续 4 字相同", "只留下 2 个选题（要求 3 个，丢弃 1 个）"]}
+```
+- 查重：每个结果与每本参考的「书名+简介+text」做 8 字 n-gram，≥1 处相同就丢弃并计入 `dropped`；书名与参考书名连续 4 字相同只提醒。
+- Idea.source：`{type:"fusion", kind:"fusion", ref:"《A》×0.75；《B》×0.25", refs:[{index, title, book_id_ext, weight, has_text}], notes, borrowed:[{ref:"参考1", what}], changed:[], overlap:[], warnings:[]}`（没有书名的粘贴参考在 ref 里写作「粘贴原文{序号}」）。
+
+### 仿写立项 TXT
+- `POST /api/radar/imitate/extract`：`multipart/form-data`（字段 `file`=TXT，≤30MB）或 JSON `{text, filename?}` → 同步返回（不入库、不调模型）：
+```json
+{"title_guess": "雾港夜巡人", "encoding": "utf-8|utf-8-sig|utf-16|gb18030|text",
+ "total_chapters": 120,
+ "chapters": [{"title": "第1章 夜巡", "chars": 2100}],
+ "text": "前 10 章「标题\n\n正文」用空行拼接，≤20000 字",
+ "text_chars": 19876, "truncated": false}
+```
+- 编码：有 BOM 按 BOM；否则先 utf-8，失败按 gb18030（兼容 gbk）。切章识别「第X章 / 第X回 / 第X节」（中文或阿拉伯数字）、「Chapter N」（不分大小写）、序章 / 楔子 / 引子；第一个章节标题前的内容（书名、作者、简介）不进 `text`。识别不到章节时整段算一章 `{"title":"全文"}`，`total_chapters=0`。`chapters` 只列前 10 章，`chars` 为去空白字数。`truncated=true` 表示前 10 章超过 20000 字被截断。
+- `title_guess`：开头的「书名：X」或「《X》」→ 文件名（去掉括号里的「全本」「作者」等）→ 开头第一行短文字。
+- 空文件 / 只有空白 / JSON 没有 text / 其它 content-type 400。
+- 前端拿 `text` 走现有 `POST /api/radar/items/{id}/deep`（深度拆解）与 `POST /api/radar/items/{id}/reskin`。
+
+### 提示词
+新增 `prompts/idea_seed`、`idea_organize`、`idea_fusion`；`prompts/trend_report` 与规则包 `rules/trend_report` 升级（可在 `/api/prompts` 覆盖；已有覆盖的旧版 trend_report 仍可用，只是不会产出新字段）。
+
+### 版本
+- `GET /api/health` → `version: "0.9.2"`。

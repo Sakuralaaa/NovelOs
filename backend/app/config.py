@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     radar_cover_max_bytes: int = 2 * 1024 * 1024
     radar_cover_timeout: float = 10.0
     radar_detail_ttl_h: float = 24.0  # 书页详情（章节目录、完整简介）缓存时长
+    # v0.9.2：风向标日报每榜读前 N 本（3–50）；自动日报生成哪些 scope（/api/radar/config 可改，存库优先）
+    radar_report_top_n: int = 30
+    radar_report_auto_scopes: list[str] = ["overall"]
     radar_user_agent: str = (
         "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
