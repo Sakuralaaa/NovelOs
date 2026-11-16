@@ -991,7 +991,51 @@ def mock_book_test(meta: dict[str, Any]) -> str:
     return _j({"variants": out})
 
 
+def mock_radar_book_ai(meta: dict[str, Any]) -> str:
+    """v0.9.1 单书灵感示例：只用题材/频道拼，不碰原书名。"""
+    kind = str(meta.get("kind") or "title")
+    n = int(meta.get("n") or 5)
+    cat = str(meta.get("category") or "都市")
+    female = meta.get("gender") == "female"
+    heads = ["退婚当天", "被逐出家门后", "开局负债百万", "穿成炮灰后", "直播第一天", "签到满一年", "被全网嘲讽后", "继承破庙后",
+             "重生回高考前", "替嫁冲喜后"]
+    tails = (["她把渣男送进了局子", "全家跪求她回家", "豪门大佬天天追着宠", "她靠算命爆红", "前夫悔疯了"] if female else
+             ["我把仇家熬成了孙子", "我的金手指只会吐槽", "全城大佬求我出手", "我靠捡垃圾无敌了", "系统劝我低调点"])
+    styles = ["厚涂写实", "国风水墨", "动漫赛璐璐", "暗黑悬疑", "明亮轻喜"]
+    out: list[dict[str, str]] = []
+    for i in range(n):
+        h, t = heads[i % len(heads)], tails[(i * 3) % len(tails)]
+        if kind == "cover":
+            out.append({"prompt": f"{cat}网文封面，{'少女' if female else '青年'}主角半身像居中，逆光，背景是{['燃烧的城市', '云海宫阙', '雨夜长街', '旧书店门口', '星空废墟'][i % 5]}，"
+                                  f"高对比冷暖撞色，{styles[i % 5]}画风，上方留出书名位置，竖版 3:4", "style": styles[i % 5]})
+        elif kind == "blurb":
+            out.append({"blurb": f"{h}，所有人都等着看笑话。\n没人知道，那天夜里，{'她' if female else '他'}收到了一条只有自己能看见的提示。\n"
+                                 f"从这天起，欺负过{'她' if female else '他'}的人，一个个都要把账还回来。", "hook": f"{h}的反差 + 只有主角能看见的提示"})
+        else:
+            out.append({"title": f"{h}，{t}", "why": f"{h}给反差，后半句给爽点期待"})
+    return _j({"candidates": out})
+
+
+def mock_polish_voice(meta: dict[str, Any]) -> str:
+    """v0.9.1 语感重塑示例：套口语替换表、拆一个长段，数字和人名不动。"""
+    text = str(meta.get("text") or "")
+    paras = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    out = []
+    for i, p in enumerate(paras):
+        for a, b in PLAIN_REPLACEMENTS.items():
+            p = p.replace(a, b)
+        if len(p) > 70 and "。" in p[20:-1]:
+            k = p.find("。", 20) + 1
+            if 0 < k < len(p):
+                p = p[:k] + "\n\n" + p[k:]
+        out.append(p)
+    res = "\n\n".join(out) or text
+    return res if res != text else text.replace("。", "。\n\n", 1)
+
+
 HANDLERS = {
+    "radar_book_ai": mock_radar_book_ai,
+    "polish_voice": mock_polish_voice,
     "trend_report": mock_trend_report,
     "book_test": mock_book_test,
     "ideation": mock_ideation,

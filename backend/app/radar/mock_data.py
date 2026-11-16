@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 _MALE: list[tuple[str, list[str]]] = [
@@ -29,6 +29,17 @@ _AUTHORS = ["青山不语", "夜听雨", "南风知我意", "北冥有鱼", "半
             "白鹭成双", "长歌当哭", "鹿鸣", "锦瑟", "孤城闭"]
 _ABSTRACT_M = "主角在绝境中觉醒金手指，一路打脸逆袭，揭开隐藏在世界背后的真相。"
 _ABSTRACT_F = "她重生归来，手握先知，步步为营，把欠她的一一讨回，也遇见了真正护她的人。"
+
+
+_CH_TITLES = ["夜里来的客人", "他终于坐不住了", "账本上的第三个名字", "这一刀，我等了三年", "门外有人敲了七下"]
+
+
+def _shelf(h: int, words: int, day: date) -> dict[str, Any]:
+    """v0.9.1 书架字段示例值：按字数估章数（每章约 2200 字），封面与章节 id 留空（示例书没有番茄书页）。"""
+    n = max(1, words // 2200)
+    upd = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) - timedelta(hours=h % 30)
+    return {"cover_url": "", "first_chapter_id": "", "last_chapter_id": "", "chapter_count": n,
+            "last_chapter_title": f"第{n}章 {_CH_TITLES[h % len(_CH_TITLES)]}", "last_update_at": upd}
 
 
 def mock_rank_items(day: date | None = None) -> list[dict[str, Any]]:
@@ -53,6 +64,7 @@ def mock_rank_items(day: date | None = None) -> list[dict[str, Any]]:
                     "tags": [cat, ["系统", "重生", "爽文", "逆袭", "甜宠", "穿越"][h % 6]],
                     "gender": gender,
                     "board": "read",
+                    **_shelf(h, 80_000 + (h % 2_000_000), day),
                 })
         pool.sort(key=lambda x: -x["read_count"])
         for i, it in enumerate(pool, 1):
@@ -102,6 +114,7 @@ def mock_new_items(day: date | None = None) -> list[dict[str, Any]]:
                     "gender": gender,
                     "board": "new",
                     "rank_diff": rng.choice([0, 0, 1, 3, -2, 5]),
+                    **_shelf(h, 30_000 + h % 260_000, day),
                 })
         pool.sort(key=lambda x: -x["read_count"])
         for i, it in enumerate(pool, 1):

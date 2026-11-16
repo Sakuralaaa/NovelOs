@@ -87,6 +87,7 @@ def refresh(ctx: JobContext) -> dict[str, Any]:
         out = {"snapshot_id": last.id, "source": source, "items": last.items_count, "unchanged": True,
                "note": note or "榜单今天还没更新，沿用当前数据"}
         _maybe_auto_report(cfg, last.id or 0, out)
+        _maybe_cache_covers(items)  # 沿用旧快照时也补缓存还没下载的封面（已缓存的会跳过）
         return out
 
     ctx.progress(85, "保存快照")
@@ -96,13 +97,35 @@ def refresh(ctx: JobContext) -> dict[str, Any]:
         s.flush()
         for it in items:
             s.add(RankItem(snapshot_id=snap.id or 0, rank_diff=int(it.get("rank_diff") or 0), board=it["board"], **{k: it[k] for k in (
-                "book_id_ext", "title", "author", "category", "rank", "read_count", "word_count", "abstract", "tags", "gender")}))
+                "book_id_ext", "title", "author", "category", "rank", "read_count", "word_count", "abstract", "tags", "gender")},
+                **_shelf_fields(it)))
         s.commit()
         sid = snap.id
     out = {"snapshot_id": sid, "source": source, "items": len(items), "note": note,
            "boards": {b: sum(1 for it in items if it["board"] == b) for b in BOARDS}}
     _maybe_auto_report(cfg, sid or 0, out)
+    _maybe_cache_covers(items)
     return out
+
+
+def _shelf_fields(it: dict[str, Any]) -> dict[str, Any]:
+    """v0.9.1 书架字段（App 榜单 / 旧格式条目没有这些键时取空值）。"""
+    upd = it.get("last_update_at")
+    return {"cover_url": str(it.get("cover_url") or ""), "first_chapter_id": str(it.get("first_chapter_id") or ""),
+            "last_chapter_id": str(it.get("last_chapter_id") or ""), "last_chapter_title": str(it.get("last_chapter_title") or "")[:120],
+            "last_update_at": upd if isinstance(upd, datetime) else None, "chapter_count": int(it.get("chapter_count") or 0)}
+
+
+def _maybe_cache_covers(items: list[dict[str, Any]]) -> None:
+    """抓榜完成后后台预缓存封面（配置 radar_cache_covers，默认开；只处理有 cover_url 的条目，失败忽略）。"""
+    from app.config import get_settings
+    from app.radar import covers
+
+    if not get_settings().radar_cache_covers:
+        return
+    todo = {str(it["book_id_ext"]): str(it.get("cover_url") or "") for it in items if it.get("cover_url")}
+    if todo:
+        covers.prefetch_async(todo)
 
 
 def _maybe_auto_report(cfg: dict[str, Any], snapshot_id: int, out: dict[str, Any]) -> None:

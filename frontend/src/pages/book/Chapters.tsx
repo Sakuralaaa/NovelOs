@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCheck, ChevronLeft, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3,
+  AlertTriangle, CheckCheck, ChevronLeft, Feather, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +22,7 @@ import { ReviewPanel } from '@/components/chapter/ReviewPanel'
 import { LintPanel, type LocalStats } from '@/components/chapter/LintPanel'
 import { ChangesPanel } from '@/components/chapter/ChangesPanel'
 import { DiffView } from '@/components/chapter/DiffView'
+import { AigcPanel, useSha256 } from '@/components/aigc/Aigc'
 import { useBook } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { useDebouncedCallback } from '@/hooks/useDebounced'
@@ -29,7 +30,7 @@ import { modKey, useHotkey } from '@/hooks/useHotkey'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import { analyzeText } from '@/lib/textAnalysis'
-import type { Chapter, ChapterVariant } from '@/lib/types'
+import type { AigcSegment, Chapter, ChapterVariant } from '@/lib/types'
 import { cn, countWords, fmtNum, fmtTime } from '@/lib/utils'
 
 const STATUS: Record<Chapter['status'], { l: string; dot: string; tone: 'neutral' | 'warning' | 'success' }> = {
@@ -124,7 +125,8 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const [showBare, setShowBare] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [variantId, setVariantId] = useState<number | null>(null)
-  const [diff, setDiff] = useState<{ title: string; before: string; after: string; kind?: 'rewrite' } | null>(null)
+  const [diff, setDiff] = useState<{ title: string; before: string; after: string; kind?: 'rewrite'; label?: string; warnings?: string[] } | null>(null)
+  const [showAigc, setShowAigc] = useState(false)
   const [rwOpen, setRwOpen] = useState(false)
   const [rwSel, setRwSel] = useState<{ start: number; end: number; text: string } | null>(null)
   const [confirmUndo, setConfirmUndo] = useState(false)
@@ -194,8 +196,10 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const humanizeJob = useActiveJob(`humanize:${id}`)
   const thickenJob = useActiveJob(`thicken:${id}`)
   const rewriteJob = useActiveJob(`rewrite:${id}`)
-  const busy = !!(reviewJob || humanizeJob || thickenJob || rewriteJob)
-  const rewriting = !!(humanizeJob || thickenJob || rewriteJob)
+  const polishJob = useActiveJob(`polish:${id}`)
+  const aigcJob = useActiveJob(`aigc:${id}`)
+  const busy = !!(reviewJob || humanizeJob || thickenJob || rewriteJob || polishJob)
+  const rewriting = !!(humanizeJob || thickenJob || rewriteJob || polishJob)
 
   const runRewrite = async (kind: 'humanize' | 'thicken') => {
     if (!(await save())) return
@@ -213,6 +217,50 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
           if ((fresh.content ?? '') !== before) setDiff({ title: `${label}完成 · 逐段对比`, before, after: fresh.content ?? '' })
           else toast.info(`${label}完成，这一章没有需要改的地方`)
         } catch { toast.success(`${label}完成`) }
+      },
+    })
+  }
+  // v0.9.1：语感重塑。结果若带 before/after 则走「按要求改写」的预览-采纳流程；若后端已直接写入正文，则像人味修整一样逐段对比、可撤销
+  const runPolish = async () => {
+    if (!(await save())) return
+    const before = latest.current.content
+    start(api.polishVoice(bookId, id), {
+      key: `polish:${id}`, label: '语感重塑', silent: true,
+      onSuccess: async (j) => {
+        const r = (j.result ?? {}) as Record<string, any>
+        const warnings = normWarnings(r.warnings)
+        const title = '语感重塑 · 逐段对比，确定后才写入'
+        if (typeof r.after === 'string') {
+          const b0 = typeof r.before === 'string' ? r.before : before
+          if (r.changed === false || r.after === b0) { toast.info('语感重塑完成，这一章没有需要改的地方'); return }
+          if (latest.current.content !== b0) { toast.error('重塑期间正文被改过，为免覆盖已丢弃这次结果，请重试'); return }
+          autoReviewRef.current = false
+          setDiff({ title, before: b0, after: r.after, kind: 'rewrite', label: typeof r.label === 'string' && r.label ? r.label : '语感重塑前', warnings })
+          return
+        }
+        try {
+          const fresh = await api.chapter(id)
+          qc.setQueryData(qk.chapter(id), fresh)
+          dirty.current = false
+          setContent(fresh.content ?? '')
+          setSaveState('saved')
+          if ((fresh.content ?? '') !== before) setDiff({ title: '语感重塑完成 · 逐段对比', before, after: fresh.content ?? '', warnings })
+          else toast.info('语感重塑完成，这一章没有需要改的地方')
+        } catch { toast.success('语感重塑完成') }
+      },
+    })
+  }
+  // v0.9.1：朱雀 AIGC 检测
+  const runAigc = async () => {
+    if (!(await save())) return
+    start(api.chapterAigc(bookId, id), {
+      key: `aigc:${id}`, label: 'AI 率检测',
+      successMsg: (j) => { const v = (j.result?.aigc ?? j.result)?.softmax ?? 0; return `AI 率检测完成：${Math.round(v <= 1 ? v * 100 : v)}%` },
+      onSuccess: (j) => {
+        // 结果 = {chapter_id, aigc}（兼容直接返回 Aigc）；同时已写入章节，失效刷新会再拉一次详情
+        const a = (j.result?.aigc ?? j.result) as Chapter['aigc']
+        if (a) qc.setQueryData(qk.chapter(id), (old: Chapter | undefined) => (old ? { ...old, aigc: { ...a, stale: false } } : old))
+        setTab('aigc')
       },
     })
   }
@@ -245,7 +293,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   }
   const autoReviewRef = useRef(true)
   const applyRewrite = useMutation({
-    mutationFn: (c: string) => api.applyRewrite(id, { content: c, label: '按要求改写前' }),
+    mutationFn: (c: string) => api.applyRewrite(id, { content: c, label: diff?.label || '按要求改写前' }),
     meta: { errorTitle: '采纳改写失败' },
   })
   const undoMut = useMutation({
@@ -328,6 +376,23 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   // 文本分析 & 高亮
   const shown = curVariant ? curVariant.content || '' : content
   const analysis = useMemo(() => analyzeText(shown), [shown])
+  // AIGC 是否过期：能算 sha256 且与 content_hash 一致 → 未过期；否则看本地是否改过、章节 updated_at 是否晚于检测时间
+  const aigc = ch?.aigc ?? null
+  // 过期判断：以服务端 aigc.stale 为准；本地还没保存的修改也算过期。老后端没有 stale 字段时，退回比对 sha256 前缀 / updated_at
+  const hash = useSha256(content, !!aigc && aigc.stale === undefined)
+  const hashMatch = hash && aigc?.content_hash && /^[0-9a-f]{16,64}$/i.test(aigc.content_hash) ? hash.startsWith(aigc.content_hash.toLowerCase()) : null
+  const localEdited = content !== (ch?.content ?? '') || saveState !== 'saved'
+  const aigcStale = !!aigc && (localEdited || (aigc.stale !== undefined ? aigc.stale
+    : hashMatch !== null ? !hashMatch
+    : !!ch?.updated_at && !!aigc.checked_at && new Date(ch.updated_at).getTime() - new Date(aigc.checked_at).getTime() > 3000))
+  const locateSeg = (sg: AigcSegment) => {
+    const end = Math.min(sg.end, shown.length)
+    if (sg.start >= shown.length) { toast.info('这一段的位置超出了当前正文', { description: '正文可能已经改过，重新检测一次吧' }); return }
+    setShowAigc(true)
+    setFocusQuote({ q: `aigc:${sg.start}`, start: sg.start, end })
+    setSheetOpen(false)
+    setTimeout(() => editor.current?.reveal(sg.start, end), 30)
+  }
   const local: LocalStats = {
     avg_sentence_len: analysis.avg_sentence_len, short_sentence_ratio: analysis.short_sentence_ratio, bare_dialogue_ratio: analysis.bare_dialogue_ratio,
     summary_ratio: analysis.summary_ratio, dialogue_ratio: analysis.dialogue_ratio,
@@ -337,9 +402,10 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     const r: Range[] = []
     if (showBare) analysis.paras.filter((p) => p.kind === 'bare-dialogue').forEach((p) => r.push({ start: p.start, end: p.end, kind: 'bare' }))
     if (showSummary) analysis.paras.filter((p) => p.kind === 'summary').forEach((p) => r.push({ start: p.start, end: p.end, kind: 'summary' }))
+    if (showAigc && aigc && !curVariant) aigc.segments?.forEach((sg) => { if (sg.label !== 'human' && sg.end > sg.start) r.push({ start: sg.start, end: Math.min(sg.end, shown.length), kind: sg.label }) })
     if (focusQuote) { const f = { start: focusQuote.start, end: focusQuote.end, kind: 'focus' as const }; return [...r.filter((x) => x.end <= f.start || x.start >= f.end), f] }
     return r
-  }, [analysis, showBare, showSummary, focusQuote])
+  }, [analysis, showBare, showSummary, focusQuote, showAigc, aigc, curVariant, shown.length])
 
   const locateQuote = (quote: string) => {
     if (!quote) return
@@ -360,7 +426,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
 
   const panel = (
     <Tabs value={tab} onValueChange={setTab} className="flex h-full flex-col">
-      <div className="border-b px-4 py-3"><TabsList className="w-full"><TabsTrigger value="review">审稿</TabsTrigger><TabsTrigger value="lint">人味</TabsTrigger><TabsTrigger value="changes">变更</TabsTrigger></TabsList></div>
+      <div className="border-b px-4 py-3"><TabsList className="w-full"><TabsTrigger value="review">审稿</TabsTrigger><TabsTrigger value="lint">人味</TabsTrigger><TabsTrigger value="aigc">AI 率</TabsTrigger><TabsTrigger value="changes">变更</TabsTrigger></TabsList></div>
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <TabsContent value="review" className="focus:outline-none"><ReviewPanel review={ch.review} onQuote={locateQuote} onReview={runReview} reviewing={!!reviewJob} activeQuote={focusQuote?.q}
           onApplyPatches={(ix) => applyPatches.mutate(ix)} applyingPatches={applyPatches.isPending}
@@ -369,12 +435,18 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
           <LintPanel lint={lintForPanel} local={local} showBare={showBare} showSummary={showSummary} onToggleBare={setShowBare} onToggleSummary={setShowSummary}
             onHumanize={() => runRewrite('humanize')} onThicken={() => runRewrite('thicken')} busy={busy || hasVariants} thickening={!!thickenJob} humanizing={!!humanizeJob} />
         </TabsContent>
+        <TabsContent value="aigc" className="focus:outline-none">
+          <AigcPanel aigc={aigc} text={content} job={aigcJob} onRun={runAigc} stale={aigcStale}
+            staleNote={localEdited ? '正文有未保存或检测后的修改，结果已过期' : '检测后正文有修改，结果已过期'}
+            showHl={showAigc && !hasVariants} onToggleHl={setShowAigc} onLocate={locateSeg}
+            disabled={hasVariants ? '先采纳一个版本再检测' : rewriting ? '改写任务进行中' : false} />
+        </TabsContent>
         <TabsContent value="changes" className="focus:outline-none"><ChangesPanel changes={ch.changes} /></TabsContent>
       </div>
     </Tabs>
   )
 
-  const runningJob = rewriteJob ?? thickenJob ?? humanizeJob ?? reviewJob
+  const runningJob = polishJob ?? rewriteJob ?? thickenJob ?? humanizeJob ?? reviewJob
 
   return (
     <div className="flex h-full min-h-0">
@@ -398,6 +470,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <Button size="sm" variant="ghost" loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onClick={runReview}><span className="hidden sm:inline">审稿</span></Button>
             <Button size="sm" variant="ghost" loading={!!humanizeJob} disabled={busy || hasVariants} icon={<Wand2 className="h-3.5 w-3.5" />} onClick={() => runRewrite('humanize')}><span className="hidden sm:inline">人味修整</span></Button>
             <Button size="sm" variant="ghost" loading={!!thickenJob} disabled={busy || hasVariants} icon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => runRewrite('thicken')}><span className="hidden sm:inline">描写增厚</span></Button>
+            <Tip content="改成口语网文语感：短句、动作先行、去套话；不改情节和数值"><Button size="sm" variant="ghost" loading={!!polishJob} disabled={busy || hasVariants || !!diff} icon={<Feather className="h-3.5 w-3.5" />} onClick={runPolish}><span className="hidden sm:inline">语感重塑</span></Button></Tip>
             <Tip content="写要求让 AI 改写全章或选中的文字，对比后再决定采纳"><Button size="sm" variant="ghost" loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onClick={openRewrite}><span className="hidden sm:inline">按要求改写</span></Button></Tip>
             {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
             <Dialog open={confirmUndo} onOpenChange={setConfirmUndo}>
@@ -423,7 +496,15 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
         </div>
 
         {diff ? (
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div key="diff" className="min-h-0 flex-1 overflow-y-auto">
+            {!!diff.warnings?.length && (
+              <div className="mx-auto w-full max-w-[860px] px-6 pt-4">
+                <div className="rounded-xl border border-warning/25 bg-warning-soft px-4 py-3">
+                  <div className="flex items-center gap-1.5 text-[13px] font-medium text-warning"><AlertTriangle className="h-4 w-4" />采纳前请核对（{diff.warnings.length} 条）</div>
+                  <ul className="mt-1.5 space-y-1">{diff.warnings.map((w, i) => <li key={i} className="break-words text-[12.5px] leading-relaxed text-foreground/80">· {w}</li>)}</ul>
+                </div>
+              </div>
+            )}
             <DiffView title={diff.title} before={diff.before} after={diff.after} applying={applyDiff.isPending || applyRewrite.isPending}
               onClose={() => { if (diff.kind === 'rewrite') toast.info('已丢弃改写稿，正文没有变'); setDiff(null) }}
               onApply={(c, s) => {
@@ -446,7 +527,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
               }} />
           </div>
         ) : (
-          <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto">
+          <div key="editor" ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto">
             {runningJob && rewriting && (
               <div className="sticky top-0 z-10 flex items-center justify-center gap-2 bg-primary-soft/95 py-2 text-[12.5px] font-medium text-primary backdrop-blur">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />{runningJob.message || `${runningJob.label}中…`} {Math.round(runningJob.progress)}% · 完成后可逐段对比
@@ -496,14 +577,14 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <span><b className="font-semibold text-foreground/80">{words.toLocaleString()}</b> 字</span>
             <span>{analysis.paras.length} 段</span>
             <span>约 {Math.max(1, Math.round(words / 500))} 分钟读完</span>
-            {(showBare || showSummary) && <span className="flex items-center gap-2">{showBare && <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-amber-400" />裸对白</span>}{showSummary && <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-sky-400" />概述</span>}</span>}
+            {(showBare || showSummary || (showAigc && aigc)) && <span className="flex items-center gap-2">{showBare && <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-amber-400" />裸对白</span>}{showSummary && <span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-sky-400" />概述</span>}{showAigc && aigc && <><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-danger/70" />AI</span><span className="flex items-center gap-1"><i className="h-2 w-2 rounded-sm bg-warning/80" />疑似</span></>}</span>}
           </div>
           <span className="hidden sm:inline"><Kbd>{modKey}</Kbd> <Kbd>S</Kbd> 保存</span>
         </div>
       </div>
 
       {panelOpen && <aside className="hidden w-[336px] shrink-0 border-l bg-surface/60 xl:block">{panel}</aside>}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="审稿与人味" width={400}><div className="-mx-6 -my-5 h-[calc(100dvh-80px)]">{panel}</div></Sheet>
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen} title="审稿 · 人味 · AI 率" width={400}><div className="-mx-6 -my-5 h-[calc(100dvh-80px)]">{panel}</div></Sheet>
     </div>
   )
 }
@@ -545,3 +626,8 @@ function SaveIndicator({ state, at }: { state: 'saved' | 'dirty' | 'saving' | 'e
   return <span className={cn('flex items-center gap-1 whitespace-nowrap text-xs', m.c)}>{m.i}{m.t}</span>
 }
 
+/** Job 结果里的 warnings 可能是字符串或 {message} 对象 */
+function normWarnings(w: unknown): string[] {
+  if (!Array.isArray(w)) return []
+  return w.map((x) => (typeof x === 'string' ? x : x && typeof x === 'object' ? String((x as any).message ?? (x as any).text ?? JSON.stringify(x)) : String(x))).filter(Boolean)
+}

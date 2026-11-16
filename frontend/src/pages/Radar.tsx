@@ -14,6 +14,8 @@ import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { ImitatePanel } from '@/components/radar/ImitatePanel'
 import { TrendReportView } from '@/components/radar/TrendReport'
+import { BookDetailDrawer } from '@/components/radar/BookDetailDrawer'
+import { BoardTag, ShelfCard } from '@/components/radar/ShelfCard'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { Gender, RankBoard, RankItem, TrendTopic } from '@/lib/types'
@@ -32,9 +34,13 @@ export default function RadarPage() {
   const setTab = (t: View) => { const n = new URLSearchParams(sp); if (t === 'report') n.set('tab', 'report'); else n.delete('tab'); setSp(n, { replace: true }) }
   const [board, setBoardState] = useState<RankBoard>(() => (localStorage.getItem('novelos.radar-board') === 'new' ? 'new' : 'read'))
   const setBoard = (b: RankBoard) => { setBoardState(b); setCategory(''); localStorage.setItem('novelos.radar-board', b) }
-  const [view, setView] = useState<'table' | 'grid'>('table')
+  // v0.9.1：默认番茄书架式卡片，表格保留给桌面快速浏览
+  const [view, setViewState] = useState<'table' | 'grid'>(() => (localStorage.getItem('novelos.radar-view') === 'table' ? 'table' : 'grid'))
+  const setView = (v: 'table' | 'grid') => { setViewState(v); localStorage.setItem('novelos.radar-view', v) }
   const [limit, setLimit] = useState(PAGE)
-  const [imitate, setImitate] = useState<RankItem | null>(null)
+  const [imitate, setImitateState] = useState<{ item: RankItem; focus: 'teardown' | 'reskin' } | null>(null)
+  const setImitate = (i: RankItem, focus: 'teardown' | 'reskin' = 'reskin') => setImitateState({ item: i, focus })
+  const [detail, setDetail] = useState<RankItem | null>(null)
   const nav = useNavigate()
   const qc = useQueryClient()
   const { start } = useJobs()
@@ -118,7 +124,7 @@ export default function RadarPage() {
         <CardHeader
           divider
           title={<span className="flex items-center gap-2">{category || '全部题材'}<Badge tone={board === 'new' ? 'primary' : 'neutral'}>{BOARD_LABEL[board]}</Badge></span>}
-          action={<Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: <Rows3 className="h-3.5 w-3.5" /> }, { value: 'grid', label: <LayoutGrid className="h-3.5 w-3.5" /> }]} />}
+          action={<Segmented size="sm" value={view} onChange={setView} options={[{ value: 'grid', label: <LayoutGrid className="h-3.5 w-3.5" /> }, { value: 'table', label: <Rows3 className="h-3.5 w-3.5" /> }]} />}
         />
         <div className="flex flex-wrap gap-1.5 border-b px-5 py-3">
           <Chip active={!category} onClick={() => setCategory('')}>全部<span className="num opacity-55">{items.length}</span></Chip>
@@ -132,10 +138,13 @@ export default function RadarPage() {
         ) : !shown.length ? (
           <EmptyState className="m-5 border-0" kind="radar" title={snap ? `这份快照里没有${BOARD_LABEL[board]}数据` : '还没有榜单数据'} action={<Button variant="primary" loading={!!job} onClick={refresh}>刷新榜单</Button>} />
         ) : view === 'table' ? (
-          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={setImitate} />
+          <RankTable items={shown} byBoard={!!category} onIdea={(i) => toIdeas(i.category, i.gender)} onImitate={(i) => setImitate(i)} onOpen={setDetail} />
         ) : (
-          <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
-            {shown.map((i, k) => <RankCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1} onIdea={() => toIdeas(i.category, i.gender)} onImitate={() => setImitate(i)} />)}
+          <div className="grid grid-cols-1 gap-3 p-3 sm:p-4 md:grid-cols-2 md:gap-4 md:p-5">
+            {shown.map((i, k) => (
+              <ShelfCard key={`${i.category}-${i.book_id_ext}`} item={i} n={category ? i.rank : k + 1}
+                onOpen={() => setDetail(i)} onAnalyze={() => setImitate(i, 'teardown')} onImitate={() => setImitate(i, 'reskin')} />
+            ))}
           </div>
         )}
         {filtered.length > shown.length && (
@@ -146,7 +155,8 @@ export default function RadarPage() {
       </Card>
       </>}
 
-      <ImitatePanel item={imitate} onClose={() => setImitate(null)} />
+      <BookDetailDrawer item={detail} onClose={() => setDetail(null)} onImitate={(i) => setImitate(i, 'reskin')} onAnalyze={(i) => setImitate(i, 'teardown')} />
+      <ImitatePanel item={imitate?.item ?? null} focus={imitate?.focus} onClose={() => setImitateState(null)} />
     </div>
   )
 }
@@ -225,7 +235,7 @@ function TrendSection({ board, data, loading, error, onRetry, onPick, onFilter, 
   )
 }
 
-function RankTable({ items, byBoard, onIdea, onImitate }: { items: RankItem[]; byBoard: boolean; onIdea: (i: RankItem) => void; onImitate: (i: RankItem) => void }) {
+function RankTable({ items, byBoard, onIdea, onImitate, onOpen }: { items: RankItem[]; byBoard: boolean; onIdea: (i: RankItem) => void; onImitate: (i: RankItem) => void; onOpen: (i: RankItem) => void }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[780px] text-[13.5px]">
@@ -246,7 +256,7 @@ function RankTable({ items, byBoard, onIdea, onImitate }: { items: RankItem[]; b
             <tr key={`${i.category}-${i.book_id_ext}`} className="group h-[52px] border-b border-border/60 last:border-0 hover:bg-subtle/60">
               <td className="pl-5"><RankNo n={byBoard ? i.rank : k + 1} /></td>
               <td className="max-w-0 pr-4">
-                <Tip content={i.abstract || null}><span className="flex min-w-0 items-center gap-1.5"><span className="truncate font-medium">{i.title}</span><BoardTag board={i.board} /></span></Tip>
+                <Tip content={i.abstract || null}><button onClick={() => onOpen(i)} className="flex min-w-0 max-w-full items-center gap-1.5 text-left hover:text-primary"><span className="truncate font-medium">{i.title}</span><BoardTag board={i.board} /></button></Tip>
               </td>
               <td className="max-w-[120px] truncate pr-3 text-muted-foreground">{i.author}</td>
               <td><Badge>{i.category}</Badge></td>
@@ -275,32 +285,4 @@ function RankNo({ n }: { n: number }) {
       {n}
     </span>
   )
-}
-
-function RankCard({ item: i, n, onIdea, onImitate }: { item: RankItem; n: number; onIdea: () => void; onImitate: () => void }) {
-  return (
-    <div className="card-hover group flex h-[176px] flex-col rounded-xl border bg-surface p-4">
-      <div className="flex items-start gap-3">
-        <RankNo n={n} />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5"><span className="truncate text-[14.5px] font-semibold">{i.title}</span><BoardTag board={i.board} /></div>
-          <div className="mt-1 truncate text-[12.5px] text-muted-foreground">{i.author} · {i.category}</div>
-        </div>
-        <span className="text-[12px]"><Diff v={i.rank_diff} /></span>
-      </div>
-      <p className="mt-3 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{i.abstract}</p>
-      <div className="mt-auto flex items-center justify-between pt-3 text-[12.5px] text-muted-foreground">
-        <span className="num truncate">在读 {fmtNum(i.read_count)} · {fmtNum(i.word_count)} 字</span>
-        <span className="flex shrink-0 gap-1">
-          <Button size="xs" variant="ghost" onClick={onIdea}>出选题</Button>
-          <Button size="xs" variant="soft" icon={<Feather className="h-3.5 w-3.5" />} onClick={onImitate}>仿写这本</Button>
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function BoardTag({ board }: { board?: RankBoard }) {
-  const b = board ?? 'read'
-  return <span className={cn('shrink-0 rounded px-1.5 py-px text-[10.5px] font-medium', b === 'new' ? 'bg-primary-soft text-primary' : 'bg-muted text-muted-foreground')}>{b === 'new' ? '新书' : '阅读'}</span>
 }

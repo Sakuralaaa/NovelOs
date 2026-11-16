@@ -87,6 +87,13 @@ class RankItem(SQLModel, table=True):
     gender: str = "male"
     # v0.9：榜单类型 read（阅读榜，30 万字以上）/ new（新书榜，30 万字以下）；旧数据迁移后默认 read
     board: str = "read"
+    # v0.9.1：番茄书架同款信息（封面、章节、原文跳转）；旧数据迁移后为空串 / 0 / NULL
+    cover_url: str = ""  # 番茄签名封面地址（约 7 天过期），对外通过 /api/radar/cover/{book_id_ext} 缓存代理
+    first_chapter_id: str = ""
+    last_chapter_id: str = ""
+    last_chapter_title: str = ""
+    last_update_at: Optional[datetime] = None
+    chapter_count: int = 0  # 从最新章标题解析的章号估计；0 表示未知
 
 
 class TrendReport(SQLModel, table=True):
@@ -208,6 +215,7 @@ class Chapter(SQLModel, table=True):
     variants: list[dict[str, Any]] = _json_list()
     outline_node_id: Optional[int] = None
     history: list[dict[str, Any]] = _json_list()  # 改写/精修前的旧正文 [{content, title, label, at}]，用于撤回
+    aigc: Optional[dict[str, Any]] = _json_dict_nullable()  # v0.9.1 朱雀 AIGC 检测结果（content_hash 判断是否过期）
     updated_at: datetime = Field(default_factory=utcnow)
 
 

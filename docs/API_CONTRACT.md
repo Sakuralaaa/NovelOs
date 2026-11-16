@@ -257,3 +257,100 @@ TrendReport：
 - `GET /api/books/{id}/book-test` → `{book_id, variants:[{style:"A 番茄情绪爽感|B 悬疑规则脑洞|C 轻松沙雕|D 起点正剧", title, subtitle(≤20字), hook, cover_prompt(含 3:4)}], warnings:[], created_at, model, adopted:int|null, adopted_fields:[]}`；没做过 404。
 - `POST /api/books/{id}/book-test/adopt` body `{index, fields?:["title","subtitle","hook","cover_prompt"]}`（默认 `["title","subtitle"]`：title→书名，subtitle→一句话简介，hook→包装简介，cover_prompt→包装封面提示词）→ `{book, package, adopted:{index, variant, applied, before, after}}`。书名/简介走作品信息版本栈，可 `POST /api/books/{id}/undo` 撤回。下标越界 404。
 - Agent 工具 `book_test`：产出 `kind:"book_test"`（标签「书测方案」）提案，`needs_review=true`（自动采纳不会替作者选）；`payload.variants` 为四组方案。采纳 `POST /api/agent/proposals/{pid}/apply` body `{edited:{index, fields?}}`，可撤回。
+
+
+## v0.9.1 榜单书架化、单书详情与灵感、朱雀 AIGC 检测、语感重塑
+
+### 雷达列表项（RankItem）新增字段
+`GET /api/radar/latest` 的 `items[]`（以及 `detail.item`）在原有字段外增加：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `cover` | string \| null | 本站封面代理相对路径 `/api/radar/cover/{book_id_ext}`；该书没有封面地址时为 null |
+| `source_url` | string \| null | `https://fanqienovel.com/page/{bookId}`；示例数据（非数字 id）为 null |
+| `first_chapter_url` | string \| null | `https://fanqienovel.com/reader/{firstChapterItemId}`；没有首章 id 时为 null |
+| `chapter_count` | int | 从最新章标题解析的章号估计，0 表示未知 |
+| `last_chapter_title` | string | 最新章标题，可能为空串 |
+| `last_update_at` | ISO8601 \| null | 最新章更新时间（UTC） |
+| `first_chapter_id` / `last_chapter_id` | string | 番茄章节 itemId，可能为空串（额外字段，可不用） |
+
+> 偏离说明：`source_url` / `first_chapter_url` 在示例数据或缺 id 时为 null（契约原文写作 string）。
+
+### 封面
+- `GET /api/radar/cover/{book_id_ext}` → 图片（`image/jpeg` 或 `image/png`，按文件头），`Cache-Control: private, max-age=2592000, immutable`；没有封面地址 / 下载失败 / 非图片 / 超过 2MB / id 不合法 → 404 JSON。
+- 鉴权与其它 `/api` 相同（登录 Cookie 或 API 密钥）。前端同源 `<img src={item.cover}>` 会自动带 HttpOnly 会话 Cookie，无需单独放行；用 API 密钥的脚本请带 `Authorization: Bearer nvk_…` 或 `X-API-Key`。
+- 抓榜成功后后台预缓存本次快照的封面（配置 `NOVELOS_RADAR_CACHE_COVERS`，默认开）。
+
+### 单书详情
+- `GET /api/radar/books/{book_id_ext}/detail?refresh=false` →
+```json
+{"item": {"…列表项全部字段": ""},
+ "chapter_total": 412,
+ "abstract": "书页上的完整简介（取不到时为条目简介）",
+ "chapters_head": [{"title": "第1章 …", "item_id": "7654…", "url": "https://fanqienovel.com/reader/7654…"}],
+ "chapters_tail": [{"title": "第412章 …", "item_id": "…", "url": "…"}],
+ "fetched_at": "2026-11-16T09:00:00Z",
+ "detail_error": null,
+ "cached": false}
+```
+- `chapters_head` 为前 50 章；`chapters_tail` 为第 50 章之后的最后 10 章（总数 ≤50 时为空数组，两者不重复）。`chapter_total` 取不到时为 null。
+- 解析结果缓存 24 小时（`refresh=true` 强制重抓）。抓取失败时 HTTP 仍为 200：返回 `item`，`detail_error` 为中文原因，其余为空。示例数据 `detail_error="示例数据没有番茄书页"`。榜单里没有这本书 → 404。
+- 额外字段 `cached: bool`。
+
+### 单书 AI 灵感
+- `POST /api/radar/books/{book_id_ext}/ai` body `{kind: "title" | "cover" | "blurb", n?: 1–10}`（n 默认 title/blurb 5、cover 3）→ Job（`kind=radar_book_ai`，`ref=radar_book:{id}:{kind}`；返回体同 Job 并带 `job_id` 同 `id`）。同书同 kind 进行中的任务直接返回。kind 不合法 / n 越界 422；书不存在 404。
+- `Job.result`：
+```json
+{"kind": "title", "book_id_ext": "…", "ref_title": "原书名",
+ "candidates": [{"title": "", "why": ""}],
+ "dropped": 0,
+ "warnings": ["已丢弃「…」：和原书名/简介有 1 处连续 8 字相同（…）"]}
+```
+  - title → `[{title, why}]`；cover → `[{prompt, style}]`（prompt 一段中文画面描述，含「竖版 3:4」，可直接作为 `POST /api/books/{id}/covers/generate` 的 `prompt`）；blurb → `[{blurb, hook}]`。
+  - 查重：与原书名+原简介连续 8 字相同 ≥1 处丢弃；书名候选与原书名连续 4 字相同或包含原书名也丢弃。`dropped` 为丢弃数，候选可能少于 n。
+- 提示词：`prompts/radar_book_title`、`radar_book_cover`、`radar_book_blurb`（`/api/prompts` 可覆盖）。
+
+### 朱雀 AIGC 检测（只做检测）
+- `GET /api/settings/zhuque` → `{zhuque_configured: bool, zhuque_key_tail: string(尾号 4 位，未配置为空串), zhuque_base_url: string, zhuque_auto_check: bool, zhuque_usage: {calls, tokens}}`。
+- `PUT /api/settings/zhuque` body 任选 `{zhuque_api_key?: string（空串=清除）, zhuque_base_url?: string（空串=恢复默认 https://ai-gateway.edgeone.link）, zhuque_auto_check?: bool}` → 同 GET。局部更新，不传的项不变；地址不是 http(s) 开头 400。
+  > 偏离说明：这组设置是独立接口 `/api/settings/zhuque`，不混在 `/api/settings/writing` 里。
+- `POST /api/detect/aigc` body `{text: string(1–200000), is_merge?: true}` → Job（`kind=aigc_detect`，带 `job_id`）；未配置密钥 409。`Job.result` = 下方 Aigc 结构去掉 `checked_at` / `content_hash` / `stale`，多 `chars`、`is_merge`。
+- `POST /api/books/{book_id}/chapters/{chapter_id}/aigc` body 可选 `{is_merge?: true}` → Job（`kind=chapter_aigc`，`ref=chapter:{id}`，带 `job_id`）；章节不属于该书 404、正文为空 409、未配置密钥 409。`Job.result = {chapter_id, aigc: Aigc}`，同时写入章节。
+- 章节（`GET /api/chapters/{id}` 等返回 Chapter 的接口）新增 `aigc: Aigc | null`；章节列表里的 `aigc` 不带 `segments`。
+
+Aigc：
+```json
+{"checked_at": "2026-11-16T09:00:00.000000Z",
+ "content_hash": "sha256 前 16 位",
+ "stale": false,
+ "softmax": 0.91,
+ "ratio": 0.7,
+ "labels_ratio": {"human": 0.1, "ai": 0.7, "suspect": 0.2},
+ "level": "low | mid | high",
+ "ai_segment_ratio": 0.54,
+ "suspect_segment_ratio": 0.1,
+ "segments": [{"start": 0, "end": 12, "label": "human | ai | suspect", "conf": 0.97}],
+ "tokens": 1234,
+ "chunks": 1,
+ "chars": 2300,
+ "is_merge": true}
+```
+- `level` 按 softmax：<0.5 low、0.5–0.85 mid、≥0.85 high。`segments` 的 start/end 是全文字符偏移（`content.slice(start, end)`）。`ai_segment_ratio` / `suspect_segment_ratio` 为分段里 AI / 疑似段的字数占比（没有分段时 null）。`stale=true` 表示检测后正文改过（服务端按 content_hash 判断）。
+- 失败（Job failed）的 `error` 为中文：密钥无效（401/403）、额度/频率（429）、超时（30 秒）等。
+- 写章流程不自动调用；`zhuque_auto_check=true` 时章节提交后后台检测一次，失败不影响提交。不提供“分高就自动改写”。
+
+### 语感重塑
+- `POST /api/books/{book_id}/chapters/{chapter_id}/polish-voice`（无 body）→ Job（`kind=chapter_polish_voice`，带 `job_id`）；章节不属于该书 404、正文为空 409。
+- `Job.result`（与 `POST /api/chapters/{id}/rewrite` 的对比稿结构一致，另加 `label`、`checks`、`warnings`）：
+```json
+{"chapter_id": 1, "scope": "all", "start": 0, "end": 2300, "instruction": "语感重塑", "label": "语感重塑前",
+ "before": "原文", "after": "润色稿", "changed": true, "words_before": 2300, "words_after": 2250, "ai_score_after": 21.5,
+ "checks": {"numbers_missing": [], "numbers_added": [], "names_checked": ["林恩"], "names_missing": [], "words_ratio": -0.022, "long_paragraphs": 0},
+ "warnings": ["数字/数值和原文不一致（少了 三千；多了 3000），请核对…"]}
+```
+- 不改正文。采纳：`POST /api/chapters/{id}/apply-rewrite {content: after, label}`；撤回：`POST /api/chapters/{id}/undo`。
+- 偏离说明：没有 `draft_id`，沿用现有对比稿结构（before/after）。
+- Agent 工具 `polish_voice`（参数 `number` 或 `chapter_id`）：产出 `kind:"chapter_rewrite"` 提案，`payload` 同改写提案并多 `warnings`、`checks`，`payload.instruction="语感重塑"`。
+
+### 版本
+- `GET /api/health` → `version: "0.9.1"`。

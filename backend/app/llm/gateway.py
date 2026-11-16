@@ -66,6 +66,8 @@ TASK_ROLE: dict[str, str] = {
     "reskin": "planner",
     "trend_report": "planner",
     "book_test": "planner",
+    "radar_book_ai": "planner",  # v0.9.1 榜单单书灵感（书名/封面词/简介）
+    "polish_voice": "writer",  # v0.9.1 语感重塑
     "agent": "agent",
 }
 

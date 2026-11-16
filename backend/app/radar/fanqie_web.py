@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -26,6 +27,8 @@ log = logging.getLogger("novelos.radar")
 
 API = "https://fanqienovel.com/api/rank/category/list"
 RANK_PAGE = "https://fanqienovel.com/rank/1_2_1141"
+BOOK_PAGE = "https://fanqienovel.com/page/{book_id}"  # v0.9.1：书页（含 chapterTotal、chapterListWithVolume）
+READER_PAGE = "https://fanqienovel.com/reader/{item_id}"
 # 榜单类型 → rankMold
 BOARD_MOLD: dict[str, int] = {"read": 2, "new": 1}
 BOARD_LABEL: dict[str, str] = {"read": "阅读榜", "new": "新书榜"}
@@ -57,6 +60,65 @@ def _int(v: Any) -> int:
         return int(float(str(v).replace(",", "")))
     except (TypeError, ValueError):
         return 0
+
+
+_CN_DIGIT = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_UNIT = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+_CHAPTER_NO = re.compile(r"第\s*([0-9０-９]+|[零〇一二两三四五六七八九十百千万]+)\s*[章节回话集]")
+
+
+def cn_number(s: str) -> int:
+    """中文数字转整数：八十 → 80，一千零二十三 → 1023，两百 → 200；全角/半角阿拉伯数字直接转。认不出返回 0。"""
+    s = (s or "").strip()
+    if not s:
+        return 0
+    if s.isdigit():
+        try:
+            return int(s.translate(str.maketrans("０１２３４５６７８９", "0123456789")))
+        except ValueError:
+            return 0
+    if any(ch not in _CN_DIGIT and ch not in _CN_UNIT for ch in s):
+        return 0
+    if all(ch in _CN_DIGIT for ch in s) and len(s) > 1:  # 一二三 → 123
+        return int("".join(str(_CN_DIGIT[ch]) for ch in s))
+    total, section, num = 0, 0, 0
+    for ch in s:
+        if ch in _CN_DIGIT:
+            num = _CN_DIGIT[ch]
+        elif ch == "万":
+            total += (section + num) * 10000
+            section, num = 0, 0
+        else:
+            section += (num or 1) * _CN_UNIT[ch]
+            num = 0
+    return total + section + num
+
+
+def chapter_no(title: str | None) -> int:
+    """从章节标题里取章号（「第八十章 …」→ 80，「第412章 …」→ 412）。没有章号返回 0。"""
+    m = _CHAPTER_NO.search(title or "")
+    return cn_number(m.group(1)) if m else 0
+
+
+def _ts(v: Any) -> datetime | None:
+    n = _int(v)
+    if n <= 0:
+        return None
+    if n > 10**11:  # 毫秒
+        n //= 1000
+    try:
+        return datetime.fromtimestamp(n, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def source_url(book_id: str | None) -> str | None:
+    """番茄书页链接；示例数据（非数字 id）没有书页，返回 None。"""
+    return BOOK_PAGE.format(book_id=book_id) if book_id and str(book_id).isdigit() else None
+
+
+def reader_url(item_id: str | None) -> str | None:
+    return READER_PAGE.format(item_id=item_id) if item_id and str(item_id).isdigit() else None
 
 
 def fetch_boards(c: httpx.Client) -> dict[str, list[tuple[str, str]]]:
@@ -93,8 +155,97 @@ def parse_board(data: dict[str, Any], gender: str, category: str, board: str = "
             "tags": [category, "完结" if str(r.get("creationStatus")) == "0" else "连载"],
             "gender": gender,
             "board": board,
+            # v0.9.1
+            "cover_url": str(r.get("thumbUri") or r.get("thumbUrl") or "").strip(),
+            "first_chapter_id": str(r.get("firstChapterItemId") or ""),
+            "last_chapter_id": str(r.get("lastChapterItemId") or ""),
+            "last_chapter_title": decode(r.get("lastChapterTitle")).strip()[:120],
+            "last_update_at": _ts(r.get("lastChapterUpdateTime")),
+            "chapter_count": chapter_no(decode(r.get("lastChapterTitle"))),
         })
     return out
+
+
+# ---------------------------------------------------------------- v0.9.1：书页详情
+
+def _state_page(html: str) -> dict[str, Any] | None:
+    i = html.find("__INITIAL_STATE__=")
+    if i < 0:
+        return None
+    try:
+        state, _ = json.JSONDecoder().raw_decode(html[i + 18:].lstrip().replace(":undefined", ":null"))
+    except ValueError:
+        return None
+    page = state.get("page") if isinstance(state, dict) else None
+    return page if isinstance(page, dict) else None
+
+
+def _chapters_from(v: Any) -> list[dict[str, str]]:
+    """chapterListWithVolume：[[{itemId,title,...}, ...], ...]（按卷分组）；也兼容平铺列表。"""
+    out: list[dict[str, str]] = []
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return out
+    if not isinstance(v, list):
+        return out
+    for vol in v:
+        rows = vol if isinstance(vol, list) else [vol]
+        for c in rows:
+            if isinstance(c, dict) and c.get("itemId"):
+                out.append({"title": decode(str(c.get("title") or "")).strip(), "item_id": str(c["itemId"])})
+    return out
+
+
+_RX_TOTAL = re.compile(r'"chapterTotal"\s*:\s*"?(\d+)')
+_RX_CHAPTER = re.compile(r'"itemId"\s*:\s*"(\d+)"[^{}]*?"title"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_RX_ABSTRACT = re.compile(r'"abstract"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _unescape(s: str) -> str:
+    try:
+        return json.loads(f'"{s}"')
+    except ValueError:
+        return s
+
+
+def parse_book_page(html: str) -> dict[str, Any]:
+    """解析番茄书页：{chapter_total:int|None, abstract:str, chapters:[{title,item_id}]}。
+    先取 window.__INITIAL_STATE__.page，取不到（或字段缺）再用正则兜底；都取不到时字段为空，不抛错。"""
+    page = _state_page(html) or {}
+    total = _int(page.get("chapterTotal")) or None
+    abstract = decode(str(page.get("abstract") or "")).strip()
+    chapters = _chapters_from(page.get("chapterListWithVolume"))
+    if total is None:
+        m = _RX_TOTAL.search(html)
+        total = int(m.group(1)) if m else None
+    if not chapters:
+        seen: set[str] = set()
+        for m in _RX_CHAPTER.finditer(html):
+            if m.group(1) not in seen:
+                seen.add(m.group(1))
+                chapters.append({"title": decode(_unescape(m.group(2))).strip(), "item_id": m.group(1)})
+    if not abstract:
+        m = _RX_ABSTRACT.search(html)
+        abstract = decode(_unescape(m.group(1))).strip() if m else ""
+    if total is None and chapters:
+        total = len(chapters)
+    return {"chapter_total": total, "abstract": abstract, "chapters": chapters}
+
+
+def fetch_book_page(book_id: str, client: httpx.Client | None = None) -> str:
+    """取书页 HTML（普通 UA）。非 200 抛 httpx.HTTPStatusError。"""
+    s = get_settings()
+    own = client is None
+    c = client or httpx.Client(timeout=s.radar_timeout, headers={"User-Agent": WEB_UA, "Accept": "text/html,*/*"}, follow_redirects=True)
+    try:
+        r = c.get(BOOK_PAGE.format(book_id=book_id))
+        r.raise_for_status()
+        return r.text
+    finally:
+        if own:
+            c.close()
 
 
 def fetch_rank_lists(per_board: int | None = None, progress=None, boards: list[str] | tuple[str, ...] | None = None

@@ -1,5 +1,28 @@
 # 更新日志
 
+## v0.9.1（2026-11-16）
+
+### 榜单书架化
+- `RankItem` 新增 `cover_url`、`first_chapter_id`、`last_chapter_id`、`last_chapter_title`、`last_update_at`、`chapter_count`（旧库自动补列：空串 / 0 / NULL）。抓榜时从番茄接口的 `thumbUri`、`firstChapterItemId`、`lastChapterItemId`、`lastChapterTitle`、`lastChapterUpdateTime` 填充；`chapter_count` 从最新章标题解析中文/阿拉伯章号（「第八十章」→ 80），0 表示未知。示例数据给出章数、最新章与更新时间示例值（无封面）。
+- 列表项新增计算字段 `cover`（本站封面代理相对路径，无封面为 null）、`source_url`（番茄书页）、`first_chapter_url`（阅读页）。
+- 封面缓存代理 `GET /api/radar/cover/{book_id_ext}`：`data/covers/{id}.jpg` 有就直接返回（长缓存），否则用最新条目的 `cover_url` 下载（10 秒超时、必须 `image/*`、≤2MB）后存盘；失败 404。实际格式按文件头识别（番茄有时给 PNG）。抓榜后后台预缓存本次快照封面（`NOVELOS_RADAR_CACHE_COVERS`，默认开；间隔为 `radar_interval_s` 的一半且不低于 0.5 秒；失败忽略）。鉴权与其它 `/api` 相同，同源 `<img>` 自动带登录 Cookie。
+- 单书详情 `GET /api/radar/books/{id}/detail`：解析番茄书页 `__INITIAL_STATE__.page`（取不到再用正则兜底）得到 `chapter_total`、完整简介、章节目录前 50 与最后 10 章；缓存 24 小时（`data/radar_detail/`，`?refresh=true` 强制重抓）；抓取失败仍返回条目并带 `detail_error`。
+- 单书 AI 灵感 `POST /api/radar/books/{id}/ai {kind: title|cover|blurb, n}`（Job，planner 路由）：换皮书名 / 封面提示词（3:4，可直接喂封面生成）/ 简介候选，只学同类爆款思路；结果用 v0.7 的 8 字 n-gram 与原书名、原简介比对，书名候选另查与原书名连续 4 字相同，重合的丢弃并计入 `dropped`。新提示词 `prompts/radar_book_title.md`、`radar_book_cover.md`、`radar_book_blurb.md`，可在 /api/prompts 覆盖。
+
+### 朱雀 AIGC 文本检测（只做检测）
+- 接入腾讯 EdgeOne Makers `@makers/zhuque-text`（`POST {base_url}/v1/providers/zhuque-text/classify`）。设置 `GET/PUT /api/settings/zhuque`：密钥 Fernet 加密存库，只回 `zhuque_configured` 与尾号 4 位；`zhuque_base_url` 可改成自己的网关域名；PUT 局部更新。
+- 长文按段落切块（每块 ≤8000 字，`NOVELOS_ZHUQUE_CHUNK_CHARS`），逐块调用后按字数加权合并 softmax / ratio / labels_ratio，分段位置换算回全文偏移；30 秒超时；401/403/429 给中文提示；累计 total_tokens。档位：softmax <0.5 低、0.5–0.85 中、≥0.85 高。
+- `POST /api/detect/aigc`（Job）检测任意文字；`POST /api/books/{bid}/chapters/{cid}/aigc`（Job）结果存进章节新字段 `aigc`（含 `content_hash`，正文改动后 `stale=true`）。
+- 写章流程默认不调用；可选 `zhuque_auto_check`（默认关），开启后章节提交时后台检测一次，失败不影响提交。不会根据检测分自动改写。
+
+### 语感重塑
+- `POST /api/books/{bid}/chapters/{cid}/polish-voice`（Job，writer 路由）：按 `prompts/polish_voice.md` 改成老网文写手的口语语感、提升可读性（成语换口语、换掉套路动作、动词先行、长短句交替、按平台控制段长、具体感官细节），情节/数值/人名/对白含义不变。结果走现有改写对比稿流程（`apply-rewrite` 采纳、`undo` 撤回），不直接覆盖正文。
+- 程序校验：数字/数值词集合与原文一致、主要人名都在、字数变化在 ±20% 内、番茄档段长 ≤70 字，不符的写进 `warnings`。
+- Agent 新工具 `polish_voice`：产出「章节改写」提案。
+
+### 其它
+- 版本号 0.9.1。
+
 ## v0.9.0（2026-11-16）
 
 ### 榜单雷达

@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from sqlmodel import Session, select
 
 from app.api.schemas import (
-    AiAsk, BibleApplyIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
+    AiAsk, BibleApplyIn, ChapterAigcIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
     ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
     AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
     IdeaRevise, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
@@ -573,6 +573,45 @@ async def rewrite_chapter(chapter_id: int, body: ChapterRewriteIn, s: Session = 
     bid = _chapter_book(s, chapter_id)
     return job_out(submit("chapter_rewrite", lambda ctx: writing.rewrite_chapter_job(
         chapter_id, body.instruction, body.route, body.scope, body.start, body.end, ctx), book_id=bid))
+
+
+# ------------------------------------------------------------------ v0.9.1：语感重塑、朱雀检测
+
+def _book_chapter(s: Session, book_id: int, chapter_id: int) -> Chapter:
+    c = s.get(Chapter, chapter_id)
+    if c is None or c.book_id != book_id:
+        raise HTTPException(404, "章节不存在")
+    return c
+
+
+@router.post("/books/{book_id}/chapters/{chapter_id}/polish-voice")
+async def polish_voice(book_id: int, chapter_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """语感重塑（Job，kind=chapter_polish_voice）：result 同 rewrite 的对比稿结构 + checks + warnings；
+    不改正文，采纳走 POST /api/chapters/{id}/apply-rewrite，撤回走 /undo。"""
+    c = _book_chapter(s, book_id, chapter_id)
+    if not c.content.strip():
+        raise HTTPException(409, "章节正文为空；多版本章节请先 adopt 一个版本")
+    j = job_out(submit("chapter_polish_voice", lambda ctx: writing.polish_voice_job(chapter_id, ctx, book_id), book_id=book_id))
+    return {**j, "job_id": j["id"]}
+
+
+@router.post("/books/{book_id}/chapters/{chapter_id}/aigc")
+async def chapter_aigc(book_id: int, chapter_id: int, body: ChapterAigcIn | None = Body(default=None),
+                       s: Session = Depends(get_session)) -> dict[str, Any]:
+    """朱雀 AIGC 检测本章（Job，kind=chapter_aigc，ref=chapter:{id}），结果存进 Chapter.aigc。没配置密钥 409。"""
+    from app.jobs.manager import find_active
+    from app.services import zhuque
+
+    c = _book_chapter(s, book_id, chapter_id)
+    if not c.content.strip():
+        raise HTTPException(409, "章节正文为空")
+    zhuque.require_configured()
+    merge = body.is_merge if body else True
+    ref = f"chapter:{chapter_id}"
+    running = find_active("chapter_aigc", ref)
+    j = job_out(running if running is not None else submit(
+        "chapter_aigc", lambda ctx: zhuque.check_chapter(chapter_id, book_id, ctx.progress, merge), book_id=book_id, ref=ref))
+    return {**j, "job_id": j["id"]}
 
 
 @router.post("/chapters/{chapter_id}/apply-rewrite")

@@ -7,12 +7,12 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlmodel import Session, select
 
 from app import __version__
 from app.api.schemas import (
-    ChannelIn, ChannelUpdate, ModelFetchIn, RadarConfigIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
+    AigcDetectIn, ChannelIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
     snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
@@ -217,6 +217,34 @@ def writing_put(body: WritingSettingsIn, s: Session = Depends(get_session)) -> d
     return writing_settings(s)
 
 
+@router.get("/settings/zhuque")
+def zhuque_get(s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.9.1 朱雀 AIGC 检测设置：{zhuque_configured, zhuque_key_tail, zhuque_base_url, zhuque_auto_check, zhuque_usage:{calls,tokens}}。"""
+    from app.services import zhuque
+
+    return zhuque.settings_out(s)
+
+
+@router.put("/settings/zhuque")
+def zhuque_put(body: ZhuqueSettingsIn, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from app.services import zhuque
+
+    return zhuque.update_settings(s, body.zhuque_api_key, body.zhuque_base_url, body.zhuque_auto_check)
+
+
+@router.post("/detect/aigc")
+async def detect_aigc(body: AigcDetectIn) -> dict[str, Any]:
+    """v0.9.1 朱雀检测任意文字（Job，kind=aigc_detect）；result 同章节 aigc 结构（无 checked_at / content_hash）。没配置密钥 409。"""
+    from app.services import zhuque
+
+    if not body.text.strip():
+        raise HTTPException(400, "要检测的文字不能为空")
+    zhuque.require_configured()
+    text, merge = body.text, body.is_merge
+    j = job_out(submit("aigc_detect", lambda ctx: zhuque.detect(text, merge, ctx.progress)))
+    return {**j, "job_id": j["id"]}
+
+
 @router.get("/settings/tropes")
 def tropes_get(s: Session = Depends(get_session)) -> dict[str, Any]:
     """全局禁用套路列表（生成选题、设定等时注入提示词，生成结果命中关键词时标黄提醒）。"""
@@ -320,6 +348,44 @@ def radar_reports(limit: int = Query(10, ge=1, le=50), scope: str | None = Query
     from app.radar import report as trend_report
 
     return [trend_report.report_out(s, r, with_report=full) for r in trend_report.list_reports(s, limit, scope or None)]
+
+
+# ------------------------------------------------------------------ v0.9.1：封面代理、单书详情、单书 AI 灵感
+
+@router.get("/radar/cover/{book_id_ext}")
+def radar_cover(book_id_ext: str) -> Response:
+    """封面缓存代理：data/covers/{id}.jpg 有就直接返回，否则用最新条目的 cover_url 下载存盘；失败 404。
+    鉴权同其它 /api（同源 <img> 会自动带登录 Cookie）。"""
+    from app.radar import covers
+
+    try:
+        data, mt = covers.get_cover(book_id_ext)
+    except covers.CoverError as e:
+        raise HTTPException(404, str(e)) from e
+    return Response(content=data, media_type=mt, headers={"Cache-Control": "private, max-age=2592000, immutable"})
+
+
+@router.get("/radar/books/{book_id_ext}/detail")
+def radar_book_detail(book_id_ext: str, refresh: bool = Query(False)) -> dict[str, Any]:
+    """书页详情（章节目录前 50 + 最后 10、完整简介、chapter_total），缓存 24 小时；抓取失败仍返回 item 并带 detail_error。"""
+    from app.radar import books
+
+    return books.detail(book_id_ext, refresh=refresh)
+
+
+@router.post("/radar/books/{book_id_ext}/ai")
+async def radar_book_ai(book_id_ext: str, body: RadarBookAiIn) -> dict[str, Any]:
+    """单书 AI 灵感（Job，kind=radar_book_ai，ref=radar_book:{id}:{kind}）→ result {kind, candidates, dropped, warnings, ...}。"""
+    from app.jobs.manager import find_active
+    from app.radar import books
+
+    n = books.ai_n(body.kind, body.n)
+    with session_scope() as s:
+        books.latest_item(s, books._check_id(book_id_ext))
+    ref = f"radar_book:{book_id_ext}:{body.kind}"
+    running = find_active("radar_book_ai", ref)
+    j = job_out(running if running is not None else submit("radar_book_ai", lambda ctx: books.ai_job(book_id_ext, body.kind, n, ctx), ref=ref))
+    return {**j, "job_id": j["id"]}
 
 
 @router.get("/radar/config")

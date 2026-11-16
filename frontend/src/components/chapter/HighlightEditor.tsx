@@ -1,13 +1,16 @@
 import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef } from 'react'
 import { cn } from '@/lib/utils'
 
-export interface Range { start: number; end: number; kind: 'focus' | 'bare' | 'summary' }
+export interface Range { start: number; end: number; kind: 'focus' | 'bare' | 'summary' | 'ai' | 'suspect' }
 export interface EditorHandle { reveal: (start: number, end: number) => void; focus: () => void; getSelection: () => { start: number; end: number } }
 
 const MARK: Record<Range['kind'], string> = {
   focus: 'rounded-sm bg-warning/40 animate-flash',
   bare: 'rounded-sm bg-amber-400/25 shadow-[inset_0_-2px_0_0_rgb(245_158_11/0.7)]',
   summary: 'rounded-sm bg-sky-400/20 shadow-[inset_0_-2px_0_0_rgb(14_165_233/0.6)]',
+  // v0.9.1 朱雀 AIGC 检测
+  ai: 'rounded-sm bg-danger/15 shadow-[inset_0_-2px_0_0_hsl(var(--danger)/0.65)]',
+  suspect: 'rounded-sm bg-warning/20 shadow-[inset_0_-2px_0_0_hsl(var(--warning)/0.7)]',
 }
 
 /**

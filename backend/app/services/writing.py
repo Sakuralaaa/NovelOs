@@ -737,7 +737,11 @@ def commit_chapter(chapter_id: int) -> Chapter:
             s.rollback()
             raise
         s.refresh(ch)
-        return ch
+    # v0.9.1：开启「提交后朱雀检测」时后台检测一次（默认关；失败不影响提交，不会触发任何改写）
+    from app.services import zhuque
+
+    zhuque.maybe_auto_check(chapter_id)
+    return ch
 
 
 # ------------------------------------------------------------------ 作者操作
@@ -946,6 +950,114 @@ def rewrite_chapter_job(chapter_id: int, instruction: str, route: str | None, sc
     return {"chapter_id": chapter_id, "scope": scope, "start": start, "end": end, "instruction": instruction.strip(),
             "before": content, "after": after, "changed": after != content, "words_before": count_words(content),
             "words_after": count_words(after), "ai_score_after": lint.ai_score}
+
+
+# ------------------------------------------------------------------ v0.9.1 语感重塑
+
+POLISH_LABEL = "语感重塑前"
+POLISH_RATIO = 0.2  # 字数变化上限 ±20%
+_CN_NUM = "零〇一二两三四五六七八九十百千万亿"
+_MEASURE = "个只名位次招层阶级品重块颗枚斤两里米丈年月天日岁倍成拳剑刀步秒分钟章段星转境下声遍圈口张根条把间座道份家"
+_NUM_RX = re.compile(rf"\d+(?:[.,]\d+)*%?|[{_CN_NUM}]{{2,}}|[二三四五六七八九十百千万亿](?=[{_MEASURE}])")
+_NUM_STOP = {"万一", "一一", "千万", "万万", "一二", "三三两两", "七七八八", "十有八九", "一一二"}
+PARA_RULE = {
+    "fanqie": "番茄档：短段，每段不超过 70 字（一段 1–3 行），长段拆开，对白单独成段。",
+    "qidian": "起点档：段落可以稍长，但单段别超过 150 字。",
+    "generic": "通用档：段落长短跟着内容走，单段别超过 120 字。",
+}
+PARA_MAX = {"fanqie": 70, "qidian": 150, "generic": 120}
+
+
+def number_tokens(text: str) -> set[str]:
+    """正文里的数字 / 数值词集合：阿拉伯数字、两字以上的中文数字串、单个中文数字 + 量词（三招、九层）。"""
+    out = set()
+    for m in _NUM_RX.finditer(text or ""):
+        t = m.group(0)
+        if t in _NUM_STOP:
+            continue
+        out.add(t)
+    return out
+
+
+def polish_checks(before: str, after: str, names: list[str], platform: str = "fanqie") -> tuple[dict[str, Any], list[str]]:
+    """程序校验：数字/数值词集合一致、主要人名都在、字数变化在 ±20% 内、段长（番茄 ≤70 字）。"""
+    nb, na = number_tokens(before), number_tokens(after)
+    missing_nums, added_nums = sorted(nb - na), sorted(na - nb)
+    present = [n for n in names if n and n in before]
+    missing_names = [n for n in present if n not in after]
+    wb, wa = count_words(before), count_words(after)
+    ratio = round((wa - wb) / wb, 3) if wb else 0.0
+    limit = PARA_MAX.get(platform, 120)
+    long_paras = sum(1 for p in paragraphs(after) if count_words(p) > limit)
+    warns: list[str] = []
+    if missing_nums or added_nums:
+        parts = []
+        if missing_nums:
+            parts.append("少了 " + "、".join(missing_nums[:8]))
+        if added_nums:
+            parts.append("多了 " + "、".join(added_nums[:8]))
+        warns.append(f"数字/数值和原文不一致（{'；'.join(parts)}），请核对战力、金额、时间有没有被改")
+    if missing_names:
+        warns.append(f"这些人名在润色稿里不见了：{'、'.join(missing_names[:8])}")
+    if abs(ratio) > POLISH_RATIO:
+        warns.append(f"字数变化 {ratio:+.0%}（{wb} → {wa} 字），超过 ±{POLISH_RATIO:.0%}，可能删了情节或注了水")
+    if long_paras:
+        warns.append(f"还有 {long_paras} 段超过 {limit} 字，建议再拆段")
+    checks = {"numbers_missing": missing_nums, "numbers_added": added_nums, "names_checked": present, "names_missing": missing_names,
+              "words_ratio": ratio, "long_paragraphs": long_paras}
+    return checks, warns
+
+
+def _banned_for(text: str, k: int = 30) -> str:
+    from app.lint.banned_zh import BANNED_PATTERNS
+
+    hits: list[str] = []
+    for p in BANNED_PATTERNS:
+        if p.priority == 1 and p.word in text and p.word not in hits:
+            hits.append(p.word)
+    base = ["嘴角勾起一抹", "深吸一口气", "眼神一凛", "瞳孔一缩", "眼中闪过一丝", "指节泛白", "心中一凛", "不禁", "仿佛", "与此同时"]
+    words = hits[:k] + [w for w in base if w not in hits]
+    return "、".join(words[:k + len(base)])
+
+
+def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = None) -> dict[str, Any]:
+    """语感重塑：只生成润色稿（不落库），结构同改写稿（before/after…），作者对比后 apply-rewrite 采纳、undo 撤回。
+    生成后做程序校验，不符的写进 warnings；不会因为任何检测分数自动再改。"""
+    with session_scope() as s:
+        ch = _require_content(s.get(Chapter, chapter_id))
+        if book_id is not None and ch.book_id != book_id:
+            raise NotFound("章节不存在")
+        pack, meta, _ = _pack_for_chapter(s, ch)
+        content, number = ch.content, ch.number
+        names = [c.name for c in common.cards(s, ch.book_id) if c.type == "character"]
+        for n in (meta.get("beats") or {}).get("characters") or []:
+            n = str(n.get("name") if isinstance(n, dict) else n or "").strip()
+            if n and n not in names:
+                names.append(n)
+    platform = meta.get("platform") or "fanqie"
+    present = [n for n in names if n and n in content]
+    voices = "\n".join(f"- {n}：{v.get('voice', '')}；口头禅：{'、'.join(v.get('catchphrases') or [])}" for n, v in pack.voices.items()) or "（未设定）"
+    from app.skills.loader import PLATFORM_LABEL
+
+    user = render("polish_voice", number=number, platform_label=PLATFORM_LABEL.get(platform, platform), para_rule=PARA_RULE.get(platform, ""),
+                  voices=voices, names="、".join(present) or "（无）", banned=_banned_for(content), text=content)
+    ctx.progress(15, "语感重塑中")
+    out = get_gateway().chat(
+        "polish_voice", [{"role": "system", "content": system_prompt("polish_voice", platform=platform)}, {"role": "user", "content": user}],
+        meta={**meta, "text": content, "names": present}, temperature=0.8,
+    )
+    new = normalize_paragraphs(_clean_rewrite(out))
+    if not new.strip():
+        raise ValueError("模型没有给出润色稿")
+    if len(new) < 0.3 * len(content):
+        raise ValueError("润色稿比原文短太多，疑似被截断，请重试或换个模型")
+    ctx.progress(85, "校验数值、人名与字数，人味检查")
+    checks, warns = polish_checks(content, new, present, platform)
+    with session_scope() as s:
+        lint = lint_for(s, ch.book_id, new, number, chapter_id)
+    return {"chapter_id": chapter_id, "scope": "all", "start": 0, "end": len(content), "instruction": "语感重塑",
+            "label": POLISH_LABEL, "before": content, "after": new, "changed": new != content, "words_before": count_words(content),
+            "words_after": count_words(new), "ai_score_after": lint.ai_score, "checks": checks, "warnings": warns}
 
 
 def apply_rewrite(chapter_id: int, content: str, label: str) -> Chapter:

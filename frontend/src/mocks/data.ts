@@ -49,7 +49,23 @@ export function makeRankItems(): RankItem[] {
       tags: Array.from(new Set([pick(tags), pick(tags), pick(tags)])),
       gender,
     }))
-  return [...mk('male', MALE_TITLES, MALE_CATS, TAGS_M), ...mk('female', FEMALE_TITLES, FEMALE_CATS, TAGS_F)].map((x, i) => ({ ...x, id: i + 1 }))
+  // v0.9.1 书架卡片字段：mock 里 <img> 不走 fetch，封面用 data URL；每 5 本一本无封面、每 7 本一本坏链接，用来看占位封面
+  return [...mk('male', MALE_TITLES, MALE_CATS, TAGS_M), ...mk('female', FEMALE_TITLES, FEMALE_CATS, TAGS_F)].map((x, i) => {
+    const chapters = i % 9 === 4 ? 0 : 80 + Math.round(r() * 900)
+    return {
+      ...x, id: i + 1,
+      rank_diff: i % 4 === 1 ? 1 + (i % 6) : i % 4 === 3 ? -(1 + (i % 3)) : 0,
+      cover: i % 5 === 2 ? null : i % 7 === 3 ? `/api/radar/cover/${x.book_id_ext}` : coverDataUrl(x.title, i),
+      // 与后端一致：缺 id 时为 null（每 10 本一本无书页、每 6 本一本无首章）
+      source_url: i % 10 === 9 ? null : `https://fanqienovel.com/page/${x.book_id_ext}`,
+      first_chapter_url: i % 6 === 1 ? null : `https://fanqienovel.com/reader/${x.book_id_ext}01`,
+      first_chapter_id: i % 6 === 1 ? '' : `${x.book_id_ext}01`,
+      last_chapter_id: chapters ? `${x.book_id_ext}${chapters}` : '',
+      chapter_count: chapters,
+      last_chapter_title: chapters ? `第${chapters}章 ${['风雨欲来', '一剑破局', '真相浮出', '再临故地', '今夜无人入眠'][i % 5]}` : '',
+      last_update_at: i % 6 === 5 ? null : new Date(Date.now() - ((i * 37) % 9) * 86400000 - 3600000 * (i % 20)).toISOString(),
+    }
+  })
 }
 
 // ---------- 演示书正文段落 ----------

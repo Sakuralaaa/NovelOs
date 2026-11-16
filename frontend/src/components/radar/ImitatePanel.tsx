@@ -18,7 +18,7 @@ const pct = (v: number) => `${Math.round((v ?? 0) * 100)}%`
 const bare = (s: string) => s.replace(/\s/g, '').length
 
 /** 榜单仿写面板：平板/桌面是右侧抽屉，手机是底部抽屉 */
-export function ImitatePanel({ item, onClose }: { item: RankItem | null; onClose: () => void }) {
+export function ImitatePanel({ item, onClose, focus }: { item: RankItem | null; onClose: () => void; focus?: 'teardown' | 'reskin' }) {
   // 关闭动画期间保留上一本书，避免内容闪空
   const [shown, setShown] = useState<RankItem | null>(item)
   useEffect(() => { if (item) setShown(item) }, [item])
@@ -35,14 +35,14 @@ export function ImitatePanel({ item, onClose }: { item: RankItem | null; onClose
           )}
         >
           <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-muted md:hidden" aria-hidden />
-          {shown && <PanelBody key={shown.id ?? shown.book_id_ext} item={shown} onClose={onClose} />}
+          {shown && <PanelBody key={shown.id ?? shown.book_id_ext} item={shown} onClose={onClose} focus={focus} />}
         </D.Content>
       </D.Portal>
     </D.Root>
   )
 }
 
-function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
+function PanelBody({ item, onClose, focus }: { item: RankItem; onClose: () => void; focus?: 'teardown' | 'reskin' }) {
   const id = item.id ?? 0
   const nav = useNavigate()
   const q = useTeardown(id || undefined)
@@ -67,6 +67,14 @@ function PanelBody({ item, onClose }: { item: RankItem; onClose: () => void }) {
     if (wasReskinning.current && !reskinning && last) setTimeout(() => ideasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
     wasReskinning.current = reskinning
   }, [reskinning, last])
+
+  // v0.9.1「仿写立项」入口：拆解就绪后直接滚到换皮选题区
+  const focused = useRef(false)
+  useEffect(() => {
+    if (focus !== 'reskin' || focused.current || !td) return
+    focused.current = true
+    setTimeout(() => ideasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+  }, [focus, td])
 
   const doReskin = () => { void reskin.run() }
   const openIdea = (i: Idea) => { onClose(); nav(`/ideas/${i.id}`) }

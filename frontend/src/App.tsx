@@ -23,6 +23,7 @@ const Foreshadows = lazy(() => import('@/pages/book/Foreshadows'))
 const PackagePage = lazy(() => import('@/pages/book/Package'))
 const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
+const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 const qc = new QueryClient({
@@ -66,6 +67,7 @@ export function App() {
                 <Route path="books/:bookId/foreshadows" element={<S><Foreshadows /></S>} />
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
+                <Route path="aigc" element={<S><AigcDetectPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />
               </Route>

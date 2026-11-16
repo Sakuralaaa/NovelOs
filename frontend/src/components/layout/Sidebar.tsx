@@ -2,7 +2,7 @@ import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Bot, BookOpen, Feather, FileText, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
-  PanelLeftClose, PanelLeftOpen, Radar, Search, Settings, Sun, Waypoints,
+  PanelLeftClose, PanelLeftOpen, Radar, Search, Settings, ShieldCheck, Sun, Waypoints,
 } from '@/components/icons'
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
@@ -19,6 +19,7 @@ const MAIN = [
   { to: '/radar', label: '热点雷达', icon: Radar },
   { to: '/ideas', label: '选题', icon: Lightbulb },
   { to: '/books', label: '我的书', icon: BookOpen },
+  { to: '/aigc', label: 'AI 率检测', icon: ShieldCheck },
 ]
 
 export const BOOK_NAV = [

@@ -54,6 +54,38 @@ export interface RankItem {
   gender: Gender
   /** v0.9：阅读榜 / 新书榜（旧数据为 read） */
   board?: RankBoard
+  // ---- v0.9.1 书架卡片 ----
+  /** 封面相对路径（如 /api/radar/cover/{book_id_ext}），null 时用占位封面 */
+  cover?: string | null
+  /** 番茄书页 */
+  source_url?: string | null
+  first_chapter_url?: string | null
+  /** 0 = 未知 */
+  chapter_count?: number
+  last_chapter_title?: string | null
+  last_update_at?: string | null
+  /** 番茄章节 itemId，可能为空串 */
+  first_chapter_id?: string
+  last_chapter_id?: string
+}
+/** v0.9.1：榜单书详情（抽屉） */
+export interface RadarChapterLink { title: string; item_id: string; url: string }
+export interface RadarBookDetail {
+  item: RankItem
+  chapter_total: number | null
+  abstract: string
+  chapters_head: RadarChapterLink[]
+  chapters_tail: RadarChapterLink[]
+  fetched_at: string
+  detail_error: string | null
+  cached?: boolean
+}
+export type RadarAiKind = 'title' | 'cover' | 'blurb'
+export interface RadarAiResult {
+  kind: RadarAiKind
+  candidates: ({ title: string; why: string } | { prompt: string; style: string } | { blurb: string; hook: string })[]
+  dropped: number
+  warnings?: string[]
 }
 export type RankBoard = 'read' | 'new'
 export interface RadarSnapshot {
@@ -346,6 +378,8 @@ export interface Chapter {
   /** v0.4：可撤回的旧正文数 */
   history?: number
   last_history_label?: string
+  /** v0.9.1：最近一次朱雀 AIGC 检测 */
+  aigc?: AigcResult | null
 }
 export interface ChapterVariant {
   id: number
@@ -437,6 +471,40 @@ export interface WritingSettings {
   auto_adopt_best: boolean
   auto_commit: boolean
   default_variants: 1 | 2 | 3
+}
+
+/** v0.9.1：GET/PUT /api/settings/zhuque */
+export interface ZhuqueSettings {
+  zhuque_configured: boolean
+  zhuque_key_tail: string
+  zhuque_base_url: string
+  zhuque_auto_check: boolean
+  zhuque_usage?: { calls: number; tokens: number }
+}
+/** PUT：zhuque_api_key 空串=清除；zhuque_base_url 空串=恢复默认 */
+export type ZhuqueSettingsInput = Partial<{ zhuque_api_key: string; zhuque_base_url: string; zhuque_auto_check: boolean }>
+
+// ---------- v0.9.1 AIGC 检测 ----------
+export type AigcLabel = 'human' | 'ai' | 'suspect'
+export interface AigcSegment { start: number; end: number; label: AigcLabel; conf: number }
+export interface AigcResult {
+  /** 独立检测（/detect/aigc）的结果没有 checked_at / content_hash / stale */
+  checked_at?: string
+  content_hash?: string
+  /** 服务端判断：检测后正文已改 */
+  stale?: boolean
+  ai_segment_ratio?: number | null
+  suspect_segment_ratio?: number | null
+  chars?: number
+  is_merge?: boolean
+  softmax: number
+  ratio: number
+  labels_ratio: { human: number; ai: number; suspect: number }
+  level: 'low' | 'mid' | 'high'
+  /** 章节列表里的 aigc 不带 segments */
+  segments?: AigcSegment[]
+  tokens: number
+  chunks: number
 }
 
 // ---------- v0.5：每本书的专属 Agent ----------

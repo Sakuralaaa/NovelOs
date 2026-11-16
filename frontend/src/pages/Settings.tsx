@@ -50,6 +50,13 @@ const ROUTES: { key: RouteKey; label: string; desc: string }[] = [
 ]
 
 export default function SettingsPage() {
+  // 从别处「去设置」跳过来时定位到对应卡片（如 /settings#aigc）
+  useEffect(() => {
+    const id = window.location.hash.slice(1)
+    if (!id) return
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350)
+    return () => clearTimeout(t)
+  }, [])
   return (
     <div className="page">
       <PageHeader title="设置" />
@@ -57,6 +64,7 @@ export default function SettingsPage() {
         <Channels />
         <RoutingCard />
         <WritingCard />
+        <AigcCard />
         <TropesCard />
         <RadarCard />
         <AccountCard />
@@ -373,6 +381,97 @@ function WritingCard() {
               <div className="text-[13.5px] font-medium">审稿通过后自动提交</div>
               <Switch checked={c.auto_commit} onCheckedChange={(v) => m.mutate({ auto_commit: v })} />
             </label>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+const ZHUQUE_DEFAULT_BASE = 'https://ai-gateway.edgeone.link'
+
+/** v0.9.1：腾讯朱雀 AIGC 检测（走 EdgeOne Makers 网关） */
+function AigcCard() {
+  const q = useQuery({ queryKey: qk.zhuque, queryFn: api.zhuqueSettings, retry: false })
+  const qc = useQueryClient()
+  const [key, setKey] = useState('')
+  const [show, setShow] = useState(false)
+  const [changing, setChanging] = useState(false)
+  const [base, setBase] = useState<string | null>(null)
+  const m = useMutation({
+    mutationFn: api.saveZhuqueSettings,
+    meta: { errorTitle: '保存失败' },
+    onSuccess: (d, v) => {
+      qc.setQueryData(qk.zhuque, d)
+      if (v.zhuque_api_key !== undefined) { setKey(''); setChanging(false); setShow(false) }
+      if (v.zhuque_base_url !== undefined) setBase(null)
+      toast.success(v.zhuque_api_key !== undefined ? (v.zhuque_api_key ? '朱雀 API Key 已保存' : '已移除朱雀 API Key') : v.zhuque_base_url === '' ? '已恢复默认网关地址' : 'AI 率检测设置已保存')
+    },
+  })
+  const c = q.data
+  const configured = !!c?.zhuque_configured
+  const baseVal = base ?? c?.zhuque_base_url ?? ZHUQUE_DEFAULT_BASE
+  const baseDirty = base !== null && base.trim() !== (c?.zhuque_base_url ?? ZHUQUE_DEFAULT_BASE)
+  return (
+    <Card id="aigc" className="scroll-mt-6">
+      <CardHeader divider title="AI 率检测（腾讯朱雀）" icon={<ShieldCheck className="h-4 w-4" />}
+        action={c && <Badge tone={configured ? 'success' : 'neutral'} dot>{configured ? '已配置' : '未配置'}</Badge>} />
+      <CardBody className="p-0">
+        {q.isError ? <p className="px-5 py-4 text-[13px] text-muted-foreground">读取设置失败：{(q.error as any)?.message}</p> : !c ? <Skeleton className="m-5 h-28" /> : (
+          <div className="divide-y divide-border/70">
+            <div className="px-5 py-4">
+              <div className="mb-2 text-[13.5px] font-medium">API Key</div>
+              {configured && !changing ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="num inline-flex h-10 items-center gap-2 rounded-lg bg-subtle px-3 text-[13.5px]"><CheckCircle2 className="h-4 w-4 text-success" />已配置 ····{c.zhuque_key_tail || ''}</span>
+                  <Button variant="secondary" className="h-10" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => setChanging(true)}>更换</Button>
+                  <Button variant="ghost" className="h-10 text-muted-foreground hover:text-danger" loading={m.isPending && m.variables?.zhuque_api_key === ''} onClick={() => m.mutate({ zhuque_api_key: '' })}>移除</Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <div className="relative min-w-[220px] flex-1">
+                    <Input type={show ? 'text' : 'password'} name="zhuque-api-key" autoComplete="new-password" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} placeholder="粘贴 EdgeOne Makers 的 API Key" className="h-10 pr-10 font-mono" />
+                    <button type="button" onClick={() => setShow(!show)} className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={show ? '隐藏' : '显示'}>{show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                  </div>
+                  <Button variant="primary" className="h-10" disabled={!key.trim()} loading={m.isPending && !!m.variables?.zhuque_api_key} onClick={() => m.mutate({ zhuque_api_key: key.trim() })}>保存</Button>
+                  {changing && <Button variant="ghost" className="h-10" onClick={() => { setChanging(false); setKey('') }}>取消</Button>}
+                </div>
+              )}
+              <ol className="mt-3.5 grid gap-2 sm:grid-cols-3">
+                {[
+                  <>登录 <a className="text-primary hover:underline" href="https://console.cloud.tencent.com/edgeone" target="_blank" rel="noopener noreferrer">EdgeOne 控制台</a></>,
+                  <>进入 Makers → Models → API Key，点「创建 API Key」</>,
+                  <>复制生成的 Key，粘贴到上面保存</>,
+                ].map((t, i) => (
+                  <li key={i} className="flex gap-2 rounded-lg bg-subtle px-3 py-2.5 text-[12.5px] leading-relaxed">
+                    <span className="num flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background">{i + 1}</span><span>{t}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-2 text-[12px] text-muted-foreground">详细说明见 <a className="text-primary hover:underline" href="https://pages.edgeone.ai/zh/document/models-vendors-zhuque" target="_blank" rel="noopener noreferrer">EdgeOne 朱雀模型文档</a>。密钥只保存在你的 NovelOS 后端，页面上只显示尾号。</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">网关地址</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">一般不用改，默认 {ZHUQUE_DEFAULT_BASE}</div>
+              </div>
+              <div className="flex w-full gap-2 sm:w-[380px]">
+                <Input value={baseVal} onChange={(e) => setBase(e.target.value)} placeholder={ZHUQUE_DEFAULT_BASE} className="h-10 font-mono text-[13px]" />
+                {baseDirty && <Button variant="primary" className="h-10" loading={m.isPending && m.variables?.zhuque_base_url !== undefined} onClick={() => m.mutate({ zhuque_base_url: (base ?? '').trim() })}>保存</Button>}
+                {!baseDirty && c.zhuque_base_url && c.zhuque_base_url !== ZHUQUE_DEFAULT_BASE && <Button variant="ghost" className="h-10" onClick={() => m.mutate({ zhuque_base_url: '' })}>恢复默认</Button>}
+              </div>
+            </div>
+            <label className={cn('flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3', !configured && 'opacity-60')}>
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">章节提交后自动检测</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">每次提交入账后在后台检测一次 AI 率，会消耗 EdgeOne Makers 每月免费额度</div>
+              </div>
+              <Switch checked={!!c.zhuque_auto_check} onCheckedChange={(v) => m.mutate({ zhuque_auto_check: v })} />
+            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 text-[11.5px] text-muted-foreground">
+              <span>检测结果仅供自查；发布时请按平台要求如实申报 AI 辅助创作。</span>
+              {c.zhuque_usage && <span className="num">累计检测 {c.zhuque_usage.calls.toLocaleString('zh-CN')} 次 · {c.zhuque_usage.tokens.toLocaleString('zh-CN')} tokens</span>}
+            </div>
           </div>
         )}
       </CardBody>

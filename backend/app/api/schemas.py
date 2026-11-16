@@ -73,6 +73,28 @@ class WritingSettingsIn(BaseModel):
     default_variants: int | None = Field(default=None, ge=1, le=3)
 
 
+class RadarBookAiIn(BaseModel):
+    """v0.9.1 单书 AI 灵感：title 书名 / cover 封面提示词 / blurb 简介；n 默认 5（cover 默认 3），1–10。"""
+    kind: Literal["title", "cover", "blurb"]
+    n: int | None = Field(default=None, ge=1, le=10)
+
+
+class ZhuqueSettingsIn(BaseModel):
+    """v0.9.1 朱雀检测设置，局部更新：不传的项不改；zhuque_api_key 传空串清除；zhuque_base_url 传空串恢复默认。"""
+    zhuque_api_key: str | None = Field(default=None, max_length=500)
+    zhuque_base_url: str | None = Field(default=None, max_length=300)
+    zhuque_auto_check: bool | None = None
+
+
+class AigcDetectIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    is_merge: bool = True
+
+
+class ChapterAigcIn(BaseModel):
+    is_merge: bool = True
+
+
 class RadarConfigIn(BaseModel):
     enabled: bool
     daily_hour: int = Field(ge=0, le=23)
@@ -387,7 +409,21 @@ def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:
 def rank_item_out(r: RankItem) -> dict[str, Any]:
     return {"id": r.id, "book_id_ext": r.book_id_ext, "title": r.title, "author": r.author, "category": r.category, "rank": r.rank,
             "read_count": r.read_count, "word_count": r.word_count, "abstract": r.abstract, "tags": list(r.tags or []),
-            "gender": r.gender, "rank_diff": r.rank_diff, "board": r.board if r.board in ("read", "new") else "read"}
+            "gender": r.gender, "rank_diff": r.rank_diff, "board": r.board if r.board in ("read", "new") else "read",
+            **rank_item_shelf(r)}
+
+
+def rank_item_shelf(r: RankItem) -> dict[str, Any]:
+    """v0.9.1 书架字段：cover 为本站封面代理相对路径（没有封面地址时 null）；source_url / first_chapter_url 是番茄原文链接
+    （示例数据的非数字 id 没有书页，为 null）。"""
+    from urllib.parse import quote
+
+    from app.radar.fanqie_web import reader_url, source_url
+
+    return {"cover": f"/api/radar/cover/{quote(r.book_id_ext, safe='')}" if (r.cover_url or "").strip() else None,
+            "source_url": source_url(r.book_id_ext), "first_chapter_url": reader_url(r.first_chapter_id),
+            "chapter_count": int(r.chapter_count or 0), "last_chapter_title": r.last_chapter_title or "",
+            "last_update_at": iso(r.last_update_at), "first_chapter_id": r.first_chapter_id or "", "last_chapter_id": r.last_chapter_id or ""}
 
 
 def book_out(s: Session, b: Book) -> dict[str, Any]:
@@ -484,6 +520,14 @@ def chapter_out(c: Chapter, with_content: bool = True) -> dict[str, Any]:
             for v in (c.variants or [])
         ],
     }
+    # v0.9.1 朱雀检测结果；列表（不带正文）里去掉逐段 segments
+    if isinstance(c.aigc, dict):
+        from app.services.zhuque import content_hash
+
+        a = c.aigc if with_content else {k: v for k, v in c.aigc.items() if k != "segments"}
+        out["aigc"] = {**a, "stale": a.get("content_hash") != content_hash(c.content)}  # 正文改过 → 结果过期
+    else:
+        out["aigc"] = None
     hist = list(c.history or [])
     out["history"] = len(hist)
     out["last_history_label"] = str(hist[-1].get("label") or "") if hist else ""

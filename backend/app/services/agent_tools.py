@@ -390,6 +390,23 @@ def t_rewrite_chapter(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
     return _proposal_result(c, p, {"words_before": r["words_before"], "words_after": r["words_after"]})
 
 
+def t_polish_voice(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
+    """v0.9.1 语感重塑：生成润色稿 → 章节改写提案（同 rewrite_chapter，可逐段对比、采纳、撤回）。程序校验的提醒写进摘要。"""
+    with session_scope() as s:
+        ch = _find_chapter(s, c.book_id, a)
+        cid, num, title = ch.id or 0, ch.number, ch.title
+    r = writing.polish_voice_job(cid, _SubCtx(c, f"语感重塑第 {num} 章"), c.book_id)
+    if not r["changed"]:
+        return ToolResult({"note": "润色稿和原文一样"}, f"第 {num} 章没有需要改的地方")
+    warn = "；".join(r["warnings"])
+    p = props.create(c.book_id, c.session_id, "chapter_rewrite", f"语感重塑第 {num} 章《{title}》",
+                     f"{r['words_before']} → {r['words_after']} 字，AI 味 {r['ai_score_after']}" + (f"。提醒：{warn}" if warn else ""),
+                     {"chapter_id": cid, "number": num, "title": title, "instruction": "语感重塑", "before": r["before"], "after": r["after"],
+                      "words_before": r["words_before"], "words_after": r["words_after"], "ai_score_after": r["ai_score_after"],
+                      "warnings": r["warnings"], "checks": r["checks"]})
+    return _proposal_result(c, p, {"words_before": r["words_before"], "words_after": r["words_after"], "warnings": r["warnings"]})
+
+
 def t_plan_foreshadows(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
     r = fs_svc.plan(c.book_id, str(a.get("instruction") or ""), None, _int(a.get("count"), 3) or 3, _SubCtx(c, "规划伏笔"))
     items = [x for x in r["items"] if not x.get("duplicate_of")] or r["items"]
@@ -562,6 +579,10 @@ TOOLS: list[Tool] = [
     Tool("suggest_outline_node", "改大纲节点", "write", "按要求重写一个大纲节点的标题和概要，产出提案。", {"node_id": I, "instruction": S}, ["node_id", "instruction"], t_suggest_outline_node),
     Tool("rewrite_chapter", "改写章节", "write", "按要求改写一整章正文（节奏、对话、删情节、换说法等），产出带逐段对比的提案。",
          {"number": I, "chapter_id": I, "instruction": S}, ["instruction"], t_rewrite_chapter),
+    Tool("polish_voice", "语感重塑", "write",
+         "把一整章改成老网文写手的口语语感、提升可读性（成语换口语、换掉套路动作、动词先行、长短句交替、按平台控制段长），"
+         "情节、数值、人名和对白含义不变；程序会校验数字、人名和字数变化，产出带逐段对比的改写提案。",
+         {"number": I, "chapter_id": I}, [], t_polish_voice),
     Tool("plan_foreshadows", "规划伏笔", "write", "读大纲和设定让 AI 规划长短线伏笔，产出提案（attach=true 时采纳后同时写进对应章细纲）。",
          {"instruction": S, "count": I, "attach": {"type": "boolean"}}, [], t_plan_foreshadows),
     Tool("add_foreshadow", "加伏笔", "write", "新增一条伏笔（计划中），产出提案。",

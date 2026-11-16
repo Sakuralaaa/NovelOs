@@ -1,7 +1,7 @@
 import { Command } from 'cmdk'
 import * as D from '@radix-ui/react-dialog'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, CornerDownLeft, Home, Lightbulb, Moon, Radar, Settings } from '@/components/icons'
+import { BookOpen, CornerDownLeft, Home, Lightbulb, Moon, Radar, Settings, ShieldCheck } from '@/components/icons'
 import { useBooks } from '@/hooks/queries'
 import { toggleTheme } from '@/hooks/useTheme'
 import { BOOK_NAV } from './Sidebar'
@@ -27,6 +27,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Command.Item className={itemCls} onSelect={() => go('/radar')}><Radar className="h-4 w-4 opacity-70" />热点雷达</Command.Item>
                 <Command.Item className={itemCls} onSelect={() => go('/ideas')}><Lightbulb className="h-4 w-4 opacity-70" />选题</Command.Item>
                 <Command.Item className={itemCls} onSelect={() => go('/books')}><BookOpen className="h-4 w-4 opacity-70" />我的书</Command.Item>
+                <Command.Item className={itemCls} onSelect={() => go('/aigc')}><ShieldCheck className="h-4 w-4 opacity-70" />AI 率检测（朱雀）</Command.Item>
                 <Command.Item className={itemCls} onSelect={() => go('/settings')}><Settings className="h-4 w-4 opacity-70" />设置 · 模型渠道</Command.Item>
                 <Command.Item className={itemCls} onSelect={() => { toggleTheme(); onOpenChange(false) }}><Moon className="h-4 w-4 opacity-70" />切换深色 / 浅色</Command.Item>
               </Command.Group>

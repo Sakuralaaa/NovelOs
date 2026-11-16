@@ -23,6 +23,7 @@ const db = {
   routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, agent: null, image_mode: 'images' } as Routing,
   radarConfig: { enabled: true, daily_hour: 8 } as RadarConfig,
   writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1 },
+  zhuque: { zhuque_configured: true, zhuque_key_tail: '9fQ2', zhuque_base_url: 'https://ai-gateway.edgeone.link', zhuque_auto_check: false, zhuque_usage: { calls: 12, tokens: 38210 } },
   snapshots: [{ id: 1, taken_at: ago(60 * 5), source: 'mock', items_count: 60 }] as RadarSnapshot[],
   items: makeRankItems(),
   books: [] as Book[],
@@ -266,6 +267,18 @@ on('DELETE', '/settings/channels/:id', (m) => { db.channels = db.channels.filter
 on('POST', '/settings/channels/:id/test', (m) => { const c = must(db.channels.find((x) => x.id === +m[1])); return c.base_url.startsWith('http') ? { ok: true, latency_ms: 230 + (c.id % 7) * 41 } : { ok: false, latency_ms: 0, error: 'Base URL 格式不正确' } })
 on('GET', '/settings/writing', () => db.writing)
 on('PUT', '/settings/writing', (_m, b) => (db.writing = { ...db.writing, ...b }))
+// v0.9.1 朱雀设置（独立接口；空串 = 清除密钥 / 恢复默认网关）
+on('GET', '/settings/zhuque', () => db.zhuque)
+on('PUT', '/settings/zhuque', (_m, b) => {
+  if (b.zhuque_api_key !== undefined) { const k = String(b.zhuque_api_key || ''); db.zhuque.zhuque_configured = !!k; db.zhuque.zhuque_key_tail = k ? k.slice(-4) : '' }
+  if (b.zhuque_base_url !== undefined) {
+    const u = String(b.zhuque_base_url || '').trim()
+    if (u && !/^https?:\/\//.test(u)) throw new HttpErr(400, '网关地址需要以 http:// 或 https:// 开头')
+    db.zhuque.zhuque_base_url = u || 'https://ai-gateway.edgeone.link'
+  }
+  if (b.zhuque_auto_check !== undefined) db.zhuque.zhuque_auto_check = !!b.zhuque_auto_check
+  return db.zhuque
+})
 on('POST', '/settings/models/fetch', (_m, b) => {
   if (!/^https?:\/\//.test(b.base_url ?? '')) throw new HttpErr(400, '拉取失败：Base URL 格式不正确')
   const base = String(b.base_url)
@@ -376,6 +389,40 @@ function mockReskin(it: (typeof db.items)[number]) {
   db.ideas.unshift(...ideas)
   return { rank_item_id: it.id, teardown_id: t.id, ref_title: it.title, idea_ids: ideas.map((x) => x.id), ideas, warnings: ideas.flatMap((x) => x.source!.warnings.map((w) => `《${x.title}》：${w}`)) }
 }
+// v0.9.1 书架详情 / AI 书名·封面词·简介
+const extOf = (ext: string) => must(db.items.find((x) => x.book_id_ext === ext), '榜单书')
+const CH_NAMES = ['意外', '交易', '第一桶金', '暗流', '试探', '反击', '收网', '新的规则', '夜访', '赌约', '破局', '旧债']
+on('GET', '/radar/books/:id/detail', (m) => {
+  const it = extOf(m[1])
+  if ((it.id ?? 0) % 8 === 6) return { item: it, chapter_total: null, abstract: '', chapters_head: [], chapters_tail: [], fetched_at: now(), detail_error: '番茄书页暂时打不开（mock：模拟抓取失败）', cached: false }
+  const total = it.chapter_count || 120
+  const link = (n: number) => ({ title: `第${n}章 ${CH_NAMES[n % CH_NAMES.length]}`, item_id: `${it.book_id_ext}${n}`, url: `https://fanqienovel.com/reader/${it.book_id_ext}${String(n).padStart(4, '0')}` })
+  return {
+    item: it, chapter_total: total,
+    abstract: `${it.abstract}\n\n【${it.category}】${it.tags.join(' / ')}。前期节奏快，三章内金手指到账，十章内第一次大打脸。`,
+    chapters_head: Array.from({ length: Math.min(50, total) }, (_, i) => link(i + 1)),
+    // 与后端一致：第 50 章之后的最后 10 章，不与前 50 章重复；总数 ≤50 时为空
+    chapters_tail: total > 50 ? Array.from({ length: Math.min(10, total - 50) }, (_, i) => link(total - Math.min(10, total - 50) + i + 1)) : [],
+    fetched_at: now(), detail_error: null, cached: false,
+  }
+})
+on('POST', '/radar/books/:id/ai', (m, b) => {
+  const it = extOf(m[1]); const kind = String(b.kind || 'title'); const n = Math.max(1, Math.min(10, +b.n || (kind === 'cover' ? 3 : 5)))
+  const head = it.title.split(/[：:]/)[0]
+  const j = createJob('radar_book_ai', null, 2600, ['读取书名与简介…', '生成候选…', '与原书做相似度过滤…'], () => {
+    const pool = kind === 'title'
+      ? ['全城停电后，我的便利店亮了', '开局负债百万，我靠签到翻身', '我的系统只在午夜营业', '被退学那天，我觉醒了推演', '我在废城收破烂，捡到了神级图纸', '外卖员？不，我是规则的修订者', '冷宫种田三年，皇帝求我出山', '离职当天，我继承了一座山门']
+        .map((t, k) => ({ title: t, why: ['反差开局 + 明确金手指，三秒能看懂', '负面处境起手，期待感强', '时间限定制造神秘感', '“那天”句式点出转折', '低开高走的身份落差', '否定句式 + 身份反转', '女频经典落差：失宠到被求', '现实痛点 + 爽点承诺'][k] }))
+      : kind === 'cover'
+        ? ['竖版 3:4 网文封面，冷色调废土城市夜景，少年背影站在亮着灯的便利店门口，霓虹招牌，电影感光影，留出上方 1/3 写书名', '竖版封面，东方玄幻，白衣少年立于断崖，身后巨大金色符文阵，云海翻涌，史诗感，高对比', '竖版封面，都市高武，雨夜街头，主角半身特写，眼中有蓝色数据流，赛博质感，暗调', '竖版封面，古风女频，红墙宫院一角，少女回眸，手持药篮，柔光，水彩质感', '竖版封面，末世囤货，冰封城市俯瞰，一座发光的仓库，暖光与冷色对比，极简构图']
+          .map((p, k) => ({ prompt: p, style: ['电影海报风', '国风厚涂', '赛博朋克', '水彩国风', '极简扁平'][k] }))
+        : [`他被所有人看不起的那天，${head}的规则只对他一个人生效。\n第一天，他还清了债；第三天，那些人开始排队求他。`, `别人穿越带系统，她穿越只带了一本账。\n可这本账，记的是满朝文武的把柄。`, `末世第七天，城里只剩一家店还开着门。\n老板说：钱不收，只收秘密。`, `被逐出宗门时，他只带走了一把扫帚。\n十年后，宗门大阵碎了，所有人才想起——那把扫帚扫过的地方，从未落过灰。`]
+          .map((t, k) => ({ blurb: t, hook: ['屈辱开局 + 独享规则', '反差道具 + 权谋张力', '设定悬念 + 交易钩子', '伏笔反转'][k] }))
+    const dropped = (it.id ?? 0) % 3 === 0 ? 1 : 0
+    return { kind, book_id_ext: it.book_id_ext, ref_title: it.title, candidates: pool.slice(0, n), dropped, warnings: dropped ? [`已丢弃「${head}之后」：和原书名/简介有 1 处连续 8 字相同`] : [] }
+  })
+  return { ...j, job_id: j.id }
+})
 on('GET', '/radar/config', () => db.radarConfig)
 on('PUT', '/radar/config', (_m, b) => (db.radarConfig = { ...db.radarConfig, ...b }))
 
@@ -503,15 +550,18 @@ on('DELETE', '/chapters/:id', (m) => {
 })
 on('PUT', '/outline/:id', (m, b) => Object.assign(must(db.outline.find((o) => o.id === +m[1]), '节点'), b))
 
-const strip = (c: Chapter) => { const { content, variants, ...rest } = c; void content; return { ...rest, variants: variants?.map((v) => ({ ...v, content: '' })) } }
+const strip = (c: Chapter) => { const { content, variants, aigc, ...rest } = withStale(c); void content; return { ...rest, aigc: aigc ? { ...aigc, segments: undefined } : aigc ?? null, variants: variants?.map((v) => ({ ...v, content: '' })) } }
 on('GET', '/books/:id/chapters', (m) => db.chapters.filter((c) => c.book_id === +m[1]).sort((a, b) => a.number - b.number).map(strip))
-on('GET', '/chapters/:id', (m) => must(db.chapters.find((c) => c.id === +m[1]), '章节'))
+// v0.9.1：aigc.stale 由“服务端”按 content_hash 判断
+const mhash = (t: string) => { let h = 2166136261; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); return (h >>> 0).toString(16).padStart(8, '0') + 'mock0000' }
+const withStale = (c: Chapter) => { if (c.aigc) c.aigc.stale = mhash(c.content ?? '') !== c.aigc.content_hash; return c }
+on('GET', '/chapters/:id', (m) => withStale(must(db.chapters.find((c) => c.id === +m[1]), '章节')))
 on('PUT', '/chapters/:id', (m, b) => {
   const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
   Object.assign(c, { title: b.title ?? c.title, content: b.content ?? c.content, updated_at: now() })
   c.words = countWords(c.content ?? '')
   recalc(c.book_id)
-  return c
+  return withStale(c)
 })
 function writeOne(bookId: number, variants: number) {
   const n = db.chapters.filter((c) => c.book_id === bookId).length + 1
@@ -726,17 +776,94 @@ on('POST', '/chapters/:id/rewrite', (m, b) => { const c = must(db.chapters.find(
   const after = rewriteText(before, String(b.instruction ?? ''))
   return { chapter_id: c.id, scope: 'all', before, after, changed: before !== after, words_before: countWords(before), words_after: countWords(after), ai_score_after: mkLint(after).ai_score }
 }) })
+// v0.9.1 朱雀 AIGC 检测（mock：按段落里的“AI 腔”特征粗略打标）
+function mockAigc(text: string) {
+  const segs: { start: number; end: number; label: 'human' | 'ai' | 'suspect'; conf: number }[] = []
+  const re = /[^\n]+/g
+  let mm: RegExpExecArray | null
+  let k = 0
+  while ((mm = re.exec(text))) {
+    const p = mm[0]; if (!p.trim()) continue
+    const score = (/(不禁|一切都|总之|仿佛|与此同时|值得一提)/.test(p) ? 0.5 : 0) + (p.length > 60 ? 0.15 : 0) + (((k * 7 + p.length) % 10) / 20)
+    const label = score >= 0.55 ? 'ai' : score >= 0.38 ? 'suspect' : 'human'
+    segs.push({ start: mm.index, end: mm.index + p.length, label, conf: +Math.min(0.99, 0.5 + score / 2).toFixed(2) })
+    k++
+  }
+  const tot = segs.reduce((n, s) => n + s.end - s.start, 0) || 1
+  const by = (l: string) => segs.filter((s) => s.label === l).reduce((n, s) => n + s.end - s.start, 0) / tot
+  const ai = by('ai'), suspect = by('suspect'), human = Math.max(0, 1 - ai - suspect)
+  const softmax = +Math.min(0.99, ai * 0.95 + suspect * 0.45 + 0.04).toFixed(4)
+  let h = 2166136261; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
+  void h
+  return {
+    checked_at: now(), content_hash: mhash(text), stale: false, softmax, ratio: +ai.toFixed(4),
+    labels_ratio: { human: +human.toFixed(4), ai: +ai.toFixed(4), suspect: +suspect.toFixed(4) },
+    level: softmax >= 0.85 ? 'high' : softmax >= 0.5 ? 'mid' : 'low',
+    ai_segment_ratio: +ai.toFixed(4), suspect_segment_ratio: +suspect.toFixed(4), chars: text.length, is_merge: true,
+    segments: segs, tokens: Math.round(text.replace(/\s/g, '').length * 1.3), chunks: Math.max(1, Math.ceil(text.length / 20000)),
+  }
+}
+on('POST', '/detect/aigc', (_m, b) => {
+  const text = String(b.text ?? '')
+  if (!db.zhuque.zhuque_configured) throw new HttpErr(409, '还没有配置朱雀 API Key')
+  if (!text.trim()) throw new HttpErr(422, '文本为空')
+  if (text.length > 200000) throw new HttpErr(422, '文本太长')
+  const j = createJob('aigc_detect', null, 2400, ['提交朱雀检测…', '分段检测中…', '汇总结果…'], () => {
+    const { checked_at, content_hash, stale, ...r } = mockAigc(text); void checked_at; void content_hash; void stale
+    db.zhuque.zhuque_usage.calls++; db.zhuque.zhuque_usage.tokens += r.tokens
+    return r
+  })
+  return { ...j, job_id: j.id }
+})
+on('POST', '/books/:id/chapters/:id/aigc', (m) => {
+  const c = must(db.chapters.find((x) => x.id === +m[2] && x.book_id === +m[1]), '章节')
+  if (!db.zhuque.zhuque_configured) throw new HttpErr(409, '还没有配置朱雀 API Key')
+  if (!(c.content ?? '').trim()) throw new HttpErr(409, '正文为空')
+  const j = createJob('chapter_aigc', c.book_id, 2400, ['提交朱雀检测…', '分段检测中…', '汇总结果…'], () => {
+    const r = mockAigc(c.content ?? ''); c.aigc = r as any
+    db.zhuque.zhuque_usage.calls++; db.zhuque.zhuque_usage.tokens += r.tokens
+    return { chapter_id: c.id, aigc: r }
+  }, `chapter:${c.id}`)
+  return { ...j, job_id: j.id }
+})
+// v0.9.1 语感重塑（mock：拆长句、去套话；结果走预览-采纳流程）
+function polishText(t: string) {
+  return t.split('\n').map((p) => p
+    .replace(/不禁/g, '').replace(/一切都在往好的方向发展/g, '日子总算松了口气').replace(/于是接下来的几天里，/g, '接下来几天，')
+    .replace(/，然后/g, '。').replace(/缓缓地/g, '').replace(/仿佛/g, '像')).join('\n')
+}
+on('POST', '/books/:id/chapters/:id/polish-voice', (m) => {
+  const c = must(db.chapters.find((x) => x.id === +m[2] && x.book_id === +m[1]), '章节')
+  if (!(c.content ?? '').trim()) throw new HttpErr(409, '正文为空')
+  const j = createJob('chapter_polish_voice', c.book_id, 3000, ['分析语感…', '短句化、动作前置…', '核对人名与数值…'], () => {
+    const before = c.content ?? ''
+    let after = polishText(before)
+    if (after === before) after = before.replace(/。/, '。\n\n他没再多想，抬脚就走。')
+    const warnings: string[] = []
+    if (/\d/.test(before)) warnings.push('数值核对：原文“信用点 +5”在改写稿中仍为 +5，但“三天”变成了“几天”，请确认')
+    warnings.push('人名核对：配角「老周」在改写稿第 4 段没有出现，可能被合并进了动作描写')
+    const wb = countWords(before), wa = countWords(after)
+    if (Math.abs(wa - wb) / Math.max(1, wb) > 0.02) warnings.push(`字数变化：${wb} → ${wa}（${wa >= wb ? '+' : ''}${Math.round(((wa - wb) / Math.max(1, wb)) * 100)}%）`)
+    return {
+      chapter_id: c.id, scope: 'all', start: 0, end: before.length, instruction: '语感重塑', label: '语感重塑前',
+      before, after, changed: after !== before, words_before: wb, words_after: wa, ai_score_after: mkLint(after).ai_score,
+      checks: { numbers_missing: [], numbers_added: [], names_checked: ['林野'], names_missing: ['老周'], words_ratio: +((wa - wb) / Math.max(1, wb)).toFixed(3), long_paragraphs: 0 },
+      warnings,
+    }
+  })
+  return { ...j, job_id: j.id }
+})
 on('POST', '/chapters/:id/apply-rewrite', (m, b) => {
   const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
   ;(chHist[c.id] ??= []).push({ content: c.content ?? '', title: c.title, label: b.label || '按要求改写前' })
   Object.assign(c, { content: b.content, words: countWords(b.content), lint: mkLint(b.content), history: chHist[c.id].length, last_history_label: b.label, updated_at: now() })
-  return c
+    return withStale(c)
 })
 on('POST', '/chapters/:id/undo', (m) => {
   const c = must(db.chapters.find((x) => x.id === +m[1]), '章节')
   const prev = chHist[c.id]?.pop()
   if (!prev) throw new HttpErr(409, '没有可以撤回的版本')
-  return Object.assign(c, { content: prev.content, title: prev.title, words: countWords(prev.content), lint: mkLint(prev.content), history: chHist[c.id].length })
+  return withStale(Object.assign(c, { content: prev.content, title: prev.title, words: countWords(prev.content), lint: mkLint(prev.content), history: chHist[c.id].length }))
 })
 on('POST', '/ideas/:id/detrope', (m) => {
   const idea = must(db.ideas.find((x) => x.id === +m[1]), '选题')

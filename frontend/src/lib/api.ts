@@ -3,7 +3,7 @@ import type {
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankBoard, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
-  BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport,
+  BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport, RadarAiKind, RadarBookDetail, ZhuqueSettings, ZhuqueSettingsInput,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -54,11 +54,27 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/** 后端返回的相对资源路径（如 /api/radar/cover/x）转成可直接用的地址；与 request 同源同 /api 前缀，cookie 鉴权自动带上 */
+export function assetUrl(path?: string | null): string | null {
+  if (!path) return null
+  if (/^(https?:|data:|blob:)/.test(path)) return path
+  if (path.startsWith('/api/')) return path
+  return `/api${path.startsWith('/') ? '' : '/'}${path}`
+}
+
 const get = <T,>(u: string) => request<T>('GET', u)
 const post = <T,>(u: string, b?: unknown) => request<T>('POST', u, b ?? {})
 const put = <T,>(u: string, b: unknown) => request<T>('PUT', u, b)
 const patch = <T,>(u: string, b: unknown) => request<T>('PATCH', u, b)
 const del = <T,>(u: string) => request<T>('DELETE', u)
+/** v0.9.1 部分接口只返回 {job_id}：取一次 Job，好交给 useJobs().start 轮询 */
+async function viaJobId(p: Promise<{ job_id: number } | Job>): Promise<Job> {
+  const r = await p as any
+  if (r && typeof r.status === 'string' && typeof r.id === 'number') return r as Job
+  const id = Number(r?.job_id ?? r?.id)
+  if (!id) throw new ApiError(500, '后端没有返回任务编号')
+  return get<Job>(`/jobs/${id}`)
+}
 
 export const api = {
   health: () => get<{ status: string; version: string }>('/health'),
@@ -106,6 +122,16 @@ export const api = {
   runTeardown: (itemId: number, refresh = false) => post<Job>(`/radar/items/${itemId}/teardown${qs({ refresh: refresh || undefined })}`),
   deepTeardown: (itemId: number, text: string) => post<Job>(`/radar/items/${itemId}/deep`, { text }),
   reskin: (itemId: number) => post<Job>(`/radar/items/${itemId}/reskin`),
+  // v0.9.1：书架卡片详情 + 书名/封面词/简介候选（任务）
+  radarBookDetail: (ext: string) => get<RadarBookDetail>(`/radar/books/${encodeURIComponent(ext)}/detail`),
+  radarBookAi: (ext: string, kind: RadarAiKind, n?: number) => viaJobId(post(`/radar/books/${encodeURIComponent(ext)}/ai`, { kind, ...(n ? { n } : {}) })),
+  // v0.9.1：腾讯朱雀 AIGC 检测。设置是独立接口；检测都是任务：/detect/aigc 的 result = Aigc，章节检测的 result = {chapter_id, aigc}
+  zhuqueSettings: () => get<ZhuqueSettings>('/settings/zhuque'),
+  saveZhuqueSettings: (b: ZhuqueSettingsInput) => put<ZhuqueSettings>('/settings/zhuque', b),
+  detectAigc: (text: string, is_merge?: boolean) => viaJobId(post('/detect/aigc', { text, ...(is_merge !== undefined ? { is_merge } : {}) })),
+  chapterAigc: (bookId: number, chapterId: number) => viaJobId(post(`/books/${bookId}/chapters/${chapterId}/aigc`)),
+  /** v0.9.1：语感重塑（任务） */
+  polishVoice: (bookId: number, chapterId: number) => viaJobId(post(`/books/${bookId}/chapters/${chapterId}/polish-voice`)),
   /** 这本书的仿写任务（新的在前），面板重新打开时用来找回进行中的任务和上次的结果 */
   itemJobs: (itemId: number) => get<Job[]>(`/radar/items/${itemId}/jobs`),
 
@@ -264,6 +290,8 @@ export const qk = {
   radarSnapshots: ['radar', 'snapshots'] as const,
   radarConfig: ['radar', 'config'] as const,
   teardown: (itemId: number) => ['radar', 'teardown', itemId] as const,
+  radarBookDetail: (ext: string) => ['radar', 'book-detail', ext] as const,
+  zhuque: ['settings', 'zhuque'] as const,
   itemJobs: (itemId: number) => ['radar', 'jobs', itemId] as const,
   books: ['books'] as const,
   book: (id: number) => ['book', id] as const,

@@ -65,10 +65,20 @@ class Settings(BaseSettings):
     radar_boards: list[str] = ["read", "new"]  # v0.9：read 阅读榜 / new 新书榜
     radar_timeout: float = 10.0
     radar_interval_s: float = 1.0  # 单次刷新内请求间隔
+    # v0.9.1：封面缓存与书页详情
+    radar_cache_covers: bool = True  # 抓榜完成后在后台预缓存本次快照的封面（失败忽略）
+    radar_cover_max_bytes: int = 2 * 1024 * 1024
+    radar_cover_timeout: float = 10.0
+    radar_detail_ttl_h: float = 24.0  # 书页详情（章节目录、完整简介）缓存时长
     radar_user_agent: str = (
         "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
     )
+
+    # v0.9.1：朱雀 AIGC 文本检测（密钥与开关存在库里，见 /api/settings/zhuque）
+    zhuque_default_base_url: str = "https://ai-gateway.edgeone.link"
+    zhuque_timeout: float = 30.0
+    zhuque_chunk_chars: int = 8000  # 每块最多字数，按段落切块
 
     # 写作
     default_chapter_words: int = 2200
