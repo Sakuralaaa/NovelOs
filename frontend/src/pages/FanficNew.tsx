@@ -91,7 +91,7 @@ export default function FanficNewPage() {
 
   return (
     <div className="page max-w-[960px] !pb-0">
-      <Link to={pre ? `/fanfic/${pre}` : '/fanfic'} className="focus-ring -ml-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />同人</Link>
+      <Link to={pre ? `/fanfic/sources/${pre}` : '/fanfic/sources'} className="focus-ring -ml-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />同人</Link>
       <h1 className="mt-1 flex items-center gap-2 text-[22px] font-semibold tracking-tight"><BookPlus className="h-5 w-5 text-primary" />建同人书</h1>
       <p className="mt-1 text-[13px] text-muted-foreground">选原著、方向和遵循度。建好后写大纲、写章、审稿都会自动带上原著设定。</p>
 
@@ -107,7 +107,7 @@ export default function FanficNewPage() {
               <div className="num flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
                 <span className="whitespace-nowrap rounded bg-muted px-1.5 leading-[18px]">{sourceLabel(src)}</span>
                 <span>{src.counts.characters} 角色</span><span>{src.counts.factions} 势力</span><span>{src.counts.timeline} 时间线节点</span><span>{src.counts.scenes} 名场面</span>
-                <Link to={`/fanfic/${src.id}`} className="inline-flex h-10 items-center text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>
+                <Link to={`/fanfic/sources/${src.id}`} className="inline-flex h-10 items-center text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>
               </div>
             )}
             {sources.data.length > 1 && (direction === 'crossover' || extra.length > 0) && (

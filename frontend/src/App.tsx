@@ -76,11 +76,18 @@ export function App() {
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
                 <Route path="books/:bookId/wanben" element={<S><WanbenPage /></S>} />
                 <Route path="books/:bookId/check" element={<S><BookCheckPage /></S>} />
-                <Route path="teardown" element={<S><TeardownPage /></S>} />
-                <Route path="teardown/:id" element={<S><TeardownPage /></S>} />
-                <Route path="fanfic" element={<S><FanficPage /></S>} />
+                {/* v0.11.2 拆书 / 同人拆成侧栏子页面 */}
+                <Route path="teardown" element={<S><TeardownPage view="new" /></S>} />
+                <Route path="teardown/history" element={<S><TeardownPage view="history" /></S>} />
+                <Route path="teardown/:id" element={<S><TeardownPage view="detail" /></S>} />
+                <Route path="fanfic" element={<S><FanficPage view="index" /></S>} />
+                <Route path="fanfic/search" element={<S><FanficPage view="search" /></S>} />
+                <Route path="fanfic/import" element={<S><FanficPage view="import" /></S>} />
+                <Route path="fanfic/sources" element={<S><FanficPage view="sources" /></S>} />
+                <Route path="fanfic/sources/:id" element={<S><FanficPage view="detail" /></S>} />
                 <Route path="fanfic/new" element={<S><FanficNewPage /></S>} />
-                <Route path="fanfic/:id" element={<S><FanficPage /></S>} />
+                {/* 旧链接 /fanfic/:id → /fanfic/sources/:id */}
+                <Route path="fanfic/:id" element={<S><FanficPage view="legacy" /></S>} />
                 <Route path="aigc" element={<S><AigcDetectPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />

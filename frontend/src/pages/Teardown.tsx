@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/misc'
 import { Segmented } from '@/components/ui/tabs'
 import { Select } from '@/components/ui/select'
-import { EmptyState, ErrorState } from '@/components/common/States'
+import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
+import { Card } from '@/components/ui/card'
 import { JobInline } from '@/components/common/JobInline'
 import { BookCover } from '@/components/radar/BookCover'
 import { BookPicker, TextSource, bareLen, type TextDoc } from '@/components/ideas/BookPicker'
@@ -17,41 +18,50 @@ import { useBooks } from '@/hooks/queries'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { PacingPoint, RankItem, TeardownBiblePart, TeardownRecord, TeardownResult, TeardownSourceType } from '@/lib/types'
-import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
+import { fmtDateTime, fmtNum } from '@/lib/utils'
 
 /** 后端：txt / paste 去空白后 ≤20000 字 */
 const TEXT_LIMIT = 20000
 const SRC_LABEL: Record<TeardownSourceType, string> = { rank_book: '榜单书', txt: 'TXT', paste: '粘贴' }
 const CREATE_KEY = 'teardown-create'
 
-export default function TeardownPage() {
+export type TeardownView = 'new' | 'history' | 'detail'
+
+/** v0.11.2 拆书：侧栏子页面（新建拆书 / 拆书历史 / 拆书详情），单列全宽 */
+export default function TeardownPage({ view = 'new' }: { view?: TeardownView }) {
   const { id } = useParams()
   const tdId = id && /^\d+$/.test(id) ? Number(id) : 0
-  return (
-    <div className="min-h-full lg:flex lg:h-full lg:flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5 sm:px-5">
-        {tdId ? (
-          <Link to="/teardown" className="focus-ring inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground">
-            <ChevronLeft className="h-4 w-4" />拆书
-          </Link>
-        ) : (
-          <h1 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><Scissors className="h-[18px] w-[18px] text-primary" weight="duotone" />拆书工作台</h1>
-        )}
-        <span className="ml-auto hidden text-[12px] text-muted-foreground sm:inline">拆结构、人设、金手指、卖点与节奏，产物可转选题或写进设定库</span>
-      </header>
-      <div className={cn('flex min-w-0 flex-col lg:grid lg:min-h-0 lg:flex-1', tdId ? 'lg:grid-cols-[320px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[360px_minmax(0,1fr)]')}>
-        <aside className="min-w-0 border-b p-3 sm:p-4 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-          <SourcePanel />
-        </aside>
-        {tdId ? <Detail id={tdId} /> : (
-          <section className="min-w-0 p-3 sm:p-5 lg:overflow-y-auto"><History /></section>
-        )}
+  if (view === 'detail') {
+    return (
+      <div className="page">
+        <Link to="/teardown/history" className="focus-ring -ml-1 mb-3 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" />拆书历史
+        </Link>
+        {tdId ? <Detail id={tdId} /> : <ErrorState error={{ message: '没找到这份拆书' }} />}
       </div>
+    )
+  }
+  return (
+    // 新建页底部多留空间：右下角任务托盘不会挡住「开始拆书」
+    <div className={view === 'history' ? 'page' : 'page pb-36'}>
+      {view === 'history' ? (
+        <>
+          <PageHeader eyebrow="拆书工作台" title="拆书历史" desc="点开查看结构、人设、金手指、卖点与节奏图，可转选题或写进设定库。"
+            actions={<Link to="/teardown"><Button variant="primary" size="lg" icon={<Scissors className="h-4 w-4" />}>新建拆书</Button></Link>} />
+          <History />
+        </>
+      ) : (
+        <>
+          <PageHeader eyebrow="拆书工作台" title="新建拆书" desc="拆结构、人设、金手指、卖点与节奏，产物可转选题或写进设定库。"
+            actions={<Link to="/teardown/history"><Button size="lg">拆书历史</Button></Link>} />
+          <SourcePanel />
+        </>
+      )}
     </div>
   )
 }
 
-// ---------------------------------------------------------------- 左栏：来源
+// ---------------------------------------------------------------- 新建拆书：来源
 
 function SourcePanel() {
   const [sp, setSp] = useSearchParams()
@@ -93,22 +103,22 @@ function SourcePanel() {
   }
 
   return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="text-[14px] font-semibold">新建拆书</h2>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">选一本榜单书，或上传 / 粘贴正文（≤20,000 字）。原文只用于拆解，不保存。</p>
-      </div>
-      <Segmented block value={src} onChange={(v) => setSrc(v)} className="h-10" options={[
+    <Card className="min-w-0 overflow-hidden">
+     <div className="space-y-4 p-4 sm:p-5 md:p-6">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+      <Segmented value={src} onChange={(v) => setSrc(v)} className="h-10" options={[
         { value: 'rank', label: <span className="inline-flex items-center gap-1"><Lightbulb className="h-3.5 w-3.5" />榜单书</span> },
-        { value: 'upload', label: <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />TXT</span> },
-        { value: 'paste', label: <span className="inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" />粘贴</span> },
+        { value: 'upload', label: <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />上传 TXT</span> },
+        { value: 'paste', label: <span className="inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" />粘贴正文</span> },
       ]} />
+      <p className="min-w-0 flex-1 basis-[240px] text-[12px] leading-relaxed text-muted-foreground">选一本榜单书，或上传 / 粘贴正文（≤20,000 字）。原文只用于拆解，不保存。</p>
+      </div>
 
       {src === 'rank' ? (
         <>
           {ext && pre.isLoading && !book && <Skeleton className="h-[72px] rounded-xl" />}
           {book && (
-            <div className="flex min-w-0 items-center gap-3 rounded-xl border border-primary/40 bg-primary-soft/40 p-2.5">
+            <div className="flex min-w-0 items-center gap-3 rounded-xl border border-primary/40 bg-primary-soft/40 p-2.5 md:max-w-[560px]">
               <BookCover src={book.cover} title={book.title} size="sm" className="w-[40px] shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[14px] font-semibold">{book.title}</div>
@@ -119,7 +129,7 @@ function SourcePanel() {
             </div>
           )}
           {book && !picking ? (
-            <Button variant="ghost" size="sm" className="h-10 w-full" onClick={() => setPicking(true)}>换一本</Button>
+            <Button variant="ghost" size="sm" className="h-10" onClick={() => setPicking(true)}>换一本</Button>
           ) : (
             <BookPicker single selected={book ? [book] : []}
               initial={pre.data ? { gender: pre.data.item.gender, board: pre.data.item.board } : undefined}
@@ -131,12 +141,18 @@ function SourcePanel() {
       )}
       {tooLong && <p className="text-[12px] text-danger">正文超过 {TEXT_LIMIT.toLocaleString('zh-CN')} 字，请删减后再拆</p>}
 
-      <div className="sticky bottom-0 -mx-3 bg-background/95 px-3 pb-1 pt-2 backdrop-blur sm:-mx-4 sm:px-4">
-        {running ? <JobInline job={running} /> : (
-          <Button variant="primary" className="h-11 w-full" disabled={!ready} icon={<Scissors className="h-4 w-4" />} onClick={() => void go()}>开始拆书</Button>
+     </div>
+      <div className="flex flex-col gap-3 border-t bg-subtle/30 px-4 py-4 sm:flex-row sm:items-center sm:px-5 md:px-6">
+        {running ? <div className="min-w-0 flex-1"><JobInline job={running} /></div> : (
+          <>
+            <p className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
+              {src === 'rank' ? (book ? <>将拆解《<span className="font-medium text-foreground/85">{book.title}</span>》</> : '先在上面选一本榜单书') : doc ? `正文 ${textN.toLocaleString('zh-CN')} 字` : '先上传或粘贴正文'}
+            </p>
+            <Button variant="primary" size="lg" className="w-full sm:w-auto" disabled={!ready} icon={<Scissors className="h-4 w-4" />} onClick={() => void go()}>开始拆书</Button>
+          </>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -144,19 +160,20 @@ function SourcePanel() {
 
 function History() {
   const q = useQuery({ queryKey: qk.teardowns, queryFn: api.teardowns })
-  if (q.isLoading) return <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[68px] rounded-xl" />)}</div>
+  if (q.isLoading) return <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[72px] rounded-xl" />)}</div>
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />
   const list = q.data ?? []
   return (
     <div className="space-y-3">
-      <h2 className="text-[14px] font-semibold">历史拆书<span className="num ml-1.5 font-normal text-muted-foreground">{list.length}</span></h2>
+      {list.length > 0 && <div className="text-[13px] text-muted-foreground">共 <span className="num font-medium text-foreground">{list.length}</span> 份</div>}
       {!list.length ? (
-        <EmptyState kind="book" title="还没有拆过书" desc="在左边选一本榜单书或导入正文，点「开始拆书」。" />
+        <EmptyState kind="book" title="还没有拆过书" desc="在「新建拆书」选一本榜单书或导入正文，点「开始拆书」。"
+          action={<Link to="/teardown"><Button variant="primary" icon={<Scissors className="h-4 w-4" />}>新建拆书</Button></Link>} />
       ) : (
-        <ul className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]">
+        <ul className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]" data-testid="teardown-history">
           {list.map((t) => (
             <li key={t.id}>
-              <Link to={`/teardown/${t.id}`} className="card-hover focus-ring flex min-h-[64px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-3.5 py-3">
+              <Link to={`/teardown/${t.id}`} className="card-hover focus-ring flex min-h-[72px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-4 py-3.5 shadow-card">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><Scissors className="h-[18px] w-[18px]" /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] font-semibold">{t.title || '未命名'}</span>
@@ -187,12 +204,12 @@ const TABS: { value: TabKey; label: string }[] = [
 function Detail({ id }: { id: number }) {
   const q = useQuery({ queryKey: qk.teardownDetail(id), queryFn: () => api.teardownDetail(id), retry: false })
   const [tab, setTab] = useState<TabKey>('structure')
-  if (q.isLoading) return <section className="space-y-3 p-3 sm:p-5 lg:col-span-2"><Skeleton className="h-8 w-1/2" /><Skeleton className="h-64 rounded-xl" /></section>
-  if (q.isError || !q.data) return <section className="p-3 sm:p-5 lg:col-span-2"><ErrorState error={q.error ?? { message: '没找到这份拆书' }} onRetry={() => q.refetch()} /></section>
+  if (q.isLoading) return <div className="space-y-3"><Skeleton className="h-8 w-1/2" /><Skeleton className="h-64 rounded-xl" /></div>
+  if (q.isError || !q.data) return <ErrorState error={q.error ?? { message: '没找到这份拆书' }} onRetry={() => q.refetch()} />
   const t = q.data
   return (
-    <>
-      <section className="min-w-0 p-3 sm:p-5 lg:overflow-y-auto">
+    <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <section className="min-w-0">
         <h2 className="break-words text-[19px] font-semibold tracking-tight">{t.title || '未命名'}</h2>
         <div className="num mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
           <span className="rounded bg-muted px-1.5 leading-[20px]">{SRC_LABEL[t.source] ?? t.source}</span>
@@ -212,10 +229,10 @@ function Detail({ id }: { id: number }) {
           <TabBody tab={tab} r={t.result ?? {}} />
         </div>
       </section>
-      <aside className="min-w-0 border-t p-3 sm:p-4 lg:overflow-y-auto lg:border-l lg:border-t-0">
+      <aside className="min-w-0 self-start rounded-xl border bg-surface p-4 shadow-card lg:sticky lg:top-6">
         <Actions t={t} />
       </aside>
-    </>
+    </div>
   )
 }
 
@@ -364,7 +381,7 @@ function PacingChart({ data }: { data: PacingPoint[] }) {
   )
 }
 
-// ---------------------------------------------------------------- 右栏：操作
+// ---------------------------------------------------------------- 详情：操作
 
 const PARTS: { value: TeardownBiblePart; label: string; desc: string }[] = [
   { value: 'characters', label: '人设模板', desc: '写为人物条目' },
@@ -407,7 +424,7 @@ function Actions({ t }: { t: TeardownRecord }) {
       qc.invalidateQueries({ queryKey: qk.teardowns })
       qc.removeQueries({ queryKey: qk.teardownDetail(t.id) })
       toast.success('已删除')
-      nav('/teardown', { replace: true })
+      nav('/teardown/history', { replace: true })
     },
   })
   const toggle = (p: TeardownBiblePart) => setParts((ps) => (ps.includes(p) ? ps.filter((x) => x !== p) : [...ps, p]))

@@ -63,7 +63,7 @@ export function FanficInfoCard({ bookId, className }: { bookId: number; classNam
           <div className="min-w-0">
             <div className="mb-1 text-[12px] font-medium text-muted-foreground">原著资料</div>
             {f.source ? (
-              <Link to={`/fanfic/${f.source.id}`} className="card-hover focus-ring flex min-h-[48px] min-w-0 items-center gap-2 rounded-lg border px-3 py-2">
+              <Link to={`/fanfic/sources/${f.source.id}`} className="card-hover focus-ring flex min-h-[48px] min-w-0 items-center gap-2 rounded-lg border px-3 py-2">
                 <span className="min-w-0 flex-1"><span className="block truncate text-[13.5px] font-semibold">{f.source.title}</span>
                   <span className="num block text-[12px] text-muted-foreground">{f.source.counts.characters} 角色 · 完整度 {f.source.completeness}</span></span>
                 <span className="shrink-0 text-[12px] text-primary">设定卡 →</span>
