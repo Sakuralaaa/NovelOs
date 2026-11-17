@@ -124,7 +124,7 @@ export default function FanficNewPage() {
   const STEP_NAMES = ['选原著', '创作想法', '确认设置']
   return (
     <div className="page max-w-[960px] !pb-0">
-      <Link to={pre ? `/fanfic/${pre}` : '/fanfic'} className="focus-ring -ml-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />同人</Link>
+      <Link to={pre ? `/fanfic/sources/${pre}` : '/fanfic/sources'} className="focus-ring -ml-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />同人</Link>
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight"><BookPlus className="h-5 w-5 text-primary" />建同人书</h1>
         <div className="ml-auto flex gap-1">
@@ -151,7 +151,7 @@ export default function FanficNewPage() {
       {stepN === 1 && (
         <Step n={1} title="选原著" done={!!src}>
           {sources.isLoading ? <Skeleton className="h-10 rounded-md" /> : sources.isError ? <ErrorState error={sources.error} onRetry={() => sources.refetch()} /> : !sources.data?.length ? (
-            <p className="rounded-xl border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">还没有原著资料。<Link to="/fanfic" className="text-primary underline-offset-2 hover:underline">先去导入一份 →</Link></p>
+            <p className="rounded-xl border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">还没有原著资料。<Link to="/fanfic/search" className="text-primary underline-offset-2 hover:underline">先去导入一份 →</Link></p>
           ) : (
             <div className="space-y-4">
               <div>
@@ -183,7 +183,7 @@ export default function FanficNewPage() {
                   </div>
                 </div>
               )}
-              {src && <Link to={`/fanfic/${src.id}`} className="inline-flex h-10 items-center text-[13px] text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>}
+              {src && <Link to={`/fanfic/sources/${src.id}`} className="inline-flex h-10 items-center text-[13px] text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>}
             </div>
           )}
         </Step>

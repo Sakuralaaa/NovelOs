@@ -1,12 +1,13 @@
 import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, BookOpen, BookOpenCheck, Feather, FileText, History, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
+  Bot, BookOpen, ChevronDown, BookOpenCheck, Feather, FileText, History, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
   FlagCheckered, Notebook, StackSimple, PanelLeftClose, PanelLeftOpen, Radar, Scissors, Search, Settings, ShieldCheck, Stethoscope, Sun, Waypoints,
 } from '@/components/icons'
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
+import * as T from '@radix-ui/react-tooltip'
 import { useBook, useStatus } from '@/hooks/queries'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { modKey } from '@/hooks/useHotkey'
@@ -14,11 +15,22 @@ import { api, qk } from '@/lib/api'
 import { useAuth } from '@/components/auth/AuthGate'
 import { cn } from '@/lib/utils'
 
-const MAIN = [
+type SubItem = { to: string; label: string; end?: boolean; match?: RegExp }
+type MainItem = { to: string; label: string; icon: typeof House; end?: boolean; children?: SubItem[] }
+
+const MAIN: MainItem[] = [
   { to: '/', label: '首页', icon: House, end: true },
   { to: '/radar', label: '热点雷达', icon: Radar },
-  { to: '/teardown', label: '拆书', icon: Scissors },
-  { to: '/fanfic', label: '同人', icon: BookOpenCheck },
+  { to: '/teardown', label: '拆书', icon: Scissors, children: [
+    { to: '/teardown', label: '新建拆书', end: true },
+    { to: '/teardown/history', label: '拆书历史', match: /^\/teardown\/(history|\d+)/ },
+  ] },
+  { to: '/fanfic', label: '同人', icon: BookOpenCheck, children: [
+    { to: '/fanfic/search', label: '联网取材' },
+    { to: '/fanfic/import', label: '导入原著' },
+    { to: '/fanfic/sources', label: '原著资料' },
+    { to: '/fanfic/new', label: '建同人书' },
+  ] },
   { to: '/ideas', label: '选题', icon: Lightbulb },
   { to: '/books', label: '我的书', icon: BookOpen },
   { to: '/aigc', label: 'AI 率检测', icon: ShieldCheck },
@@ -103,6 +115,55 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
       <nav className={cn('flex-1 overflow-y-auto px-3 pb-3 pt-3', collapsed && 'px-0')}>
         <div className="space-y-0.5">
           {MAIN.map((n) => {
+            if (n.children) {
+              const under = loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')
+              const subActive = (c: SubItem) => (c.match ? c.match.test(loc.pathname) : c.end ? loc.pathname === c.to : loc.pathname === c.to || loc.pathname.startsWith(c.to + '/'))
+              if (collapsed) {
+                return (
+                  <T.Root key={n.to} delayDuration={80}>
+                    <T.Trigger asChild>
+                      <NavLink to={n.children[0].to} onClick={onNavigate} className={item(under)} aria-label={n.label}>
+                        <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
+                      </NavLink>
+                    </T.Trigger>
+                    <T.Portal>
+                      <T.Content side="right" align="start" sideOffset={8} className="z-[70] min-w-[148px] rounded-xl border bg-popover p-1.5 text-foreground shadow-pop animate-fade-in">
+                        <div className="px-2.5 pb-1 pt-0.5 text-[11.5px] font-medium text-muted-foreground">{n.label}</div>
+                        {n.children.map((c) => (
+                          <NavLink key={c.to} to={c.to} onClick={onNavigate}
+                            className={cn('focus-ring flex h-9 items-center rounded-lg px-2.5 text-[13.5px] transition-colors', subActive(c) ? 'bg-foreground/[0.06] font-medium text-primary' : 'text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground')}>
+                            {c.label}
+                          </NavLink>
+                        ))}
+                      </T.Content>
+                    </T.Portal>
+                  </T.Root>
+                )
+              }
+              return (
+                <div key={n.to}>
+                  <NavLink to={n.children[0].to} onClick={onNavigate} className={item(false)}>
+                    <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
+                    <span className={cn('flex-1', under && 'font-medium text-foreground')}>{n.label}</span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 text-foreground/40 transition-transform', !under && '-rotate-90')} />
+                  </NavLink>
+                  {under && (
+                    <div className="my-0.5 ml-[21px] space-y-0.5 border-l pl-2.5">
+                      {n.children.map((c) => {
+                        const a = subActive(c)
+                        return (
+                          <NavLink key={c.to} to={c.to} onClick={onNavigate}
+                            className={cn('focus-ring flex h-8 items-center rounded-lg px-2.5 text-[13px] transition-colors',
+                              a ? 'bg-foreground/[0.06] font-medium text-primary dark:bg-foreground/[0.08]' : 'text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground')}>
+                            {c.label}
+                          </NavLink>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            }
             return (
               <Tip key={n.to} content={collapsed ? n.label : null} side="right">
                 <div>

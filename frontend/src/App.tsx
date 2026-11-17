@@ -83,9 +83,14 @@ export function App() {
                 <Route path="books/:bookId/batch" element={<S><BatchPage /></S>} />
                 <Route path="books/:bookId/notes" element={<S><NotesPage /></S>} />
                 <Route path="teardown" element={<S><TeardownPage /></S>} />
+                <Route path="teardown/history" element={<S><TeardownPage /></S>} />
                 <Route path="teardown/:id" element={<S><TeardownPage /></S>} />
                 <Route path="fanfic" element={<S><FanficPage /></S>} />
                 <Route path="fanfic/new" element={<S><FanficNewPage /></S>} />
+                <Route path="fanfic/search" element={<S><FanficPage /></S>} />
+                <Route path="fanfic/import" element={<S><FanficPage /></S>} />
+                <Route path="fanfic/sources" element={<S><FanficPage /></S>} />
+                <Route path="fanfic/sources/:id" element={<S><FanficPage /></S>} />
                 <Route path="fanfic/:id" element={<S><FanficPage /></S>} />
                 <Route path="aigc" element={<S><AigcDetectPage /></S>} />
                 <Route path="history" element={<S><HistoryPage /></S>} />

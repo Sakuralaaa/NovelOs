@@ -29,7 +29,7 @@ export function TemplatePicker({ templates, categories, loading, selected, onPic
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="搜作品名 / 别名 / 人物" className="h-10 pl-8" aria-label="搜索热门同人题材" />
       </div>
-      <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] sm:-mx-4 sm:px-4">
+      <div className="-mx-3 flex gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:px-0">
         {(['', ...categories] as const).map((c) => (
           <button key={c || 'all'} type="button" onClick={() => setCat(c)} aria-pressed={cat === c}
             className={cn('focus-ring inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-[12.5px] transition',
@@ -41,7 +41,7 @@ export function TemplatePicker({ templates, categories, loading, selected, onPic
       ) : !list.length ? (
         <p className="rounded-xl border border-dashed px-3 py-4 text-center text-[12.5px] text-muted-foreground">没有匹配的模板，直接在下面填作品名也可以联网取材</p>
       ) : (
-        <div className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1.5 sm:-mx-4 sm:px-4">
+        <div className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1.5 sm:mx-0 sm:px-0">
           {list.map((t) => {
             const on = selected === t.id
             return (

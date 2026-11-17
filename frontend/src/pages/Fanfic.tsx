@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -26,44 +26,49 @@ const MAX_BYTES = 30 * 1024 * 1024
 const MIN_CHARS = 200
 const bare = (s: string) => s.replace(/\s/g, '').length
 
+type FanficView = 'search' | 'import' | 'sources'
+const VIEW_META: Record<FanficView, { title: string; desc: string }> = {
+  search: { title: '联网取材', desc: '只填作品名，用联网搜索整理人物、世界观、时间线和势力；资料可能有误，生成后请核对。' },
+  import: { title: '导入原著', desc: '粘贴或上传 TXT（≤30MB），提炼角色、世界观、势力、时间线和名场面，原文只在本次提炼中使用，不保存。' },
+  sources: { title: '原著资料', desc: '提炼好的设定卡可以逐条修改，再用它建同人书。' },
+}
+
 export default function FanficPage() {
   const { id } = useParams()
+  const loc = useLocation()
+  const [sp] = useSearchParams()
   const sid = id && /^\d+$/.test(id) ? Number(id) : 0
+  // 旧地址：/fanfic、/fanfic/:id、/fanfic?source=
+  if (loc.pathname === '/fanfic' || loc.pathname === '/fanfic/') {
+    const src = sp.get('source')
+    return <Navigate to={src && /^\d+$/.test(src) ? `/fanfic/sources/${src}` : '/fanfic/search'} replace />
+  }
+  if (sid && !loc.pathname.startsWith('/fanfic/sources/')) return <Navigate to={`/fanfic/sources/${sid}`} replace />
+  if (sid) return (
+    <div className="page max-w-[1080px]">
+      <Link to="/fanfic/sources" className="focus-ring -ml-1 mb-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />原著资料</Link>
+      <SourceDetail id={sid} />
+    </div>
+  )
+  const view: FanficView = loc.pathname.startsWith('/fanfic/import') ? 'import' : loc.pathname.startsWith('/fanfic/sources') ? 'sources' : 'search'
+  const meta = VIEW_META[view]
   return (
-    <div className="min-h-full lg:flex lg:h-full lg:flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5 sm:px-5">
-        {sid ? (
-          <Link to="/fanfic" className="focus-ring inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground">
-            <ChevronLeft className="h-4 w-4" />同人
-          </Link>
-        ) : (
-          <h1 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><BookOpenCheck className="h-[18px] w-[18px] text-primary" weight="duotone" />同人创作</h1>
+    <div className={cn('page', view === 'sources' ? 'max-w-[1080px]' : 'max-w-[880px]')}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight"><BookOpenCheck className="h-5 w-5 text-primary" weight="duotone" />{meta.title}</h1>
+        {view === 'sources' && (
+          <Link to="/fanfic/new" className="ml-auto"><Button variant="primary" size="sm" className="h-10" icon={<BookPlus className="h-4 w-4" />}>建同人书</Button></Link>
         )}
-        <span className="ml-auto hidden text-[12px] text-muted-foreground sm:inline">联网取材或导入原著提炼设定卡（原文不入库），再按方向与遵循度建同人书</span>
-        <Link to={sid ? `/fanfic/new?source=${sid}` : '/fanfic/new'} className="ml-auto sm:ml-2">
-          <Button variant="primary" size="sm" className="h-10" icon={<BookPlus className="h-4 w-4" />}>建同人书</Button>
-        </Link>
-      </header>
-      <div className="flex min-w-0 flex-col lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="min-w-0 border-b p-3 sm:p-4 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-          <ImportPanel />
-          <div className="mt-5 border-t pt-4"><SourceList active={sid} /></div>
-        </aside>
-        <section className="min-w-0 p-3 sm:p-5 lg:overflow-y-auto">
-          {sid ? <SourceDetail id={sid} /> : <Intro />}
-        </section>
+      </div>
+      <p className="mt-1 text-[13px] text-muted-foreground">{meta.desc}</p>
+      <div className="mt-5">
+        {view === 'sources' ? <SourceList /> : <ImportPanel key={view} kind={view} />}
       </div>
     </div>
   )
 }
 
-function Intro() {
-  return (
-    <EmptyState kind="cards" title="选一份原著资料查看设定卡" desc="在左侧选一个热门题材或填作品名联网取材，也可以粘贴/上传原著 TXT（可再联网补充）。系统只提炼角色、世界观、势力、时间线和名场面，原文不保存；提炼完可以逐条修改，再用它建同人书。" />
-  )
-}
-
-// ---------------------------------------------------------------- 左栏：导入
+// ---------------------------------------------------------------- 取材 / 导入
 
 const SEARCH_DEPTHS: { value: FanficDepth; label: string; desc: string }[] = [
   { value: 'quick', label: '快速', desc: '2 轮检索：概况 + 主要人物' },
@@ -84,7 +89,7 @@ function SearchHint({ status }: { status?: FanficSearchStatus }) {
   return null
 }
 
-function ImportPanel() {
+function ImportPanel({ kind }: { kind: 'search' | 'import' }) {
   const nav = useNavigate()
   const { start } = useJobs()
   const running = useActiveJob(CREATE_KEY)
@@ -92,7 +97,7 @@ function ImportPanel() {
   const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000 })
   const status = tq.data?.search
   const canSearch = status ? status.available : true
-  const [mode, setMode] = useState<ImportMode>('search')
+  const [mode, setMode] = useState<ImportMode>(kind === 'search' ? 'search' : 'paste')
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
@@ -133,25 +138,19 @@ function ImportPanel() {
       onSuccess: (j) => {
         const id = j.result?.source_id ?? j.result?.source?.id
         setText(''); setFile(null); setTitle(''); setFocus([]); setTplId(null)
-        if (id) nav(`/fanfic/${id}`)
+        if (id) nav(`/fanfic/sources/${id}`)
       },
     })
   }
   const depths = mode === 'search' ? SEARCH_DEPTHS : DEPTHS
   return (
     <div className="min-w-0 space-y-3">
-      <div>
-        <h2 className="text-[14px] font-semibold">导入原著</h2>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-          {mode === 'search' ? '只填作品名，用联网搜索整理人物、世界观、时间线和势力；资料可能有误，生成后请核对。'
-            : '粘贴或上传 TXT（≤30MB）。超过 20 万字时只取重点角色段落、开头和后文抽样；原文只在本次提炼中使用，不保存。'}
-        </p>
-      </div>
-      <Segmented block value={mode} onChange={setMode} className="h-10" options={[
-        { value: 'search', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><Globe2 className="h-3.5 w-3.5" />联网取材</span> },
-        { value: 'paste', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />粘贴</span> },
-        { value: 'txt', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><CloudUpload className="h-3.5 w-3.5" />TXT</span> },
-      ]} />
+      {kind === 'import' && (
+        <Segmented value={mode} onChange={setMode} className="h-10" options={[
+          { value: 'paste', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />粘贴</span> },
+          { value: 'txt', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><CloudUpload className="h-3.5 w-3.5" />TXT</span> },
+        ]} />
+      )}
       {mode === 'search' && (
         <>
           <TemplatePicker templates={tq.data?.templates ?? []} categories={tq.data?.categories ?? []} loading={tq.isLoading} selected={tplId} onPick={pickTemplate} />
@@ -225,7 +224,7 @@ function ImportPanel() {
           ))}
         </div>
       </div>
-      <div className="sticky bottom-0 -mx-3 bg-background/95 px-3 pb-1 pt-2 backdrop-blur sm:-mx-4 sm:px-4">
+      <div className="sticky bottom-0 pb-3 pt-3">
         {running ? <JobInline job={running} /> : (
           <Button variant="primary" className="h-11 w-full" disabled={!ready} icon={mode === 'search' ? <Globe2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />} onClick={() => void go()}>
             {mode === 'search' ? (hasTitle ? `开始联网取材《${title.trim().slice(0, 12)}》` : '填写作品名后开始取材') : '提炼原著设定卡'}
@@ -236,21 +235,23 @@ function ImportPanel() {
   )
 }
 
-// ---------------------------------------------------------------- 左栏：列表
+// ---------------------------------------------------------------- 原著资料列表
 
-function SourceList({ active }: { active: number }) {
+function SourceList() {
   const q = useQuery({ queryKey: fqk.sources, queryFn: fanficApi.sources })
   if (q.isLoading) return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[64px] rounded-xl" />)}</div>
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />
   const list = q.data ?? []
   return (
     <div className="space-y-2">
-      <h2 className="text-[14px] font-semibold">原著资料<span className="num ml-1.5 font-normal text-muted-foreground">{list.length}</span></h2>
-      {!list.length ? <p className="rounded-xl border border-dashed px-4 py-6 text-center text-[12.5px] text-muted-foreground">还没有导入原著</p> : (
-        <ul className="space-y-1.5">
+      {!list.length ? (
+        <EmptyState kind="cards" title="还没有原著资料" desc="联网取材或导入原著 TXT 后，提炼出的设定卡会出现在这里。"
+          action={<div className="flex gap-2"><Link to="/fanfic/search"><Button variant="primary" size="sm" icon={<Globe2 className="h-4 w-4" />}>联网取材</Button></Link><Link to="/fanfic/import"><Button variant="soft" size="sm" icon={<CloudUpload className="h-4 w-4" />}>导入原著</Button></Link></div>} />
+      ) : (
+        <ul className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {list.map((s) => (
             <li key={s.id}>
-              <Link to={`/fanfic/${s.id}`} className={cn('card-hover focus-ring flex min-h-[60px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-3 py-2.5', active === s.id && 'border-primary/50 bg-primary-soft/30')}>
+              <Link to={`/fanfic/sources/${s.id}`} className="card-hover focus-ring flex min-h-[60px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-3 py-2.5">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] font-semibold">{s.title || '未命名'}</span>
                   <span className="num mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
@@ -271,7 +272,7 @@ function SourceList({ active }: { active: number }) {
   )
 }
 
-// ---------------------------------------------------------------- 右栏：设定卡
+// ---------------------------------------------------------------- 设定卡详情
 
 const PARTS: { value: SourceCardPart; label: string }[] = [
   { value: 'characters', label: '角色' }, { value: 'world', label: '世界观' }, { value: 'factions', label: '势力' },
@@ -350,7 +351,7 @@ function SourceDetail({ id }: { id: number }) {
       qc.invalidateQueries({ queryKey: ['fanfic', 'book'] })
       qc.removeQueries({ queryKey: fqk.source(id) })
       toast.success('已删除原著资料')
-      nav('/fanfic', { replace: true })
+      nav('/fanfic/sources', { replace: true })
     },
     onError: (e: any) => {
       if (e instanceof ApiError && e.status === 409) setForceAsk(e.message)

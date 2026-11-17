@@ -49,7 +49,7 @@ export function AttachFanficDialog({ bookId, open, onOpenChange }: { bookId: num
           <Button variant="primary" disabled={!!missing} title={missing ? `还需要：${missing}` : undefined} loading={m.isPending} onClick={() => m.mutate()}>{missing ? `还需要${missing}` : '设为同人'}</Button>
         </>}>
         {sources.isLoading ? <Skeleton className="h-40 rounded-xl" /> : !sources.data?.length ? (
-          <p className="rounded-xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">还没有原著资料。<Link to="/fanfic" className="text-primary underline-offset-2 hover:underline" onClick={() => onOpenChange(false)}>先去同人页导入一份 →</Link></p>
+          <p className="rounded-xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">还没有原著资料。<Link to="/fanfic/search" className="text-primary underline-offset-2 hover:underline" onClick={() => onOpenChange(false)}>先去同人页导入一份 →</Link></p>
         ) : (
           <div className="space-y-4">
             <div>
