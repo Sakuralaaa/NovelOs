@@ -622,6 +622,17 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - `PUT /api/fanfic/sources/{id}` body `{title?, cards?: {characters?|world?|factions?|timeline?|scenes?}}`（给了哪块就整块替换哪块）→ `{source: FanficSource, warnings: string[]}`；cards 含未知键 422。
 - `DELETE /api/fanfic/sources/{id}?force=false` → `{ok: true}`；有同人书在用时 409（加 `force=true` 强删，书上的 fanfic 保留，上下文改为只按规则把握，`GET /books/{id}/fanfic` 的 `source_missing=true`）。
 
+### v0.11.1 联网取材 / 热门题材模板
+- `GET /api/fanfic/templates` → `{templates: FanficTemplate[], categories: ["国漫","网文","欧美","日漫","游戏"], search: {mode: "web"|"mock"|"none", available: bool, hint: string}}`。
+  `FanficTemplate = {id, title, aliases: string[], category, intro, characters: string[], search_focus: string[], styles: [{label, desc, direction}], directions: DirectionId[]}`（只含作品名、人物名等事实性元数据）。
+- `POST /api/fanfic/sources` 新增：
+  - `source: "search"`：`{source: "search", title: 作品名（必填）, focus?, depth?, template_id?}`，不需要 `text`。检索轮数 quick 2 / standard 4 / deep 6（有模板 +1，模板检索重点多时再 +1），`focus` 每项各加一轮（最多 6）。
+  - paste / txt 可加 `web_supplement: true`（multipart 用 `web_supplement=1`）与 `template_id?`：提炼原文后联网补充，以原文为准，冲突记 warnings；需要 `title`（作品名），否则 422。
+  - 没有联网搜索模型（有渠道但「任务路由 → 联网搜索」未配置）时 search / web_supplement 返回 **422**，`detail` 提示去设置；mock 模式（无渠道）返回演示资料。
+- `POST /api/fanfic/sources/{id}/supplement` body `{focus?: string[≤10]（默认沿用资料的 focus）, depth?: "standard"}` → Job（`kind=fanfic_supplement`）；`Job.result = {source, source_id, added: {characters, factions, timeline, scenes, rules, locations}, warnings}`。资料不存在 404，无搜索模型 422。
+- FanficSourceBrief 新字段：`source` 可为 `"search"`、`template_id`、`web_rounds`（联网检索轮数）、`refs_count`；FanficSource 新字段 `refs: string[]`（来源链接）。纯联网资料 `chars=total_chars=0`，没有原文指纹。
+- 原著重合（`fanfic-overlap` / `ooc-check` 的 overlap）：原著资料没有指纹时 `level="ok"`、`no_fingerprint: true`，`warning` 说明无法比对。
+
 ### 同人书
 - 建书时指定：`POST /api/books` body 增加 `fanfic?: {source_id, fidelity?: "moderate", direction?: "canon_fill", extra_source_ids?: int[≤9], notes?: ≤1000}`、`copyright_ack?: bool`。
   给了 `fanfic` 但 `copyright_ack !== true` → **400**（不建书）；source 不存在 404；fidelity/direction 非法 422。

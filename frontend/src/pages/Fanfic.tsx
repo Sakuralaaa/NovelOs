@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, BookOpenCheck, BookPlus, ChevronLeft, CloudUpload, FileText, Loader2, Plus, RotateCcw, Save, Sparkles, Trash,
+  AlertTriangle, BookOpenCheck, BookPlus, ChevronLeft, CloudUpload, FileText, Globe2, Loader2, Plus, RotateCcw, Save, Sparkles, Trash,
 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -12,11 +12,12 @@ import { Segmented } from '@/components/ui/tabs'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { EmptyState, ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
-import { Chips, DEPTHS, Lbl, RemoveBtn, StrList, depthLabel } from '@/components/fanfic/bits'
+import { Chips, DEPTHS, Lbl, RemoveBtn, StrList, depthLabel, sourceLabel } from '@/components/fanfic/bits'
+import { TemplatePicker } from '@/components/fanfic/TemplatePicker'
 import { ApiError, fanficApi, fqk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type {
-  FanficDepth, FanficSource, SourceCardPart, SourceCards, SourceCharacter, SourceFaction, SourceScene, SourceTimelineItem,
+  FanficDepth, FanficSearchStatus, FanficSource, FanficTemplate, SourceCardPart, SourceCards, SourceCharacter, SourceFaction, SourceScene, SourceTimelineItem,
 } from '@/lib/types'
 import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
 
@@ -38,7 +39,7 @@ export default function FanficPage() {
         ) : (
           <h1 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><BookOpenCheck className="h-[18px] w-[18px] text-primary" weight="duotone" />同人创作</h1>
         )}
-        <span className="ml-auto hidden text-[12px] text-muted-foreground sm:inline">导入原著提炼设定卡（原文不入库），再按方向与遵循度建同人书</span>
+        <span className="ml-auto hidden text-[12px] text-muted-foreground sm:inline">联网取材或导入原著提炼设定卡（原文不入库），再按方向与遵循度建同人书</span>
         <Link to={sid ? `/fanfic/new?source=${sid}` : '/fanfic/new'} className="ml-auto sm:ml-2">
           <Button variant="primary" size="sm" className="h-10" icon={<BookPlus className="h-4 w-4" />}>建同人书</Button>
         </Link>
@@ -58,25 +59,58 @@ export default function FanficPage() {
 
 function Intro() {
   return (
-    <EmptyState kind="cards" title="选一份原著资料查看设定卡" desc="在左侧粘贴或上传原著 TXT 导入。系统只提炼角色、世界观、势力、时间线和名场面，原文不保存；提炼完可以逐条修改，再用它建同人书。" />
+    <EmptyState kind="cards" title="选一份原著资料查看设定卡" desc="在左侧选一个热门题材或填作品名联网取材，也可以粘贴/上传原著 TXT（可再联网补充）。系统只提炼角色、世界观、势力、时间线和名场面，原文不保存；提炼完可以逐条修改，再用它建同人书。" />
   )
 }
 
 // ---------------------------------------------------------------- 左栏：导入
+
+const SEARCH_DEPTHS: { value: FanficDepth; label: string; desc: string }[] = [
+  { value: 'quick', label: '快速', desc: '2 轮检索：概况 + 主要人物' },
+  { value: 'standard', label: '标准', desc: '4 轮：再加时间线、势力' },
+  { value: 'deep', label: '深入', desc: '6+ 轮：体系细节、后续剧情' },
+]
+type ImportMode = 'search' | 'paste' | 'txt'
+
+function SearchHint({ status }: { status?: FanficSearchStatus }) {
+  if (!status) return null
+  if (status.mode === 'none') return (
+    <div className="flex gap-2 rounded-lg bg-warning-soft px-3 py-2 text-[12.5px] leading-relaxed text-warning">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 break-words">还没有配置联网搜索模型。去 <Link to="/settings#routing" className="font-medium underline underline-offset-2">设置 → 任务路由 → 联网搜索</Link> 选一个能联网的模型；也可以改用粘贴 / TXT 原文。</span>
+    </div>
+  )
+  if (status.mode === 'mock') return <p className="text-[11.5px] text-muted-foreground">演示模式：没有配置渠道，返回演示资料（不会真的联网）。</p>
+  return null
+}
 
 function ImportPanel() {
   const nav = useNavigate()
   const { start } = useJobs()
   const running = useActiveJob(CREATE_KEY)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [mode, setMode] = useState<'paste' | 'txt'>('paste')
+  const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000 })
+  const status = tq.data?.search
+  const canSearch = status ? status.available : true
+  const [mode, setMode] = useState<ImportMode>('search')
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
   const [focus, setFocus] = useState<string[]>([])
   const [depth, setDepth] = useState<FanficDepth>('standard')
+  const [tplId, setTplId] = useState<string | null>(null)
+  const [webOn, setWebOn] = useState<boolean | null>(null) // null = 跟随「是否配置了搜索模型」的默认值
+  const web = (webOn ?? canSearch) && canSearch
   const n = bare(text)
-  const ready = mode === 'paste' ? n >= MIN_CHARS : !!file
+  const hasTitle = !!title.trim()
+  const ready = mode === 'search' ? hasTitle && canSearch : mode === 'paste' ? n >= MIN_CHARS : !!file
+  const tpl = tq.data?.templates.find((t) => t.id === tplId) ?? null
+  const pickTemplate = (t: FanficTemplate) => {
+    if (tplId === t.id) { setTplId(null); return }
+    setTplId(t.id)
+    setTitle(t.title)
+    setFocus(t.characters.slice(0, 2))
+  }
   const pickFile = (f?: File | null) => {
     if (!f) return
     if (!/\.txt$/i.test(f.name) && f.type && f.type !== 'text/plain') { toast.error('只支持 .txt 文本文件'); return }
@@ -86,34 +120,60 @@ function ImportPanel() {
   }
   const go = async () => {
     if (!ready) return
-    const common = { title: title.trim() || undefined, focus: focus.length ? focus.slice(0, 10) : undefined, depth }
-    await start(fanficApi.createSource(mode === 'paste' ? { source: 'paste', text, ...common } : { source: 'txt', file: file!, ...common }), {
-      label: '提炼原著设定', key: CREATE_KEY, successMsg: '原著设定卡已生成',
+    const t = title.trim()
+    const template_id = tpl && tpl.title === t ? tpl.id : undefined
+    const common = { title: t || undefined, focus: focus.length ? focus.slice(0, 10) : undefined, depth, template_id }
+    const withWeb = web && !!t
+    const req = mode === 'search' ? fanficApi.createSource({ source: 'search', ...common, title: t })
+      : mode === 'paste' ? fanficApi.createSource({ source: 'paste', text, web_supplement: withWeb, ...common })
+        : fanficApi.createSource({ source: 'txt', file: file!, web_supplement: withWeb, ...common })
+    await start(req, {
+      label: mode === 'search' ? `联网取材《${t}》` : withWeb ? '提炼原著设定 + 联网补充' : '提炼原著设定', key: CREATE_KEY,
+      successMsg: '原著设定卡已生成',
       onSuccess: (j) => {
         const id = j.result?.source_id ?? j.result?.source?.id
-        setText(''); setFile(null); setTitle(''); setFocus([])
+        setText(''); setFile(null); setTitle(''); setFocus([]); setTplId(null)
         if (id) nav(`/fanfic/${id}`)
       },
     })
   }
+  const depths = mode === 'search' ? SEARCH_DEPTHS : DEPTHS
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       <div>
         <h2 className="text-[14px] font-semibold">导入原著</h2>
-        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">粘贴或上传 TXT（≤30MB）。超过 20 万字时只取重点角色段落、开头和后文抽样；原文只在本次提炼中使用，不保存。</p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+          {mode === 'search' ? '只填作品名，用联网搜索整理人物、世界观、时间线和势力；资料可能有误，生成后请核对。'
+            : '粘贴或上传 TXT（≤30MB）。超过 20 万字时只取重点角色段落、开头和后文抽样；原文只在本次提炼中使用，不保存。'}
+        </p>
       </div>
       <Segmented block value={mode} onChange={setMode} className="h-10" options={[
-        { value: 'paste', label: <span className="inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" />粘贴</span> },
-        { value: 'txt', label: <span className="inline-flex items-center gap-1"><CloudUpload className="h-3.5 w-3.5" />TXT</span> },
+        { value: 'search', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><Globe2 className="h-3.5 w-3.5" />联网取材</span> },
+        { value: 'paste', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><FileText className="h-3.5 w-3.5" />粘贴</span> },
+        { value: 'txt', label: <span className="inline-flex items-center gap-1 whitespace-nowrap"><CloudUpload className="h-3.5 w-3.5" />TXT</span> },
       ]} />
-      <Input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} placeholder="原著名（可选）" className="h-10" />
-      {mode === 'paste' ? (
+      {mode === 'search' && (
+        <>
+          <TemplatePicker templates={tq.data?.templates ?? []} categories={tq.data?.categories ?? []} loading={tq.isLoading} selected={tplId} onPick={pickTemplate} />
+          <SearchHint status={status} />
+        </>
+      )}
+      <Input value={title} onChange={(e) => { setTitle(e.target.value.slice(0, 60)); if (tpl && e.target.value.trim() !== tpl.title) setTplId(null) }}
+        placeholder={mode === 'search' ? '作品名（必填），如：斗罗大陆' : web ? '原著名（联网补充需要）' : '原著名（可选）'} className="h-10" aria-label="作品名" />
+      {tpl && mode === 'search' && (
+        <div className="rounded-lg bg-subtle/70 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground/85">{tpl.title}</span>{tpl.aliases.length > 0 && <>（{tpl.aliases.join(' / ')}）</>}：{tpl.intro}
+          <span className="mt-1 block">检索重点：{tpl.search_focus.slice(0, 3).join('；')}</span>
+        </div>
+      )}
+      {mode === 'paste' && (
         <div>
           <Textarea rows={7} value={text} onChange={(e) => setText(e.target.value)} placeholder="把原著正文粘贴到这里（至少 200 字）"
             className="min-h-[160px] font-serif text-[13.5px]" />
           <div className={cn('num mt-1 text-right text-[12px]', n && n < MIN_CHARS ? 'text-danger' : 'text-muted-foreground')}>{n.toLocaleString('zh-CN')} 字{n > 0 && n < MIN_CHARS ? `，至少 ${MIN_CHARS} 字` : ''}</div>
         </div>
-      ) : (
+      )}
+      {mode === 'txt' && (
         <div>
           <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = '' }} />
           {file ? (
@@ -134,14 +194,28 @@ function ImportPanel() {
           )}
         </div>
       )}
+      {mode !== 'search' && (
+        <label className={cn('flex min-h-[44px] items-start gap-2.5 rounded-lg border px-3 py-2', canSearch ? 'cursor-pointer' : 'cursor-not-allowed opacity-60')}>
+          <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]" checked={web} disabled={!canSearch}
+            onChange={(e) => setWebOn(e.target.checked)} aria-label="联网补充" />
+          <span className="min-w-0">
+            <span className="block text-[13px] font-medium">联网补充</span>
+            <span className="block text-[11.5px] leading-snug text-muted-foreground">
+              {!canSearch ? '未配置联网搜索模型（设置 → 任务路由 → 联网搜索）'
+                : web && !hasTitle ? '填写原著名后才会联网补充'
+                  : '用搜索补齐原文没覆盖的人物、设定和后续剧情；冲突以原文为准'}
+            </span>
+          </span>
+        </label>
+      )}
       <div>
-        <Lbl hint="最多 10 个">重点角色 / 剧情关键词（可选）</Lbl>
-        <Chips value={focus} onChange={setFocus} max={10} placeholder="如：主角名，回车添加" />
+        <Lbl hint="最多 10 个">{mode === 'search' ? '重点人物 / 剧情范围（可选，每项多检索一轮）' : '重点角色 / 剧情关键词（可选）'}</Lbl>
+        <Chips value={focus} onChange={setFocus} max={10} placeholder={mode === 'search' ? '如：唐三、小舞，回车添加' : '如：主角名，回车添加'} />
       </div>
       <div>
-        <Lbl>提炼深度</Lbl>
+        <Lbl>{mode === 'search' ? '检索深度' : '提炼深度'}</Lbl>
         <div className="grid grid-cols-3 gap-1.5">
-          {DEPTHS.map((d) => (
+          {depths.map((d) => (
             <button key={d.value} type="button" onClick={() => setDepth(d.value)} aria-pressed={depth === d.value}
               className={cn('focus-ring min-h-[56px] min-w-0 rounded-lg border px-2 py-1.5 text-left transition',
                 depth === d.value ? 'border-primary bg-primary-soft/50' : 'hover:border-foreground/20')}>
@@ -153,7 +227,9 @@ function ImportPanel() {
       </div>
       <div className="sticky bottom-0 -mx-3 bg-background/95 px-3 pb-1 pt-2 backdrop-blur sm:-mx-4 sm:px-4">
         {running ? <JobInline job={running} /> : (
-          <Button variant="primary" className="h-11 w-full" disabled={!ready} icon={<Sparkles className="h-4 w-4" />} onClick={() => void go()}>提炼原著设定卡</Button>
+          <Button variant="primary" className="h-11 w-full" disabled={!ready} icon={mode === 'search' ? <Globe2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />} onClick={() => void go()}>
+            {mode === 'search' ? (hasTitle ? `开始联网取材《${title.trim().slice(0, 12)}》` : '填写作品名后开始取材') : '提炼原著设定卡'}
+          </Button>
         )}
       </div>
     </div>
@@ -178,6 +254,7 @@ function SourceList({ active }: { active: number }) {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[14px] font-semibold">{s.title || '未命名'}</span>
                   <span className="num mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
+                    <span className={cn('whitespace-nowrap rounded px-1.5 leading-[18px]', s.source === 'search' || s.web_rounds ? 'bg-primary-soft text-primary' : 'bg-muted')}>{sourceLabel(s)}</span>
                     <span>{s.counts.characters} 角色</span><span className="opacity-40">·</span>
                     <span>{depthLabel(s.depth)}</span><span className="opacity-40">·</span>
                     <span>完整度 {s.completeness}</span>
@@ -232,6 +309,7 @@ function SourceDetail({ id }: { id: number }) {
 
   const dirtyParts = useMemo(() => (draft && base ? PARTS.map((p) => p.value).filter((k) => JSON.stringify(draft[k]) !== JSON.stringify(base[k])) : []), [draft, base])
   const titleDirty = !!q.data && title.trim() !== q.data.title && !!title.trim()
+  const dirty = dirtyParts.length > 0 || titleDirty
 
   const save = useMutation({
     mutationFn: () => {
@@ -248,6 +326,21 @@ function SourceDetail({ id }: { id: number }) {
       else toast.success('已保存')
     },
   })
+  const { start } = useJobs()
+  const supKey = `fanfic-supplement-${id}`
+  const supRunning = useActiveJob(supKey)
+  const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000 })
+  const canSearch = tq.data ? tq.data.search.available : true
+  const supplement = async () => {
+    await start(fanficApi.supplementSource(id, { depth: 'standard' }), {
+      label: '联网补充原著资料', key: supKey, successMsg: '联网补充完成',
+      onSuccess: (j) => {
+        const src = j.result?.source as FanficSource | undefined
+        if (src) { qc.setQueryData(fqk.source(id), src); setDraft(normCards(src.cards)) }
+        qc.invalidateQueries({ queryKey: fqk.sources })
+      },
+    })
+  }
   const remove = useMutation({
     mutationFn: (force: boolean) => fanficApi.deleteSource(id, force),
     meta: { silent: true },
@@ -269,7 +362,6 @@ function SourceDetail({ id }: { id: number }) {
   if (q.isError || !q.data || !draft) return <ErrorState error={q.error ?? { message: '没找到这份原著资料' }} onRetry={() => q.refetch()} />
   const s: FanficSource = q.data
   const set = <K extends SourceCardPart>(k: K, v: SourceCards[K]) => setDraft((d) => (d ? { ...d, [k]: v } : d))
-  const dirty = dirtyParts.length > 0 || titleDirty
 
   return (
     <div className="min-w-0 pb-20">
@@ -278,9 +370,10 @@ function SourceDetail({ id }: { id: number }) {
           <Input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} aria-label="原著名"
             className="h-11 border-transparent bg-transparent px-1 text-[19px] font-semibold tracking-tight shadow-none hover:border-input" />
           <div className="num mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[12.5px] text-muted-foreground">
-            <span className="rounded bg-muted px-1.5 leading-[20px]">{s.source === 'txt' ? 'TXT' : '粘贴'}</span>
-            <span>取用 {fmtNum(s.chars)} / {fmtNum(s.total_chars)} 字</span>
-            <span>{depthLabel(s.depth)}提炼</span>
+            <span className={cn('whitespace-nowrap rounded px-1.5 leading-[20px]', s.source === 'search' || s.web_rounds ? 'bg-primary-soft text-primary' : 'bg-muted')}>{sourceLabel(s)}</span>
+            {s.source !== 'search' && <span>取用 {fmtNum(s.chars)} / {fmtNum(s.total_chars)} 字</span>}
+            {!!s.web_rounds && <span>联网检索 {s.web_rounds} 轮</span>}
+            <span>{depthLabel(s.depth)}{s.source === 'search' ? '检索' : '提炼'}</span>
             <span>完整度 {s.completeness}</span>
             <span>{fmtDateTime(s.updated_at)}</span>
             {s.focus?.length > 0 && <span className="truncate">重点：{s.focus.join('、')}</span>}
@@ -288,11 +381,24 @@ function SourceDetail({ id }: { id: number }) {
         </div>
         <div className="flex shrink-0 flex-wrap gap-1.5">
           <Link to={`/fanfic/new?source=${s.id}`}><Button variant="soft" className="h-10" icon={<BookPlus className="h-4 w-4" />}>用它建书</Button></Link>
+          {supRunning ? null : (
+            <Button variant="ghost" className="h-10" icon={<Globe2 className="h-4 w-4" />} disabled={!canSearch || dirty}
+              title={!canSearch ? (tq.data?.search.hint || '未配置联网搜索模型') : dirty ? '先保存或还原修改' : '用联网搜索补齐缺的人物、设定和后续剧情（以现有设定卡为准）'}
+              onClick={() => void supplement()}>联网补充</Button>
+          )}
           <Button variant="ghost" className="h-10 text-danger hover:bg-danger-soft" loading={remove.isPending && !forceAsk} icon={<Trash className="h-4 w-4" />}
             onClick={() => { if (window.confirm(`删除原著资料「${s.title}」？设定卡将一并删除。`)) remove.mutate(false) }}>删除</Button>
         </div>
       </div>
 
+      {supRunning && <div className="mt-3"><JobInline job={supRunning} /></div>}
+      {!canSearch && tq.data && <p className="mt-2 text-[12px] text-muted-foreground">联网补充需要先在 <Link to="/settings#routing" className="text-primary hover:underline">设置 → 任务路由 → 联网搜索</Link> 配置模型。</p>}
+      {(s.refs?.length ?? 0) > 0 && (
+        <details className="mt-3 rounded-lg border px-3 py-2 text-[12.5px]">
+          <summary className="flex min-h-[32px] cursor-pointer items-center text-muted-foreground">联网来源链接 {s.refs!.length} 个（资料可能有误，请核对）</summary>
+          <ul className="mt-1 space-y-1">{s.refs!.map((u) => <li key={u} className="min-w-0 break-all"><a href={u} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">{u}</a></li>)}</ul>
+        </details>
+      )}
       {s.used_by.length > 0 && (
         <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">在用的书：
           {s.used_by.map((b) => <Link key={b} to={`/books/${b}`} className="inline-flex h-8 items-center rounded-md bg-primary-soft px-2 text-primary hover:underline">书 #{b}</Link>)}
@@ -433,7 +539,7 @@ function WorldEdit({ value, onChange }: { value: SourceCards['world']; onChange:
 
 function FactionsEdit({ value, onChange }: { value: SourceFaction[]; onChange: (v: SourceFaction[]) => void }) {
   return (
-    <div className="grid gap-2 xl:grid-cols-2">
+    <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
       {value.map((f, i) => {
         const p = (x: Partial<SourceFaction>) => onChange(upd(value, i, x))
         return (
@@ -448,7 +554,7 @@ function FactionsEdit({ value, onChange }: { value: SourceFaction[]; onChange: (
           </Box>
         )
       })}
-      <div className="xl:col-span-2"><AddBtn onClick={() => onChange([...value, { name: '', stance: '', members: [], notes: '' }])}>添加势力</AddBtn></div>
+      <div className="col-span-full"><AddBtn onClick={() => onChange([...value, { name: '', stance: '', members: [], notes: '' }])}>添加势力</AddBtn></div>
     </div>
   )
 }
@@ -480,7 +586,7 @@ function TimelineEdit({ value, onChange }: { value: SourceTimelineItem[]; onChan
 
 function ScenesEdit({ value, onChange }: { value: SourceScene[]; onChange: (v: SourceScene[]) => void }) {
   return (
-    <div className="grid gap-2 xl:grid-cols-2">
+    <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
       {value.map((s, i) => {
         const p = (x: Partial<SourceScene>) => onChange(upd(value, i, x))
         return (
@@ -494,7 +600,7 @@ function ScenesEdit({ value, onChange }: { value: SourceScene[]; onChange: (v: S
           </Box>
         )
       })}
-      {value.length < 30 && <div className="xl:col-span-2"><AddBtn onClick={() => onChange([...value, { title: '', summary: '', characters: [] }])}>添加名场面</AddBtn></div>}
+      {value.length < 30 && <div className="col-span-full"><AddBtn onClick={() => onChange([...value, { title: '', summary: '', characters: [] }])}>添加名场面</AddBtn></div>}
     </div>
   )
 }

@@ -9,9 +9,9 @@ import { Skeleton } from '@/components/ui/misc'
 import { Segmented } from '@/components/ui/tabs'
 import { Select } from '@/components/ui/select'
 import { ErrorState } from '@/components/common/States'
-import { FIDELITY_FALLBACK, Lbl } from '@/components/fanfic/bits'
+import { FIDELITY_FALLBACK, Lbl, sourceLabel } from '@/components/fanfic/bits'
 import { fanficApi, fqk, qk } from '@/lib/api'
-import type { Book, FanficDirectionId, FanficFidelity, FanficImportPart, Gender } from '@/lib/types'
+import type { Book, FanficDirectionId, FanficFidelity, FanficImportPart, FanficTemplateStyle, Gender } from '@/lib/types'
 import { GENRES_FEMALE, GENRES_MALE, cn } from '@/lib/utils'
 
 const IMPORT_PARTS: { value: FanficImportPart; label: string; desc: string }[] = [
@@ -44,6 +44,17 @@ export default function FanficNewPage() {
 
   useEffect(() => { if (!sourceId && sources.data?.length && !pre) setSourceId(sources.data[0].id) }, [sources.data, sourceId, pre])
   const src = sources.data?.find((s) => s.id === sourceId) ?? null
+  // v0.11.1 来源资料带热门模板时：展示该题材的常见写法，选中写进作者补充（notes）
+  const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000, enabled: !!src?.template_id })
+  const tpl = (src?.template_id && tq.data?.templates.find((t) => t.id === src.template_id)) || null
+  const styleLine = (st: FanficTemplateStyle) => `【写法】${st.label}：${st.desc}`
+  const styleOn = (st: FanficTemplateStyle) => notes.split('\n').includes(styleLine(st))
+  const toggleStyle = (st: FanficTemplateStyle) => {
+    const line = styleLine(st)
+    if (styleOn(st)) { setNotes((n) => n.split('\n').filter((x) => x !== line).join('\n')); return }
+    setNotes((n) => (n.trim() ? `${n.replace(/\s+$/, '')}\n${line}` : line).slice(0, 1000))
+    if (!direction) pickDir(st.direction)
+  }
   const dirs = cat.data?.directions ?? []
   const fids = cat.data?.fidelities?.length ? cat.data.fidelities : FIDELITY_FALLBACK
   const dir = dirs.find((d) => d.id === direction) ?? null
@@ -94,6 +105,7 @@ export default function FanficNewPage() {
               options={sources.data.map((s) => ({ value: String(s.id), label: `${s.title || `原著 #${s.id}`}（${s.counts.characters} 角色 · 完整度 ${s.completeness}）` }))} />
             {src && (
               <div className="num flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted-foreground">
+                <span className="whitespace-nowrap rounded bg-muted px-1.5 leading-[18px]">{sourceLabel(src)}</span>
                 <span>{src.counts.characters} 角色</span><span>{src.counts.factions} 势力</span><span>{src.counts.timeline} 时间线节点</span><span>{src.counts.scenes} 名场面</span>
                 <Link to={`/fanfic/${src.id}`} className="inline-flex h-10 items-center text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>
               </div>
@@ -118,10 +130,37 @@ export default function FanficNewPage() {
 
       {/* 2 方向 */}
       <Step n={2} title="选创作方向" done={!!direction}>
-        {cat.isLoading ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
+        {tpl && (
+          <div className="mb-3 rounded-xl border bg-surface p-3" data-testid="template-styles">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+              <span className="text-[13.5px] font-semibold">《{tpl.title}》常见同人写法</span>
+              <span className="text-[11.5px] text-muted-foreground">可多选，会写进「作者补充」；第一次选会顺带选上对应方向</span>
+            </div>
+            <div className="mt-2 grid gap-1.5 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">
+              {tpl.styles.map((st) => {
+                const on = styleOn(st)
+                const dl = dirs.find((d) => d.id === st.direction)?.label ?? st.direction
+                return (
+                  <button key={st.label} type="button" aria-pressed={on} onClick={() => toggleStyle(st)}
+                    className={cn('focus-ring flex min-h-[56px] min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition', on ? 'border-primary bg-primary-soft/40' : 'hover:border-foreground/20')}>
+                    <span className={cn('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/25')}>{on && <Check className="h-3 w-3" />}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className={cn('min-w-0 truncate text-[13px] font-semibold', on && 'text-primary')}>{st.label}</span>
+                        <span className="ml-auto shrink-0 whitespace-nowrap rounded bg-muted px-1.5 text-[10.5px] leading-[17px] text-muted-foreground">{dl}</span>
+                      </span>
+                      <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{st.desc}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {cat.isLoading ? <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
           : cat.isError ? <ErrorState error={cat.error} onRetry={() => cat.refetch()} /> : (
             <>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">
                 {dirs.map((d) => {
                   const on = direction === d.id
                   return (
@@ -130,7 +169,8 @@ export default function FanficNewPage() {
                       <span className="flex items-center gap-1.5">
                         <span className={cn('text-[14px] font-semibold', on && 'text-primary')}>{d.label}</span>
                         {on && <Check className="h-4 w-4 text-primary" />}
-                        <span className="ml-auto shrink-0 rounded bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">建议{fids.find((f) => f.id === d.suggested_fidelity)?.label ?? d.suggested_fidelity}</span>
+                        {tpl?.directions.includes(d.id) && <span className="shrink-0 whitespace-nowrap rounded bg-primary-soft px-1.5 text-[11px] leading-[18px] text-primary">推荐</span>}
+                        <span className="ml-auto shrink-0 whitespace-nowrap rounded bg-muted px-1.5 text-[11px] leading-[18px] text-muted-foreground">建议{fids.find((f) => f.id === d.suggested_fidelity)?.label ?? d.suggested_fidelity}</span>
                       </span>
                       <span className="mt-1 block text-[12.5px] leading-relaxed text-muted-foreground">{d.desc}</span>
                     </button>

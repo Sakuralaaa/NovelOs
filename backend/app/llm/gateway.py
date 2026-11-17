@@ -33,6 +33,7 @@ log = logging.getLogger("novelos.llm")
 ROLES = ("planner", "writer", "reviewer", "search", "embedding", "image", "agent")
 # 只走路由指定模型、不向其它渠道切换的角色（普通文本模型做不了这些事）
 STRICT_ROLES = ("search", "embedding", "image")
+SEARCH_SYSTEM_MAX = 1500  # search(system=...) 自定义系统提示的字数上限
 ROUTING_KEY = "routing"
 IMAGE_MODE_KEY = "image_mode"  # images：/images/generations；chat：对话接口出图
 
@@ -502,9 +503,16 @@ class LLMGateway:
         with session_scope() as s:
             return bool(resolve_targets(s, "search"))
 
-    def search(self, query: str, context: str = "") -> str | None:
-        """用路由里的联网搜索模型查一个问题；未配置返回 None。失败抛 LLMError。"""
-        system = (
+    def search(self, query: str, context: str = "", system: str | None = None) -> str | None:
+        """用路由里的联网搜索模型查一个问题；未配置返回 None。失败抛 LLMError。
+
+        system：可选的自定义系统提示（v0.11.1 同人「联网取材」用更长的原著资料整理提示，上限 SEARCH_SYSTEM_MAX 字）；
+        不传时用默认的 250 字事实核查提示。"""
+        if system is not None and not system.strip():
+            system = None
+        if system is not None and len(system) > SEARCH_SYSTEM_MAX:
+            raise ValueError(f"搜索系统提示超过 {SEARCH_SYSTEM_MAX} 字")
+        system = system or (
             "你是小说创作的资料核查员，可以联网搜索。针对问题检索可靠来源，用中文给出简洁、可直接用于写作的事实，"
             "250 字以内，末尾列出 1~3 个来源链接。查不到或说法有争议时直说，不要编造。"
         )

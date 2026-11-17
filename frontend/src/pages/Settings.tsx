@@ -330,7 +330,7 @@ function RoutingCard() {
   const opts: Opt[] = (channels ?? []).filter((c) => c.enabled).flatMap((c) => c.models.map((mm) => ({ value: `${c.id}:${mm}`, label: <span className="font-mono text-[12.5px]">{mm}</span>, group: c.name })))
   const noCh = !opts.length
   return (
-    <Card>
+    <Card id="routing" className="scroll-mt-6">
       <CardHeader divider title="任务路由" icon={<Route className="h-4 w-4" />} action={dirty && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => r && m.mutate(r)}>保存</Button>} />
       <CardBody className="p-0">
         {q.isLoading || !r ? <Skeleton className="m-5 h-60" /> : (

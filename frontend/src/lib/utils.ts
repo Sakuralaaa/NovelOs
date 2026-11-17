@@ -71,6 +71,7 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   agent_run: 'Agent 处理中',
   fanfic_source: '提炼原著设定',
   fanfic_ooc: 'OOC 检查',
+  fanfic_supplement: '联网补充原著',
   radar_refresh: '刷新热点榜单',
   radar_teardown: '拆解榜单书',
   radar_deep: '深度拆解',

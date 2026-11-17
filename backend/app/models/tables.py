@@ -369,7 +369,7 @@ class FanficSource(SQLModel, table=True):
     __tablename__ = "fanfic_source"
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str = ""
-    source: str = "paste"  # paste / txt
+    source: str = "paste"  # paste / txt / search（v0.11.1 联网取材）
     chars: int = 0  # 实际取用（提炼 + 指纹）的字数
     total_chars: int = 0  # 导入原文总字数
     depth: str = "standard"  # quick / standard / deep：提炼轮数
@@ -378,6 +378,10 @@ class FanficSource(SQLModel, table=True):
     warnings: list[str] = _json_list()
     fingerprint: list[int] = _json_list()
     model: str = ""
+    # v0.11.1 联网取材：检索来源链接、所用热门模板 id、联网检索轮数（纯联网资料 fingerprint 为空）
+    refs: list[str] = _json_list()
+    template_id: str = ""
+    web_rounds: int = 0
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

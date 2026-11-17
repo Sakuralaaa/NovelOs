@@ -393,16 +393,23 @@ export const qkV094 = {
 // ---------------------------------------------------------------- v0.10 同人创作
 import type {
   ChapterFanficMeta, FanficCatalog, FanficDepth, FanficImportPart, FanficInfo, FanficOverlap, FanficSource, FanficSourceBrief,
-  FanficSpecInput, SourceCards,
+  FanficSpecInput, FanficTemplateCatalog, SourceCards,
 } from './types'
 
+type FanficSourceCommon = { title?: string; focus?: string[]; depth?: FanficDepth; template_id?: string }
 export type FanficSourceInput =
-  | { source: 'paste'; text: string; title?: string; focus?: string[]; depth?: FanficDepth }
-  | { source: 'txt'; file: File; title?: string; focus?: string[]; depth?: FanficDepth }
+  | ({ source: 'paste'; text: string; web_supplement?: boolean } & FanficSourceCommon)
+  | ({ source: 'txt'; file: File; web_supplement?: boolean } & FanficSourceCommon)
+  /** v0.11.1 联网取材：只填作品名（title 必填） */
+  | ({ source: 'search'; title: string } & Omit<FanficSourceCommon, 'title'>)
 export type FanficPatchInput = Partial<Pick<FanficSpecInput, 'fidelity' | 'direction' | 'extra_source_ids' | 'notes'>>
 
 export const fanficApi = {
   directions: () => get<FanficCatalog>('/fanfic/directions'),
+  /** v0.11.1 热门同人题材模板 + 联网搜索可用状态 */
+  templates: () => get<FanficTemplateCatalog>('/fanfic/templates'),
+  /** v0.11.1 已有原著资料联网补充：Job（kind=fanfic_supplement），result = {source, source_id, added, warnings} */
+  supplementSource: (id: number, b: { focus?: string[]; depth?: FanficDepth } = {}) => viaJobId(post<{ job_id: number }>(`/fanfic/sources/${id}/supplement`, b)),
   sources: () => get<FanficSourceBrief[]>('/fanfic/sources'),
   source: (id: number) => get<FanficSource>(`/fanfic/sources/${id}`),
   /** Job（kind=fanfic_source），result = {source, source_id} */
@@ -413,6 +420,8 @@ export const fanficApi = {
       if (b.title) fd.append('title', b.title)
       if (b.focus?.length) fd.append('focus', b.focus.join(','))
       if (b.depth) fd.append('depth', b.depth)
+      if (b.web_supplement) fd.append('web_supplement', '1')
+      if (b.template_id) fd.append('template_id', b.template_id)
       return viaJobId(request('POST', '/fanfic/sources', fd))
     }
     return viaJobId(post('/fanfic/sources', b))
@@ -436,6 +445,7 @@ export const fanficApi = {
 
 export const fqk = {
   directions: ['fanfic', 'directions'] as const,
+  templates: ['fanfic', 'templates'] as const,
   sources: ['fanfic', 'sources'] as const,
   source: (id: number) => ['fanfic', 'sources', id] as const,
   book: (bookId: number) => ['fanfic', 'book', bookId] as const,

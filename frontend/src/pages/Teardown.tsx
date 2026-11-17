@@ -153,7 +153,7 @@ function History() {
       {!list.length ? (
         <EmptyState kind="book" title="还没有拆过书" desc="在左边选一本榜单书或导入正文，点「开始拆书」。" />
       ) : (
-        <ul className="grid gap-2 xl:grid-cols-2">
+        <ul className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]">
           {list.map((t) => (
             <li key={t.id}>
               <Link to={`/teardown/${t.id}`} className="card-hover focus-ring flex min-h-[64px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-3.5 py-3">

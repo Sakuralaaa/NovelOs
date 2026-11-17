@@ -238,7 +238,7 @@ function SparkPath({ onBack }: { onBack: () => void }) {
         <>
           <ResultHead n={res.length} onAgain={() => setStep(1)} />
           {ideas.isLoading ? <Thinking text="读取选题…" rows={1} /> : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{res.map((i) => <IdeaMini key={i.id} idea={i} onOpen={() => nav(`/ideas/${i.id}`)} />)}</div>
+            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]">{res.map((i) => <IdeaMini key={i.id} idea={i} onOpen={() => nav(`/ideas/${i.id}`)} />)}</div>
           )}
         </>
       )}
@@ -553,7 +553,7 @@ function FusionPath({ onBack }: { onBack: () => void }) {
               <div className="mb-3 flex h-2.5 overflow-hidden rounded-full bg-muted">
                 {refs.map((r, k) => <motion.div key={r.key} layout className="h-full" style={{ width: `${pct(r.weight)}%`, background: SLOT_COLORS[k] }} />)}
               </div>
-              <div className="grid gap-2.5 md:grid-cols-3">
+              <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">
                 {refs.map((r, k) => (
                   <div key={r.key} className="rounded-xl border bg-surface p-2.5">
                     <div className="flex items-center gap-2.5">
@@ -638,7 +638,7 @@ function FusionResults({ res, onOpen, opening }: { res: FusionResult; onOpen: (i
         </div>
       )}
       {ideas.length ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {ideas.map((i, k) => <IdeaMini key={i.id || k} idea={i} busy={opening === k} label={i.id ? '打开' : '保存并打开'} onOpen={() => onOpen(i, k)} />)}
         </div>
       ) : <div className="rounded-xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">这次没有可用的结果，换个配比或补充说明再试</div>}

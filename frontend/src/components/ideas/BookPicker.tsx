@@ -74,12 +74,12 @@ export function BookPicker({ selected, onToggle, max = 3, single, initial }: {
       )}
 
       {q.isLoading ? (
-        <div className="grid gap-2 md:grid-cols-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[76px] rounded-xl" />)}</div>
+        <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[76px] rounded-xl" />)}</div>
       ) : !list.length ? (
         <div className="rounded-xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">{items.length ? '没有匹配的书' : '这个榜还没有数据，先去热点雷达刷新榜单'}</div>
       ) : (
         <>
-          <div className="grid gap-2 md:grid-cols-2">
+          <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]">
             {list.slice(0, limit).map((i, n) => {
               const on = isSel(i)
               const dis = !single && !on && full
@@ -92,7 +92,7 @@ export function BookPicker({ selected, onToggle, max = 3, single, initial }: {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold leading-snug">{i.title}</span>
                     <span className="num mt-0.5 block truncate text-[12px] text-muted-foreground">{i.author || '佚名'} · {chapterText(i.chapter_count)} · 在读 {fmtNum(i.read_count)}</span>
-                    <span className="mt-1 inline-block rounded bg-muted/80 px-1.5 text-[11px] leading-[18px] text-muted-foreground">{i.category}</span>
+                    <span className="mt-1 inline-block max-w-full truncate whitespace-nowrap rounded bg-muted/80 px-1.5 align-top text-[11px] leading-[18px] text-muted-foreground">{i.category}</span>
                   </span>
                   <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition', on ? 'border-primary bg-primary text-primary-foreground' : 'text-muted-foreground group-hover:border-foreground/30')}>
                     {on ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <Plus className="h-4 w-4" />}

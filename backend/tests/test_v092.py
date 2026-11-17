@@ -387,6 +387,6 @@ def test_new_prompts_listed_and_wording(client: TestClient) -> None:
 
 
 def test_version_092(client: TestClient) -> None:
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10."))
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11."))
     assert "## v0.9.2" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## v0.9.2" in (ROOT / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")

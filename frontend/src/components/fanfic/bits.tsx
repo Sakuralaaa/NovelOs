@@ -9,6 +9,9 @@ export const DEPTHS: { value: FanficDepth; label: string; desc: string }[] = [
   { value: 'deep', label: '深入', desc: '4 轮提炼，配角、时间线更全，耗时更长' },
 ]
 export const depthLabel = (d?: string) => DEPTHS.find((x) => x.value === d)?.label ?? d ?? ''
+/** v0.11.1 来源标签：联网 / 粘贴 / TXT（原文 + 联网补充显示「+联网」） */
+export const sourceLabel = (s: { source: string; web_rounds?: number }) =>
+  s.source === 'search' ? '联网' : `${s.source === 'txt' ? 'TXT' : '粘贴'}${s.web_rounds ? '+联网' : ''}`
 
 export const FIDELITY_FALLBACK: { id: FanficFidelity; label: string; desc: string; pass_score: number }[] = [
   { id: 'strict', label: '严格遵循', desc: '原著设定与时间线都不改', pass_score: 80 },

@@ -746,7 +746,7 @@ export type FanficFidelity = 'strict' | 'moderate' | 'loose'
 export type FanficDirectionId =
   | 'canon_fill' | 'if_line' | 'transmigration' | 'rebirth' | 'system' | 'au_modern' | 'au_ancient' | 'side_pov'
   | 'cp' | 'villain_redemption' | 'epilogue' | 'crossover'
-export type FanficSourceType = 'paste' | 'txt'
+export type FanficSourceType = 'paste' | 'txt' | 'search'
 export interface SourceCharacter {
   name: string; aliases: string[]; role: string; personality: string; speech_style: string; catchphrases: string[]
   relations: { target: string; relation: string }[]; abilities: string[]; limits: string[]; notes: string
@@ -763,8 +763,19 @@ export interface FanficSourceBrief {
   id: number; title: string; source: FanficSourceType; chars: number; total_chars: number; depth: FanficDepth; focus: string[]
   completeness: number; counts: { characters: number; factions: number; timeline: number; scenes: number }
   warnings_count: number; used_by: number[]; model: string; created_at: string; updated_at: string
+  /** v0.11.1 联网取材：所用热门模板 id、联网检索轮数、来源链接数 */
+  template_id?: string; web_rounds?: number; refs_count?: number
 }
-export interface FanficSource extends FanficSourceBrief { cards: SourceCards; warnings: string[] }
+export interface FanficSource extends FanficSourceBrief { cards: SourceCards; warnings: string[]; refs?: string[] }
+// v0.11.1 热门同人题材模板
+export type FanficTemplateCategory = '国漫' | '网文' | '欧美' | '日漫' | '游戏'
+export interface FanficTemplateStyle { label: string; desc: string; direction: FanficDirectionId }
+export interface FanficTemplate {
+  id: string; title: string; aliases: string[]; category: FanficTemplateCategory; intro: string; characters: string[]
+  search_focus: string[]; styles: FanficTemplateStyle[]; directions: FanficDirectionId[]
+}
+export interface FanficSearchStatus { mode: 'web' | 'mock' | 'none'; available: boolean; hint: string }
+export interface FanficTemplateCatalog { templates: FanficTemplate[]; categories: FanficTemplateCategory[]; search: FanficSearchStatus }
 export interface BookFanfic {
   source_id: number; source_title: string; fidelity: FanficFidelity; direction: FanficDirectionId
   extra_source_ids: number[]; notes: string; copyright_ack: boolean; copyright_ack_at: string; attached_at: string

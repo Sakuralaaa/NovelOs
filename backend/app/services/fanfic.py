@@ -19,7 +19,7 @@ from sqlmodel import Session, select
 
 from app.db import session_scope
 from app.jobs.manager import JobContext
-from app.llm.gateway import get_gateway
+from app.llm.gateway import get_gateway, is_mock_mode
 from app.models.tables import Book, Card, Chapter, FanficSource
 from app.services.common import Conflict, NotFound
 from app.services.fanfic_directions import DIRECTION_BY_ID, DIRECTION_IDS, FIDELITY, FIDELITIES
@@ -31,7 +31,7 @@ MAX_BYTES = 30 * 1024 * 1024  # 导入上限 30MB
 FP_CHARS = 200_000  # 最多取用的原文字数（提炼 + 指纹），超出部分按重点/开头/均匀抽样取
 PROMPT_CHUNK = 12_000  # 每轮提炼进提示词的字数
 DEPTHS = {"quick": 1, "standard": 2, "deep": 4}
-SOURCES = ("paste", "txt")
+SOURCES = ("paste", "txt", "search")  # v0.11.1 search：联网取材（只填作品名）
 CARD_PARTS = ("characters", "world", "factions", "timeline", "scenes")
 IMPORT_PARTS = ("characters", "factions", "world", "locations")
 MAX_CHARS_CARDS = 30
@@ -77,11 +77,21 @@ def decode_txt(raw: bytes) -> str:
     raise FanficError("无法识别文件编码，请转成 UTF-8 或 GBK 的 TXT")
 
 
-def check_input(source: str, text: str | None, depth: str = "standard") -> None:
+def check_input(source: str, text: str | None, depth: str = "standard", title: str | None = None, web: bool = False) -> None:
+    """同步预检（路由里调，Job 里再调一次）。source=search 只要作品名；web=True（原文 + 联网补充）也要作品名。"""
     if source not in SOURCES:
-        raise FanficError("source 只能是 paste / txt", 422)
+        raise FanficError("source 只能是 paste / txt / search", 422)
     if depth not in DEPTHS:
         raise FanficError("depth 只能是 quick / standard / deep", 422)
+    if source == "search":
+        if not (title or "").strip():
+            raise FanficError("联网取材请填写作品名", 422)
+        require_search()
+        return
+    if web:
+        if not (title or "").strip():
+            raise FanficError("联网补充需要填写原著名（作品名），用来检索", 422)
+        require_search()
     body = (text or "").strip()
     if not body:
         raise FanficError("请粘贴或上传原著文本")
@@ -329,11 +339,12 @@ def source_brief(s: Session, r: FanficSource) -> dict[str, Any]:
             "focus": list(r.focus or []), "completeness": completeness(c),
             "counts": {k: len(c.get(k) or []) for k in ("characters", "factions", "timeline", "scenes")},
             "warnings_count": len(r.warnings or []), "used_by": _used_by(s, int(r.id or 0)), "model": r.model,
+            "template_id": r.template_id or "", "web_rounds": int(r.web_rounds or 0), "refs_count": len(r.refs or []),
             "created_at": _iso(r.created_at), "updated_at": _iso(r.updated_at)}
 
 
 def source_out(s: Session, r: FanficSource) -> dict[str, Any]:
-    return {**source_brief(s, r), "cards": normalize_cards(r.cards), "warnings": list(r.warnings or [])}
+    return {**source_brief(s, r), "cards": normalize_cards(r.cards), "warnings": list(r.warnings or []), "refs": list(r.refs or [])}
 
 
 def _get(s: Session, source_id: int) -> FanficSource:
@@ -355,19 +366,16 @@ def list_sources() -> list[dict[str, Any]]:
 
 # ------------------------------------------------------------------ 原著资料：提炼（任务）
 
-def create_source(text: str, source: str, title: str | None, focus: list[str], depth: str, ctx: JobContext) -> dict[str, Any]:
-    check_input(source, text, depth)
-    body = text.strip()
-    focus = [f.strip()[:20] for f in focus if f and f.strip()][:10]
-    ctx.progress(5, "取材：挑出需要的部分")
+def _extract_text(body: str, focus: list[str], depth: str, ctx: JobContext, lo: int, hi: int) -> tuple[str, list[int], list[str], list[dict[str, Any]]]:
+    """原文提炼：返回（取用的原文、指纹、猜到的人名、各轮提炼结果）。"""
+    ctx.progress(lo, "取材：挑出需要的部分")
     selected, chunks = select_material(body, focus, depth)
     fp_list = fingerprint(selected)
-    fp = set(fp_list)
     names = guess_names(selected)
     gw = get_gateway()
     parts: list[dict[str, Any]] = []
     for k, chunk in enumerate(chunks, 1):
-        ctx.progress(10 + int(70 * (k - 1) / len(chunks)), f"提炼原著设定卡：第 {k}/{len(chunks)} 段")
+        ctx.progress(lo + 5 + int((hi - lo - 5) * (k - 1) / len(chunks)), f"提炼原著设定卡：第 {k}/{len(chunks)} 段")
         meta_lines = [f"程序从原文里猜到的高频人物（仅供参考，可能有误）：{'、'.join(names) or '无'}"]
         if focus:
             meta_lines.append(f"作者想重点整理：{'、'.join(focus)}")
@@ -377,23 +385,343 @@ def create_source(text: str, source: str, title: str | None, focus: list[str], d
                             meta={"names": names, "part": k, "focus": focus})
         if isinstance(data, dict):
             parts.append(data)
-    ctx.progress(85, "合并设定卡、和原文查重")
-    cards = merge_parts(parts)
-    cards, warns = scrub(cards, fp, drop=True)
-    if not cards["characters"] and not cards["world"]["summary"] and not cards["timeline"]:
-        raise ValueError("没能从原文提炼出设定，请换一段包含人物对话和情节的原文")
-    if len(_norm(body)) > len(_norm(selected)):
-        warns.insert(0, f"原文约 {len(_norm(body))} 字，按重点/开头/抽样取用了约 {len(_norm(selected))} 字")
+    return selected, fp_list, names, parts
+
+
+def _empty(cards: dict[str, Any]) -> bool:
+    return not cards["characters"] and not cards["world"]["summary"] and not cards["timeline"]
+
+
+def create_source(text: str, source: str, title: str | None, focus: list[str], depth: str, ctx: JobContext,
+                  web: bool = False, template_id: str | None = None) -> dict[str, Any]:
+    """原著资料：paste/txt 从原文提炼（web=True 时再联网补充，以原文为准）；search 只按作品名联网取材。"""
+    from app.services.fanfic_templates import find_template
+
+    check_input(source, text, depth, title, web)
+    focus = [f.strip()[:20] for f in focus if f and f.strip()][:10]
+    tpl = find_template(template_id, title)
+    work = _s(title, 60)
+    refs: list[str] = []
+    rounds = 0
+    if source == "search":
+        cards, refs, warns, rounds = gather_web(work, focus, depth, tpl, ctx, 5, 90)
+        if _empty(cards):
+            raise ValueError(f"联网没有检索到《{work}》足够可靠的设定，请检查作品名，或改用粘贴/上传原文")
+        warns.insert(0, f"资料来自联网检索（{rounds} 轮），可能有误或混入同人二设，请逐条核对；不确定的内容没有写入。纯联网资料没有原文指纹，无法做原著重合检查")
+        selected, body, fp_list, names = "", "", [], []
+    else:
+        body = text.strip()
+        selected, fp_list, names, parts = _extract_text(body, focus, depth, ctx, 5, 50 if web else 80)
+        ctx.progress(52 if web else 85, "合并设定卡、和原文查重")
+        cards = merge_parts(parts)
+        cards, warns = scrub(cards, set(fp_list), drop=True)
+        if web:
+            wcards, refs, wwarn, rounds = gather_web(work, focus, depth, tpl, ctx, 55, 88, covered=_covered(cards))
+            wcards, swarn = scrub(wcards, set(fp_list), drop=True)
+            cards, mwarn, _ = merge_priority(cards, wcards)
+            warns += wwarn + swarn + mwarn
+        if _empty(cards):
+            raise ValueError("没能从原文提炼出设定，请换一段包含人物对话和情节的原文")
+        if len(_norm(body)) > len(_norm(selected)):
+            warns.insert(0, f"原文约 {len(_norm(body))} 字，按重点/开头/抽样取用了约 {len(_norm(selected))} 字")
+    ctx.progress(92, "保存原著资料")
     with session_scope() as s:
         n = len(list(s.exec(select(FanficSource.id)))) + 1
         auto = (names[0] + "相关原著") if names else ""
-        row = FanficSource(title=_s(title, 60) or auto or f"原著资料 #{n}", source=source, chars=len(_norm(selected)),
+        row = FanficSource(title=work or auto or f"原著资料 #{n}", source=source, chars=len(_norm(selected)),
                            total_chars=len(_norm(body)), depth=depth, focus=focus, cards=cards, warnings=warns,
-                           fingerprint=fp_list, model=_model_name())
+                           fingerprint=fp_list, model=_model_name(), refs=refs, template_id=(tpl or {}).get("id", ""),
+                           web_rounds=rounds)
         s.add(row)
         s.commit()
         s.refresh(row)
         return {"source": source_out(s, row), "source_id": row.id}
+
+
+# ------------------------------------------------------------------ v0.11.1 联网取材 / 联网补充
+
+WEB_ROUNDS = {"quick": 2, "standard": 4, "deep": 6}
+MAX_FOCUS_ROUNDS = 6
+SEARCH_WORKERS = 3
+SEARCH_ANSWER_MAX = 4000  # 每轮检索结果最多取用的字数
+NO_SEARCH_MSG = "没有配置联网搜索模型：请到「设置 → 任务路由 → 联网搜索」选一个能联网的模型后再试（也可以改用粘贴/上传原文）"
+FANFIC_SEARCH_SYSTEM = (
+    "你是同人创作的原著资料整理员，可以联网搜索。用户会给出一部作品名和一个检索主题，请检索百科、设定集、官方介绍、维基等可靠来源，"
+    "用中文、用你自己的话整理成可直接用于同人写作的设定资料。\n"
+    "要求：\n"
+    "1. 只写事实性设定：人物名（保留原著写法和常见别称）、身份定位、性格、说话方式与口头禅、人物关系、能力与上限、"
+    "世界规则与力量体系等级、势力立场与成员、关键事件的先后顺序与影响、名场面的简要概括。\n"
+    "2. 不要摘抄原著正文或大段台词，口头禅只写短句。\n"
+    "3. 区分原著设定与同人二设；小说、动画、游戏、电影等版本有差异时注明版本，默认以原著为准。\n"
+    "4. 查不到或说法有争议时直说「不确定」，不要编造。\n"
+    "5. 分条列出，600~1200 字为宜；末尾列出 3~6 个来源链接（完整 URL）。"
+)
+_URL_RE = re.compile(r"https?://[^\s<>\"'）)\]】」』，。、；]+")
+
+
+def search_mode() -> str:
+    """mock：没有任何渠道（演示数据）；web：路由里配了联网搜索模型；none：有渠道但没配搜索。"""
+    with session_scope() as s:
+        if is_mock_mode(s):
+            return "mock"
+    return "web" if get_gateway().has_search() else "none"
+
+
+def require_search() -> None:
+    if search_mode() == "none":
+        raise FanficError(NO_SEARCH_MSG, 422)
+
+
+def search_status() -> dict[str, Any]:
+    mode = search_mode()
+    return {"mode": mode, "available": mode != "none", "hint": NO_SEARCH_MSG if mode == "none" else
+            ("演示模式：未联网，返回演示资料" if mode == "mock" else "")}
+
+
+def plan_queries(work: str, focus: list[str], depth: str, tpl: dict[str, Any] | None = None,
+                 supplement: bool = False) -> list[tuple[str, str]]:
+    """按深度列检索轮次：quick 2 / standard 4 / deep 6（有模板再加 1）；focus 每项各一轮（最多 6）。"""
+    hints = list((tpl or {}).get("search_focus") or [])
+    chars = list((tpl or {}).get("characters") or [])
+    names = f"《{work}》"
+    base = [
+        ("概况与世界观", f"{names}作品概况、世界观设定、力量体系与等级划分" + (f"（重点：{'；'.join(hints[:2])}）" if hints else "")),
+        ("主要人物", f"{names}主要人物的身份、性格、说话方式、口头禅、人物关系、能力与上限" + (f"，包括{'、'.join(chars[:8])}" if chars else "")),
+        ("时间线与名场面", f"{names}主线剧情的关键事件（按先后顺序）与经典名场面"),
+        ("势力与地点", f"{names}主要势力/组织的立场与成员，以及重要地点"),
+        ("力量体系细节", f"{names}" + ("；".join(hints[2:4]) if len(hints) > 2 else "力量体系的等级细节、能力限制与代价")),
+        ("后续剧情与结局", f"{names}中后期剧情走向、结局与续作关系"),
+        ("配角与反派", f"{names}重要配角与反派的性格、关系、能力与结局"),
+    ]
+    n = WEB_ROUNDS.get(depth, 4) + (1 if depth == "deep" and tpl else 0)
+    rounds = base[:n]
+    if supplement and not any(lbl == "后续剧情与结局" for lbl, _ in rounds):
+        rounds.append(base[5])
+    if depth == "deep" and len(hints) > 4:
+        rounds.append(("设定细节", f"{names}" + "；".join(hints[4:6])))
+    for f in focus[:MAX_FOCUS_ROUNDS]:
+        rounds.append((f"重点·{f}", f"{names}中「{f}」的资料：如果是人物，写身份、性格、说话方式、口头禅、关系、能力与上限、关键经历；"
+                                    f"如果是一段剧情或范围，写经过、出场人物与影响"))
+    return rounds
+
+
+def _mock_search(work: str, label: str, tpl: dict[str, Any] | None, focus: list[str]) -> str:
+    names = [*focus, *((tpl or {}).get("characters") or [])][:4] or [f"{work}主角"]
+    tid = (tpl or {}).get("id") or "work"
+    lines = [f"（演示数据：mock 模式没有联网）《{work}》· {label}",
+             f"- {names[0]}是故事的核心人物，经历从弱到强的成长。",
+             *[f"- {n}与{names[0]}关系密切，在主线里多次登场。" for n in names[1:]],
+             "- 世界存在明确的力量等级，越级挑战需要付出代价。",
+             f"来源：https://example.com/novelos-demo/{tid}/{zlib.crc32(label.encode()) % 1000}"]
+    return "\n".join(lines)
+
+
+def _covered(cards: dict[str, Any]) -> str:
+    """给检索的写作背景：原文已经覆盖了哪些人物与剧情，让搜索侧重补没覆盖的部分。"""
+    names = [c["name"] for c in cards.get("characters") or []][:12]
+    tl = [t["event"] for t in cards.get("timeline") or []]
+    bits = []
+    if names:
+        bits.append("作者上传的原文已覆盖这些人物：" + "、".join(names))
+    if tl:
+        bits.append("原文剧情大致到：" + tl[-1][:40])
+    if bits:
+        bits.append("请侧重补充原文没有覆盖的人物、设定和后续剧情")
+    return "；".join(bits)
+
+
+def gather_web(work: str, focus: list[str], depth: str, tpl: dict[str, Any] | None, ctx: JobContext, lo: int, hi: int,
+               covered: str = "", supplement: bool = False) -> tuple[dict[str, Any], list[str], list[str], int]:
+    """多轮联网检索 → 交给 fanfic_source 提炼 → merge_parts。返回（设定卡、来源链接、warnings、成功检索轮数）。"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    mode = search_mode()
+    if mode == "none":
+        raise FanficError(NO_SEARCH_MSG, 422)
+    rounds = plan_queries(work, focus, depth, tpl, supplement=supplement or bool(covered))
+    gw = get_gateway()
+    warns: list[str] = []
+    results: dict[int, tuple[str, str]] = {}
+    mid = lo + int((hi - lo) * 0.6)
+    ctx.progress(lo, f"联网检索《{work}》：共 {len(rounds)} 轮" + ("（演示）" if mode == "mock" else ""))
+
+    def one(i: int) -> tuple[int, str]:
+        label, q = rounds[i]
+        if mode == "mock":
+            return i, _mock_search(work, label, tpl, focus)
+        return i, (gw.search(q, covered, system=FANFIC_SEARCH_SYSTEM) or "")
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=SEARCH_WORKERS) as ex:
+        futs = {ex.submit(one, i): i for i in range(len(rounds))}
+        for fut in as_completed(futs):
+            i = futs[fut]
+            done += 1
+            try:
+                _, ans = fut.result()
+                if ans.strip():
+                    results[i] = (rounds[i][0], ans.strip()[:SEARCH_ANSWER_MAX])
+                else:
+                    warns.append(f"联网检索「{rounds[i][0]}」没有返回结果")
+            except Exception as e:  # noqa: BLE001
+                warns.append(f"联网检索「{rounds[i][0]}」失败：{str(e)[:80]}")
+            ctx.progress(lo + int((mid - lo) * done / len(rounds)), f"联网检索：{done}/{len(rounds)} 轮（{rounds[i][0]}）")
+    if not results:
+        raise ValueError("联网检索全部失败：" + "；".join(warns[-3:]))
+    refs: list[str] = []
+    for i in sorted(results):
+        for u in _URL_RE.findall(results[i][1]):
+            u = u.rstrip(".,;:!?")
+            if u not in refs:
+                refs.append(u)
+    blocks = [f"【检索主题：{label}】\n{text}" for label, text in (results[i] for i in sorted(results))]
+    chunks: list[str] = []
+    cur = ""
+    for b in blocks:
+        if cur and len(cur) + len(b) + 2 > PROMPT_CHUNK:
+            chunks.append(cur)
+            cur = ""
+        cur = (cur + "\n\n" + b).strip() if cur else b[:PROMPT_CHUNK]
+    if cur:
+        chunks.append(cur)
+    material = "\n".join(blocks)
+    names = list(dict.fromkeys([*focus, *((tpl or {}).get("characters") or []), *guess_names(material)]))[:12]
+    parts: list[dict[str, Any]] = []
+    for k, chunk in enumerate(chunks, 1):
+        ctx.progress(mid + int((hi - mid) * (k - 1) / len(chunks)), f"整理联网资料：第 {k}/{len(chunks)} 段")
+        meta_lines = [f"作品：《{work}》"]
+        if names:
+            meta_lines.append(f"可能的主要人物（仅供参考）：{'、'.join(names)}")
+        if focus:
+            meta_lines.append(f"作者想重点整理：{'、'.join(focus)}")
+        if covered:
+            meta_lines.append(covered)
+        user = render("fanfic_source_web", work=work, part=k, parts=len(chunks), meta="\n".join(meta_lines), text=chunk,
+                      notes="材料来自联网检索，可能有误；不确定的不写。")
+        data = get_gateway().chat_json("fanfic_source", system_prompt("fanfic_source"), user, role="reviewer",
+                                       meta={"names": names, "part": k, "focus": focus, "web": True})
+        if isinstance(data, dict):
+            parts.append(data)
+    return merge_parts(parts), refs[:30], warns, len(results)
+
+
+def _diff(a: str, b: str) -> bool:
+    """两个短字段明显不一致（都非空、互不包含）。"""
+    a, b = _norm(a), _norm(b)
+    return bool(a and b and a not in b and b not in a)
+
+
+def merge_priority(base: dict[str, Any], extra: dict[str, Any]) -> tuple[dict[str, Any], list[str], dict[str, int]]:
+    """以 base（原文提炼 / 已有资料）为准合并 extra（联网结果）：只补空字段和缺的条目，冲突以 base 为准并记 warning。"""
+    out = normalize_cards(base)
+    ex = normalize_cards(extra)
+    warns: list[str] = []
+    added = {"characters": 0, "factions": 0, "timeline": 0, "scenes": 0, "rules": 0, "locations": 0}
+    for c in ex["characters"]:
+        keys = {c["name"], *c["aliases"]}
+        hit = next((x for x in out["characters"] if keys & {x["name"], *x["aliases"]}), None)
+        if hit is None:
+            if len(out["characters"]) >= MAX_CHARS_CARDS:
+                continue
+            c["notes"] = ("（联网补充，可能有误，请核对）" + c["notes"])[:200]
+            out["characters"].append(c)
+            added["characters"] += 1
+            continue
+        if _diff(hit["role"], c["role"]):
+            warns.append(f"联网资料与原文不一致：角色「{hit['name']}」定位（原文：{hit['role']}；联网：{c['role']}），已以原文为准")
+        for k in ("role", "personality", "speech_style", "notes"):
+            hit[k] = hit[k] or c[k]
+        for k in ("aliases", "abilities", "limits"):
+            hit[k] = list(dict.fromkeys(hit[k] + [x for x in c[k] if x != hit["name"]]))[:10]
+        hit["catchphrases"] = hit["catchphrases"] or c["catchphrases"]
+        mine = {r["target"]: r["relation"] for r in hit["relations"]}
+        for r in c["relations"]:
+            if r["target"] not in mine:
+                hit["relations"].append(r)
+            elif _diff(mine[r["target"]], r["relation"]):
+                warns.append(f"联网资料与原文不一致：「{hit['name']}」与「{r['target']}」的关系（原文：{mine[r['target']]}；联网：{r['relation']}），已以原文为准")
+        hit["relations"] = hit["relations"][:12]
+    w, xw = out["world"], ex["world"]
+    w["summary"] = w["summary"] or xw["summary"]
+    for r in xw["rules"]:
+        if r not in w["rules"] and len(w["rules"]) < 12:
+            w["rules"].append(r)
+            added["rules"] += 1
+    have = {x["name"] for x in w["locations"]}
+    for x in xw["locations"]:
+        if x["name"] not in have and len(w["locations"]) < 20:
+            w["locations"].append(x)
+            added["locations"] += 1
+    for f in ex["factions"]:
+        hit = next((x for x in out["factions"] if x["name"] == f["name"]), None)
+        if hit is None:
+            out["factions"].append(f)
+            added["factions"] += 1
+            continue
+        if _diff(hit["stance"], f["stance"]):
+            warns.append(f"联网资料与原文不一致：势力「{hit['name']}」立场（原文：{hit['stance']}；联网：{f['stance']}），已以原文为准")
+        hit["stance"] = hit["stance"] or f["stance"]
+        hit["notes"] = hit["notes"] or f["notes"]
+        hit["members"] = list(dict.fromkeys(hit["members"] + f["members"]))[:12]
+    seen_ev = {_norm(t["event"]) for t in out["timeline"]}
+    for t in ex["timeline"]:
+        if _norm(t["event"]) not in seen_ev:
+            seen_ev.add(_norm(t["event"]))
+            out["timeline"].append(t)
+            added["timeline"] += 1
+    seen_sc = {_norm(x["title"]) for x in out["scenes"]} | {_norm(x["summary"]) for x in out["scenes"]}
+    for x in ex["scenes"]:
+        if _norm(x["title"]) not in seen_sc and _norm(x["summary"]) not in seen_sc:
+            out["scenes"].append(x)
+            added["scenes"] += 1
+    cards = normalize_cards(out)
+    total = sum(added.values())
+    if total:
+        warns.insert(0, "联网补充：" + "、".join(f"{lbl} {added[k]}" for k, lbl in (("characters", "角色"), ("factions", "势力"),
+                     ("timeline", "时间线"), ("scenes", "名场面"), ("rules", "世界规则"), ("locations", "地点")) if added[k])
+                     + "（以原文为准，联网内容可能有误，请核对）")
+    else:
+        warns.insert(0, "联网补充：没有发现原文之外的新内容")
+    return cards, warns, added
+
+
+def check_supplement(source_id: int) -> None:
+    with session_scope() as s:
+        _get(s, source_id)
+    require_search()
+
+
+def supplement_source(source_id: int, focus: list[str] | None, depth: str, ctx: JobContext) -> dict[str, Any]:
+    """给已有的原著资料联网补充（后台 Job）：以已有设定卡为准，只补空缺，冲突记 warning。"""
+    from app.services.fanfic_templates import find_template
+
+    if depth not in DEPTHS:
+        raise FanficError("depth 只能是 quick / standard / deep", 422)
+    with session_scope() as s:
+        r = _get(s, source_id)
+        work, tid = r.title, r.template_id
+        base = normalize_cards(r.cards)
+        fp = set(r.fingerprint or [])
+        fc = [f.strip()[:20] for f in (focus if focus is not None else list(r.focus or [])) if f and f.strip()][:10]
+    require_search()
+    tpl = find_template(tid, work)
+    wcards, refs, wwarn, rounds = gather_web(work, fc, depth, tpl, ctx, 5, 88, covered=_covered(base), supplement=True)
+    wcards, swarn = scrub(wcards, fp, drop=True)
+    cards, mwarn, added = merge_priority(base, wcards)
+    new_warns = wwarn + swarn + mwarn
+    ctx.progress(92, "保存补充结果")
+    with session_scope() as s:
+        r = _get(s, source_id)
+        r.cards = cards
+        r.warnings = list(dict.fromkeys(list(r.warnings or []) + new_warns))[-50:]
+        r.refs = list(dict.fromkeys(list(r.refs or []) + refs))[:50]
+        r.web_rounds = int(r.web_rounds or 0) + rounds
+        r.template_id = r.template_id or (tpl or {}).get("id", "")
+        r.updated_at = datetime.now(timezone.utc)
+        s.add(r)
+        s.commit()
+        s.refresh(r)
+        return {"source": source_out(s, r), "source_id": r.id, "added": added, "warnings": new_warns}
 
 
 def _model_name() -> str:
@@ -675,6 +1003,15 @@ def overlap_stats(text: str, fp: set[int], exclude: set[int] | None = None, n: i
             "warning": warn, "samples": samples}
 
 
+def _overlap(text: str, fp: set[int], ex: set[int]) -> dict[str, Any]:
+    """v0.11.1：纯联网资料没有原文指纹，重合检查标 no_fingerprint 并说明，不报错。"""
+    res = overlap_stats(text, fp, ex)
+    if not fp:
+        res["no_fingerprint"] = True
+        res["warning"] = "这份原著资料来自联网检索，没有原文指纹，无法做原著重合检查；如有原文可上传原著并联网补充"
+    return res
+
+
 def _book_source(s: Session, book_id: int) -> tuple[Book, FanficSource | None]:
     from app.services import common
 
@@ -706,7 +1043,7 @@ def chapter_overlap(chapter_id: int, save: bool = True) -> dict[str, Any]:
         if src is None:
             raise FanficError("原著资料已删除，无法比对")
         fp, ex = _fp_all(s, book, src)
-        res = {**overlap_stats(ch.content or "", fp, ex), "content_hash": content_hash(ch.content or ""), "checked_at": _now()}
+        res = {**_overlap(ch.content or "", fp, ex), "content_hash": content_hash(ch.content or ""), "checked_at": _now()}
         if save:
             ch.fanfic_meta = {**(ch.fanfic_meta or {}), "overlap": res}
             s.add(ch)
@@ -853,7 +1190,7 @@ def run_ooc(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
     result = {"fidelity": fidelity, "fidelity_label": rule["label"], "pass_score": pass_score, "overall": overall, "verdict": verdict,
               "characters": chars_out, "summary": _s(raw.get("summary"), 300) or ("本章没有出场原著角色" if not present else ""),
               "ignored_issues": ignored, "content_hash": h, "checked_at": _now(), "model": _model_name()}
-    overlap = {**overlap_stats(content, fp, ex), "content_hash": h, "checked_at": _now()}
+    overlap = {**_overlap(content, fp, ex), "content_hash": h, "checked_at": _now()}
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
         if ch is not None:

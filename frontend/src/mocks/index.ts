@@ -6,11 +6,12 @@ import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo, BibleItem, BibleOp, BibleProposal, BookInfo,
   ForeshadowPlanItem, Impact, OutlineSyncItem, Trope, TropeHit,
   Book, Card, Channel, Chapter, ChapterVariant, Foreshadow, Idea, Job, Lint, OutlineNode, Package,
-  RadarConfig, RadarSnapshot, Review, Routing, Style, Teardown, TrendReportBody,
+  RadarConfig, RadarSnapshot, Review, Routing, Style, Teardown, TrendReportBody, FanficTemplate,
 } from '@/lib/types'
 import { analyzeText } from '@/lib/textAnalysis'
 import { countWords } from '@/lib/utils'
 import { WANBEN_RESUMABLE, registerWanbenMocks } from './wanben'
+import { FF_TEMPLATES, FF_TEMPLATE_CATEGORIES } from './fanficTemplates'
 import { FEMALE_CATS, MALE_CATS, STYLE_SAMPLE, THICKEN_MAP, buildChapterText, coverDataUrl, makeRankItems } from './data'
 
 const now = () => new Date().toISOString()
@@ -1579,7 +1580,7 @@ const FF_CATALOG = {
   fidelities: Object.entries(FF_FIDELITY).map(([id, f]) => ({ id, label: f.label, desc: f.desc, pass_score: f.pass })),
   copyright_notice: '同人创作仅供个人创作与学习交流使用。原著资料只能来自你有权使用的文本；本工具不保存原文，只保存提炼出的设定卡与无法还原原文的指纹。对外发布前，请遵守发布平台的同人创作规则，并自行确认原著的授权范围；未经原著版权方授权，不得用于任何商业用途。',
 }
-type MFfSource = { id: number; title: string; source: 'paste' | 'txt'; chars: number; total_chars: number; depth: string; focus: string[]; cards: any; warnings: string[]; model: string; created_at: string; updated_at: string }
+type MFfSource = { id: number; title: string; source: 'paste' | 'txt' | 'search'; chars: number; total_chars: number; depth: string; focus: string[]; cards: any; warnings: string[]; model: string; created_at: string; updated_at: string; refs?: string[]; template_id?: string; web_rounds?: number }
 const ffSources: MFfSource[] = []
 const ffChapterMeta = new Map<number, { ooc?: any; overlap?: any }>()
 function ffCards(focus: string[]) {
@@ -1606,13 +1607,54 @@ function ffBrief(s: MFfSource) {
   const counts = { characters: c.characters.length, factions: c.factions.length, timeline: c.timeline.length, scenes: c.scenes.length }
   const completeness = Math.min(100, counts.characters * 8 + counts.factions * 5 + counts.timeline * 4 + counts.scenes * 4 + (c.world.summary ? 15 : 0) + c.world.rules.length * 3)
   return { id: s.id, title: s.title, source: s.source, chars: s.chars, total_chars: s.total_chars, depth: s.depth, focus: s.focus, completeness, counts, warnings_count: s.warnings.length,
-    used_by: db.books.filter((b) => b.fanfic && (b.fanfic.source_id === s.id || b.fanfic.extra_source_ids?.includes(s.id))).map((b) => b.id), model: s.model, created_at: s.created_at, updated_at: s.updated_at }
+    used_by: db.books.filter((b) => b.fanfic && (b.fanfic.source_id === s.id || b.fanfic.extra_source_ids?.includes(s.id))).map((b) => b.id), model: s.model, created_at: s.created_at, updated_at: s.updated_at,
+    template_id: s.template_id ?? '', web_rounds: s.web_rounds ?? 0, refs_count: s.refs?.length ?? 0 }
 }
-const ffOut = (s: MFfSource) => ({ ...ffBrief(s), cards: s.cards, warnings: s.warnings })
+const ffOut = (s: MFfSource) => ({ ...ffBrief(s), cards: s.cards, warnings: s.warnings, refs: s.refs ?? [] })
+// v0.11.1 联网取材（演示）：按模板人物生成设定卡，来源链接为演示地址
+const ffNorm = (x: string) => x.replace(/[\s·・:：]/g, '').toLowerCase()
+const ffFindTpl = (id?: string | null, title?: string) => FF_TEMPLATES.find((t) => t.id === id)
+  ?? (title ? FF_TEMPLATES.find((t) => [t.title, ...t.aliases].some((n) => ffNorm(n) === ffNorm(title))) : undefined)
+const ffWebRounds = (depth: string, focus: string[], tpl?: FanficTemplate) => ({ quick: 2, standard: 4, deep: 6 }[depth] ?? 4) + (depth === 'deep' && tpl ? 1 : 0) + Math.min(6, focus.length)
+function ffWebCards(work: string, focus: string[], tpl?: FanficTemplate) {
+  const names = [...new Set([...focus, ...(tpl?.characters ?? [])])].slice(0, 6)
+  if (!names.length) names.push(`${work}主角`)
+  return {
+    characters: names.map((n, k) => ({ name: n, aliases: [], role: k === 0 ? '主角' : '主要配角', personality: `${n}性格鲜明，有自己的坚持（演示，联网资料请核对）`, speech_style: k === 0 ? '话不多，关键时一句定调' : '语气随和',
+      catchphrases: [], relations: k ? [{ target: names[0], relation: '同伴' }] : [], abilities: ['（按原著体系补充）'], limits: [], notes: '' })),
+    world: { summary: tpl ? `${tpl.intro}（演示）` : `《${work}》的世界观概述（演示）`, rules: (tpl?.search_focus ?? ['力量体系等级']).slice(0, 3).map((x) => `${x}（演示，待核对）`), locations: [] },
+    factions: [], timeline: [{ order: 1, event: `${names[0]}踏上主线旅程（演示）`, characters: names.slice(0, 2), impact: '故事展开' }],
+    scenes: [],
+  }
+}
+const ffDemoRefs = (tpl?: FanficTemplate, n = 3) => Array.from({ length: n }, (_, i) => `https://example.com/novelos-demo/${tpl?.id ?? 'work'}/${i + 1}`)
+function ffMergeWeb(s: MFfSource, web: any) {
+  const have = new Set(s.cards.characters.map((c: any) => c.name))
+  const add = web.characters.filter((c: any) => !have.has(c.name)).map((c: any) => ({ ...c, notes: '（联网补充，可能有误，请核对）' }))
+  s.cards.characters.push(...add)
+  if (!s.cards.world.summary) s.cards.world.summary = web.world.summary
+  s.cards.world.rules = [...new Set([...s.cards.world.rules, ...web.world.rules])].slice(0, 12)
+  s.cards.timeline.push(...web.timeline.map((t: any, i: number) => ({ ...t, order: s.cards.timeline.length + i + 1 })))
+  return `联网补充：角色 ${add.length}、时间线 ${web.timeline.length}（以原文为准，联网内容可能有误，请核对）`
+}
 const ffOf = (id: string | number) => must(ffSources.find((s) => s.id === +id), '原著资料')
 ffSources.push({ id: 51, title: '示例原著·听风录', source: 'paste', chars: 48210, total_chars: 48210, depth: 'standard', focus: ['沈渡'], cards: ffCards([]), warnings: ['1 条名场面摘要和原文有连续 8 字相同，已删掉'], model: 'mock', created_at: ago(60 * 30), updated_at: ago(60 * 3) })
+ffSources.push({ id: 52, title: '斗罗大陆', source: 'search', chars: 0, total_chars: 0, depth: 'standard', focus: ['唐三'], cards: ffWebCards('斗罗大陆', ['唐三'], FF_TEMPLATES[0]), warnings: ['资料来自联网检索（5 轮），可能有误或混入同人二设，请逐条核对（演示）'], model: 'mock', created_at: ago(60 * 10), updated_at: ago(60 * 2), refs: ffDemoRefs(FF_TEMPLATES[0], 4), template_id: 'douluo', web_rounds: 5 })
 
 on('GET', '/fanfic/directions', () => FF_CATALOG)
+on('GET', '/fanfic/templates', () => ({ templates: FF_TEMPLATES, categories: FF_TEMPLATE_CATEGORIES, search: { mode: 'mock', available: true, hint: '演示模式：未联网，返回演示资料' } }))
+on('POST', '/fanfic/sources/:id/supplement', (m, b) => {
+  const s = ffOf(m[1]); const depth = b?.depth ?? 'standard'
+  if (!['quick', 'standard', 'deep'].includes(depth)) throw new HttpErr(422, 'depth 只能是 quick / standard / deep')
+  const focus: string[] = Array.isArray(b?.focus) ? b.focus : s.focus
+  const tpl = ffFindTpl(s.template_id, s.title); const rounds = ffWebRounds(depth, focus, tpl)
+  return createJob('fanfic_supplement', null, 1800 + rounds * 400, [`联网检索《${s.title}》：共 ${rounds} 轮（演示）…`, '整理联网资料…', '以现有设定卡为准合并…'], () => {
+    const w = ffMergeWeb(s, ffWebCards(s.title, focus, tpl))
+    s.warnings = [...s.warnings, w]; s.refs = [...new Set([...(s.refs ?? []), ...ffDemoRefs(tpl)])]; s.web_rounds = (s.web_rounds ?? 0) + rounds
+    s.template_id = s.template_id || tpl?.id || ''; s.updated_at = now()
+    return { source: ffOut(s), source_id: s.id, added: { characters: 1 }, warnings: [w] }
+  }, `fanfic_source:${s.id}`)
+})
 on('GET', '/fanfic/sources', () => [...ffSources].sort((a, b) => b.id - a.id).map(ffBrief))
 on('GET', '/fanfic/sources/:id', (m) => ffOut(ffOf(m[1])))
 on('POST', '/fanfic/sources', (_m, b) => {
@@ -1620,8 +1662,24 @@ on('POST', '/fanfic/sources', (_m, b) => {
   const text = String(isFile ? b.__file_text : b?.text ?? '')
   const src = isFile ? 'txt' : b?.source
   const depth = b?.depth ?? 'standard'
-  if (!['paste', 'txt'].includes(src)) throw new HttpErr(422, 'source 只能是 paste / txt')
+  if (!['paste', 'txt', 'search'].includes(src)) throw new HttpErr(422, 'source 只能是 paste / txt / search')
   if (!['quick', 'standard', 'deep'].includes(depth)) throw new HttpErr(422, 'depth 只能是 quick / standard / deep')
+  const work = String(b?.title ?? '').trim().slice(0, 60)
+  const webOn = src !== 'search' && ['1', 'true', true].includes(b?.web_supplement)
+  if ((src === 'search' || webOn) && !work) throw new HttpErr(422, src === 'search' ? '联网取材请填写作品名' : '联网补充需要填写原著名（作品名），用来检索')
+  const tpl = ffFindTpl(b?.template_id, work)
+  if (src === 'search') {
+    const focus: string[] = Array.isArray(b?.focus) ? b.focus : []
+    const rounds = ffWebRounds(depth, focus, tpl)
+    const steps = [`联网检索《${work}》：共 ${rounds} 轮（演示）…`, '检索：概况与世界观、主要人物…', '整理联网资料成设定卡…']
+    return createJob('fanfic_source', null, 1800 + rounds * 500, steps, () => {
+      const s: MFfSource = { id: nid(), title: work, source: 'search', chars: 0, total_chars: 0, depth, focus, cards: ffWebCards(work, focus, tpl),
+        warnings: [`资料来自联网检索（${rounds} 轮），可能有误或混入同人二设，请逐条核对；不确定的内容没有写入。纯联网资料没有原文指纹，无法做原著重合检查`],
+        model: 'mock', created_at: now(), updated_at: now(), refs: ffDemoRefs(tpl, 4), template_id: tpl?.id ?? '', web_rounds: rounds }
+      ffSources.push(s)
+      return { source: ffOut(s), source_id: s.id }
+    }, 'fanfic_source:search')
+  }
   const n = text.replace(/\s/g, '').length
   if (n < 200) throw new HttpErr(400, `原文太短（${n} 字），至少 200 字`)
   const focus: string[] = Array.isArray(b?.focus) ? b.focus : []
@@ -1629,7 +1687,11 @@ on('POST', '/fanfic/sources', (_m, b) => {
   const rounds = depth === 'quick' ? 1 : depth === 'deep' ? 4 : 2
   const steps = ['读取原文，按重点取段…', ...Array.from({ length: rounds }, (_, i) => `提炼第 ${i + 1}/${rounds} 轮：角色、世界观、时间线…`), '合并同名角色，去掉与原文重合的字段…']
   return createJob('fanfic_source', null, 1600 + rounds * 1100, steps, () => {
-    const s: MFfSource = { id: nid(), title, source: src, chars: Math.min(n, 200000), total_chars: n, depth, focus, cards: ffCards(focus), warnings: n > 200000 ? [`原文 ${n} 字，只取了 20 万字（重点段落优先）`] : [], model: 'mock', created_at: now(), updated_at: now() }
+    const s: MFfSource = { id: nid(), title, source: src, chars: Math.min(n, 200000), total_chars: n, depth, focus, cards: ffCards(focus), warnings: n > 200000 ? [`原文 ${n} 字，只取了 20 万字（重点段落优先）`] : [], model: 'mock', created_at: now(), updated_at: now(), template_id: tpl?.id ?? '' }
+    if (webOn) {
+      const r = ffWebRounds(depth, focus, tpl)
+      s.warnings.unshift(ffMergeWeb(s, ffWebCards(work, focus, tpl))); s.refs = ffDemoRefs(tpl); s.web_rounds = r
+    }
     ffSources.push(s)
     return { source: ffOut(s), source_id: s.id }
   }, `fanfic_source:${src}`)

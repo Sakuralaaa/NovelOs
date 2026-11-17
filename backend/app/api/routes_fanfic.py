@@ -45,13 +45,29 @@ def fanfic_directions() -> dict[str, Any]:
     return catalog()
 
 
+@router.get("/fanfic/templates")
+def fanfic_templates() -> dict[str, Any]:
+    """v0.11.1 热门同人题材模板 + 当前联网搜索是否可用（mode: web / mock / none）。"""
+    from app.services import fanfic as ff
+    from app.services.fanfic_templates import catalog
+
+    return {**catalog(), "search": ff.search_status()}
+
+
 # ------------------------------------------------------------------ 原著资料
 
 class SourceIn(BaseModel):
-    source: Literal["paste", "txt"] = "paste"
-    text: str = Field(min_length=1)
-    title: str | None = Field(default=None, max_length=60)
+    source: Literal["paste", "txt", "search"] = "paste"
+    text: str = ""  # paste / txt 必填（check_input 校验）；search 不需要
+    title: str | None = Field(default=None, max_length=60)  # search / 联网补充时是作品名（必填）
     focus: list[str] = Field(default_factory=list, max_length=10)
+    depth: Literal["quick", "standard", "deep"] = "standard"
+    web_supplement: bool = False  # v0.11.1 paste / txt：提炼后再联网补齐原文没覆盖的部分（以原文为准）
+    template_id: str | None = Field(default=None, max_length=40)
+
+
+class SupplementIn(BaseModel):
+    focus: list[str] | None = Field(default=None, max_length=10)
     depth: Literal["quick", "standard", "deep"] = "standard"
 
 
@@ -62,7 +78,8 @@ class SourceUpdate(BaseModel):
 
 @router.post("/fanfic/sources")
 async def source_create(request: Request) -> dict[str, Any]:
-    """JSON：{source, text, title?, focus?, depth?}；或 multipart：file（TXT）+ title/focus（逗号分隔）/depth。"""
+    """JSON：{source, text, title?, focus?, depth?, web_supplement?, template_id?}；source=search 时只要 title（作品名）；
+    或 multipart：file（TXT）+ title/focus（逗号分隔）/depth/web_supplement（1/true）。"""
     from app.services import fanfic as ff
 
     ctype = request.headers.get("content-type", "")
@@ -79,7 +96,9 @@ async def source_create(request: Request) -> dict[str, Any]:
             focus_raw = str(form.get("focus") or "")
             body = SourceIn(source="txt", text=text or " ", title=(str(form.get("title") or "") or None),
                             focus=[x.strip() for x in focus_raw.replace("，", ",").split(",") if x.strip()][:10],
-                            depth=str(form.get("depth") or "standard"))  # type: ignore[arg-type]
+                            depth=str(form.get("depth") or "standard"),  # type: ignore[arg-type]
+                            web_supplement=str(form.get("web_supplement") or "").lower() in ("1", "true", "on", "yes"),
+                            template_id=(str(form.get("template_id") or "") or None))
         else:
             try:
                 body = SourceIn.model_validate(json.loads(await request.body() or b"{}"))
@@ -87,13 +106,29 @@ async def source_create(request: Request) -> dict[str, Any]:
                 if isinstance(e, ValidationError):
                     raise HTTPException(422, f"参数错误：{e.errors()[0].get('loc')}: {e.errors()[0].get('msg')}") from e
                 raise HTTPException(422, "请求体不是合法 JSON") from e
-        ff.check_input(body.source, body.text, body.depth)
+        ff.check_input(body.source, body.text, body.depth, body.title, body.web_supplement and body.source != "search")
     except ValidationError as e:
         raise HTTPException(422, f"参数错误：{e.errors()[0].get('msg')}") from e
     except ff.FanficError as e:
         raise _http(e) from e
     text, src, title, focus, depth = body.text, body.source, body.title, list(body.focus), body.depth
-    return _job(submit("fanfic_source", lambda ctx: ff.create_source(text, src, title, focus, depth, ctx), ref=f"fanfic_source:{src}"))
+    web, tid = body.web_supplement and src != "search", body.template_id
+    return _job(submit("fanfic_source", lambda ctx: ff.create_source(text, src, title, focus, depth, ctx, web=web, template_id=tid),
+                       ref=f"fanfic_source:{src}"))
+
+
+@router.post("/fanfic/sources/{source_id}/supplement")
+async def source_supplement(source_id: int, body: SupplementIn | None = Body(default=None)) -> dict[str, Any]:
+    """v0.11.1 给已有原著资料联网补充（后台 Job，kind=fanfic_supplement）：以已有设定卡为准，只补空缺，冲突记 warning。"""
+    from app.services import fanfic as ff
+
+    b = body or SupplementIn()
+    try:
+        ff.check_supplement(source_id)
+    except ff.FanficError as e:
+        raise _http(e) from e
+    focus, depth = (list(b.focus) if b.focus is not None else None), b.depth
+    return _job(submit("fanfic_supplement", lambda ctx: ff.supplement_source(source_id, focus, depth, ctx), ref=f"fanfic_source:{source_id}"))
 
 
 @router.get("/fanfic/sources")

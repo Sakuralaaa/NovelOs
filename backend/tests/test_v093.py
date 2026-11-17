@@ -218,6 +218,6 @@ def test_teardown_workspace(client: TestClient) -> None:
 
 
 def test_version_and_docs(client: TestClient) -> None:
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10."))
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11."))
     assert "## v0.9.3" in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "v0.9.3" in (ROOT / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")
