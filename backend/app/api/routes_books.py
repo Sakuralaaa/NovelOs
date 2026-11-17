@@ -398,21 +398,51 @@ async def suggest_card(book_id: int, body: CardSuggest, s: Session = Depends(get
         c = s.get(Card, body.card_id)
         if c is None or c.book_id != book_id:
             raise HTTPException(404, "卡片不存在")
+        if c.locked:
+            raise HTTPException(409, "这张设定已锁定，AI 不能修改；先解锁再让 AI 改")
     return job_out(submit("card_suggest", lambda ctx: planning.suggest_card(book_id, body.card_id, body.field, body.instruction, body.route, body.draft, ctx), book_id=book_id))
 
 
 @router.put("/cards/{card_id}")
 def update_card(card_id: int, body: CardUpdate, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from app.services import card_versions
+
     c = s.get(Card, card_id)
     if c is None:
         raise HTTPException(404, "卡片不存在")
+    before = card_versions.state_of(c)
     for k, v in body.model_dump(exclude_unset=True, exclude={"soul"}).items():
         if v is not None:
             setattr(c, k, v)
     if body.soul is not None and c.type == "character":
         c.soul = merge_soul(c.soul, body.soul)
+    if card_versions.changed(before, c):  # v0.12：手动保存前的内容存一版，可单卡回滚
+        card_versions.push(c, "手动编辑", before)
     c.updated_at = utcnow()
     s.add(c)
+    s.commit()
+    s.refresh(c)
+    return card_out(c)
+
+
+@router.get("/cards/{card_id}/versions")
+def card_versions_list(card_id: int, s: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    from app.services import card_versions
+
+    c = s.get(Card, card_id)
+    if c is None:
+        raise HTTPException(404, "卡片不存在")
+    return card_versions.list_versions(c)
+
+
+@router.post("/cards/{card_id}/versions/{n}/restore")
+def card_version_restore(card_id: int, n: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    from app.services import card_versions
+
+    c = s.get(Card, card_id)
+    if c is None:
+        raise HTTPException(404, "卡片不存在")
+    card_versions.restore(s, c, n)
     s.commit()
     s.refresh(c)
     return card_out(c)
@@ -442,6 +472,8 @@ def list_facts(book_id: int, s: Session = Depends(get_session)) -> list[dict[str
 @router.post("/books/{book_id}/outline/generate")
 async def outline_generate(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     _book(s, book_id)
+    if any(n.locked for n in common.outline_nodes(s, book_id)):
+        raise HTTPException(409, "大纲里有锁定的节点，整体重新生成会覆盖它们；先解锁再重新生成")
     return job_out(submit("outline_generate", lambda ctx: outline.generate_outline(book_id, ctx), book_id=book_id, lock_book=True))
 
 
@@ -450,6 +482,8 @@ async def outline_expand(node_id: int, s: Session = Depends(get_session)) -> dic
     node = s.get(OutlineNode, node_id)
     if node is None:
         raise HTTPException(404, "大纲节点不存在")
+    if node.locked and node.level == "chapter":
+        raise HTTPException(409, outline.NODE_LOCKED_MSG)
     bid = node.book_id
     return job_out(submit("outline_expand", lambda ctx: outline.expand_node(node_id, ctx), book_id=bid, lock_book=True))
 
@@ -488,6 +522,8 @@ async def outline_suggest(node_id: int, body: AiAsk, s: Session = Depends(get_se
     node = s.get(OutlineNode, node_id)
     if node is None:
         raise HTTPException(404, "大纲节点不存在")
+    if node.locked:
+        raise HTTPException(409, outline.NODE_LOCKED_MSG)
     return job_out(submit("outline_node", lambda ctx: outline.suggest_node(node_id, body.instruction, body.route, ctx), book_id=node.book_id))
 
 

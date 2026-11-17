@@ -17,7 +17,7 @@ from app.db import session_scope
 from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway
 from app.models.tables import BibleSnapshot, Card, Fact, utcnow
-from app.services import common, tropes
+from app.services import card_versions, common, tropes
 from app.services.changes import CARD_TYPES
 from app.services.common import NotFound
 from app.services.research import research_notes
@@ -91,14 +91,19 @@ def propose(book_id: int, mode: str, instruction: str, route: str | None, ctx: J
         book = common.get_book(s, book_id)
         meta = common.kit_meta(s, book)
         existing = common.cards(s, book_id)
-        scope_cards = [c for c in existing if card_ids is None or c.id in card_ids]
+        locked_ids = {c.id for c in existing if c.locked}
+        scope_cards = [c for c in existing if (card_ids is None or c.id in card_ids) and c.id not in locked_ids]
         tl = tropes.tropes_for(s, book)
         bctx = common.book_context(s, book, with_cards=False)
     shown = scope_cards if mode == "optimize" else existing
     ex_lines = "\n".join(json.dumps({k: v for k, v in card_dict(c).items() if k != "id"}, ensure_ascii=False) for c in shown) or "（空）"
+    if locked_ids:
+        ex_lines += "\n（以下设定已被作者锁定，不能改写、替换或删除，新内容要与它们一致）：\n" + \
+            "\n".join(f"[{c.type}] {c.name}：{c.summary}" for c in existing if c.id in locked_ids)
     if mode == "optimize" and card_ids is not None:
-        others = [c for c in existing if c.id not in set(card_ids)]
-        ex_lines += "\n（其余设定卡，只作参考，不要改）：\n" + ("\n".join(f"[{c.type}] {c.name}：{c.summary}" for c in others) or "（无）")
+        others = [c for c in existing if c.id not in set(card_ids) and c.id not in locked_ids]
+        others_note = "\n（其余设定卡，只作参考，不要改）：\n"
+        ex_lines += others_note + ("\n".join(f"[{c.type}] {c.name}：{c.summary}" for c in others) or "（无）")
     user = render("bible_propose", mode_task=MODE_TASK[mode], book_context=bctx, existing=ex_lines,
                   instruction=instruction.strip() or ("按书的信息把设定写完整、写具体。" if mode != "optimize" else "写得更具体、更有画面感，彼此咬合。"),
                   scope=MODE_SCOPE[mode])
@@ -116,6 +121,7 @@ def propose(book_id: int, mode: str, instruction: str, route: str | None, ctx: J
     ctx.progress(75, "检测冲突")
     by_norm = {_norm(c.name): c for c in existing}
     items: list[dict[str, Any]] = []
+    skipped_locked: list[str] = []
     matched_old: set[int] = set()
     act_tropes = tropes.active(tl, instruction)
     for i, raw in enumerate(data["cards"]):
@@ -130,6 +136,10 @@ def propose(book_id: int, mode: str, instruction: str, route: str | None, ctx: J
                 action, target = "add", None
         elif mode == "rewrite":
             target = by_norm.get(_norm(card["name"]))  # 重写时同名视为替换旧卡
+        if target is not None and target.id in locked_ids:  # v0.12：锁定卡不改不替换
+            matched_old.add(target.id or 0)
+            skipped_locked.append(target.name)
+            continue
         conflicts = detect_conflicts(card, existing, target.id if (target and action == "update") else None)
         if mode == "rewrite" and target is not None:
             conflicts = [c for c in conflicts if c["card_id"] != target.id]
@@ -157,11 +167,11 @@ def propose(book_id: int, mode: str, instruction: str, route: str | None, ctx: J
     removals: list[dict[str, Any]] = []
     if mode == "rewrite":
         for c in existing:
-            if c.id not in matched_old:
+            if c.id not in matched_old and c.id not in locked_ids:
                 removals.append({"card_id": c.id, "name": c.name, "type": c.type, "summary": c.summary})
     facts = [f for f in (data.get("facts") or []) if isinstance(f, dict) and f.get("key")] if mode == "rewrite" else []
     return {"book_id": book_id, "mode": mode, "instruction": instruction.strip(), "change": str(data.get("change") or "")[:120],
-            "items": items, "removals": removals, "facts": facts[:40],
+            "items": items, "removals": removals, "facts": facts[:40], "skipped_locked": sorted(set(skipped_locked)),
             "counts": {"add": sum(1 for x in items if not x["conflicts"] and x["action"] == "add"),
                        "review": sum(1 for x in items if x["conflicts"] or x["action"] == "update"), "removals": len(removals)}}
 
@@ -190,10 +200,16 @@ def apply(book_id: int, mode: str, instruction: str, ops: list[dict[str, Any]], 
         cards = {c.id: c for c in common.cards(s, book_id, include_deprecated=True)}
         names = {c.name for c in cards.values()}
         n = {"created": 0, "updated": 0, "deleted": 0}
+        skipped: list[str] = []
+        label = f"{MODE_LABEL.get(mode, '批量修改')}" + (f"：{instruction.strip()[:30]}" if instruction.strip() else "")
         try:
             for op in ops:
                 kind = op.get("op")
                 if kind == "delete":
+                    c = cards.get(int(op.get("card_id") or 0))
+                    if c is not None and c.locked:
+                        skipped.append(c.name)
+                        continue
                     c = cards.pop(int(op.get("card_id") or 0), None)
                     if c is not None:
                         _unlink_facts(s, c.id or 0)
@@ -208,6 +224,10 @@ def apply(book_id: int, mode: str, instruction: str, ops: list[dict[str, Any]], 
                     c = cards.get(int(op.get("card_id") or 0))
                     if c is None:
                         raise NotFound(f"卡片 {op.get('card_id')} 不存在或已删除")
+                    if c.locked:
+                        skipped.append(c.name)
+                        continue
+                    card_versions.push(c, label)
                     names.discard(c.name)
                     c.type, c.name, c.summary, c.data, c.known_by = card["type"], card["name"], card["summary"], card["data"], card["known_by"]
                     c.updated_at = utcnow()
@@ -244,7 +264,7 @@ def apply(book_id: int, mode: str, instruction: str, ops: list[dict[str, Any]], 
         except Exception:
             s.rollback()
             raise
-        return {**n, "snapshot_id": snap.id}
+        return {**n, "snapshot_id": snap.id, "skipped_locked": skipped}
 
 
 def list_snapshots(s: Session, book_id: int) -> list[dict[str, Any]]:

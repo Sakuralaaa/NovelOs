@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Pencil, Plus, RotateCcw, Sparkles, Trash2, UnfoldVertical, X } from '@/components/icons'
+import { Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Lock, Pencil, Plus, RotateCcw, Sparkles, Trash2, UnfoldVertical, Unlock, X } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -111,6 +111,7 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
           <div className="flex flex-wrap items-center gap-2">
             <span title={n.title} className={cn('min-w-0 truncate font-medium', n.level === 'book' || n.level === 'volume' ? 'text-[14.5px]' : 'text-[13.5px]')}>{n.title}</span>
             <Badge tone={st.t} className="h-5 text-[11px]">{st.l}</Badge>
+            {n.locked && <Lock className="h-3.5 w-3.5 text-primary" aria-label="已锁定" />}
           </div>
           {n.summary && <p className={cn('mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground', isChapter ? 'line-clamp-1' : 'line-clamp-2')}>{n.summary}</p>}
           {isChapter && n.beats && Object.keys(n.beats).length > 0 && (
@@ -142,6 +143,7 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
 type BeatRow = { k: string; v: string; json?: boolean }
 
 function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClose: () => void; bookId: number }) {
+  const [lockOv, setLockOv] = useState<boolean | null>(null)
   const [f, setF] = useState<{ title: string; summary: string; beats: BeatRow[] }>({ title: '', summary: '', beats: [] })
   const [cur, setCur] = useState<OutlineNode | null>(null)
   const [ask, setAsk] = useState('')
@@ -154,7 +156,9 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
     setCur(node)
     load(node)
     setProp(null)
+    setLockOv(null)
   }
+  const locked = lockOv ?? !!node?.locked
   const qc = useQueryClient()
   // 列表、对象类的节拍按 JSON 还原后再存（以前直接存成字符串，伏笔和出场人物会丢）
   const beatsOut = () => Object.fromEntries(f.beats.filter((b) => b.k.trim()).map((b) => {
@@ -188,11 +192,17 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
     meta: { errorTitle: '删除失败' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); qc.invalidateQueries({ queryKey: qk.chapters(bookId) }); toast.success('已删除'); setConfirmDel(false); onClose() },
   })
+  const lock = useMutation({
+    mutationFn: (v: boolean) => api.updateOutline(node!.id, { locked: v }),
+    meta: { errorTitle: '操作失败' },
+    onSuccess: (n) => { qc.invalidateQueries({ queryKey: qk.outline(bookId) }); setLockOv(!!n.locked); toast.success(n.locked ? '已锁定' : '已解锁') },
+  })
   const versions = cur?.versions ?? 0
   return (
     <Sheet open={!!node} onOpenChange={(o) => !o && onClose()} title={`编辑${node ? LEVEL[node.level].label : ''}`} width={620}
       footer={<div className="flex w-full items-center gap-2">
         {node && node.level !== 'book' && <Button variant="ghost" className="text-danger hover:bg-danger-soft" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={() => setConfirmDel(true)}>删除</Button>}
+        {node && <Button variant="ghost" loading={lock.isPending} icon={locked ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />} onClick={() => lock.mutate(!locked)}>{locked ? '解锁' : '锁定'}</Button>}
         {versions > 0 && <Tip content={cur?.last_instruction ? `撤回：${cur.last_instruction}` : '撤回上一次修改'}><Button variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={undo.isPending} onClick={() => undo.mutate()}>撤回（{versions}）</Button></Tip>}
         <div className="ml-auto flex gap-2"><Button variant="ghost" onClick={onClose}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate(undefined)}>保存</Button></div>
       </div>}>
@@ -211,6 +221,8 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
               <Button size="sm" variant="primary" icon={<Check className="h-3.5 w-3.5" />} loading={m.isPending} onClick={() => m.mutate({ title: prop.title, summary: prop.summary, instruction: prop.instruction || 'AI 重写' })}>采纳并保存</Button>
             </div>
           </div>
+        ) : locked ? (
+          <div className="flex items-center gap-2 rounded-lg bg-primary-soft/50 px-3.5 py-2.5 text-[13px] text-primary"><Lock className="h-4 w-4 shrink-0" />已锁定，AI 不会改动这个节点</div>
         ) : node && (
           <AskBox title={`让 AI 重写这个${LEVEL[node.level].label}的概要`} storage={storage} value={ask} onChange={setAsk} onSubmit={suggest} job={job} refBookId={bookId}
             placeholder={node.level === 'book' ? '例如：主线别再围着身世转，改成揭开码头旧案' : node.level === 'volume' ? '例如：这一卷的卷末爆点更大，让反派当众翻车' : '例如：节奏快一点，弧末加一场反杀'} />

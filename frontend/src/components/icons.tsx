@@ -64,6 +64,12 @@ import {
   LightningIcon,
   ListIcon,
   LockKeyIcon,
+  ClockCounterClockwiseIcon,
+  LockSimpleIcon,
+  LockSimpleOpenIcon,
+  WalletIcon,
+  StarIcon,
+  ArchiveBoxIcon,
   MagicWandIcon,
   MagnifyingGlassIcon,
   MapPinIcon,
@@ -183,6 +189,12 @@ export const Lightbulb = wrap(LightbulbIcon, 'Lightbulb')
 export const ListTree = wrap(TreeStructureIcon, 'ListTree')
 export const Loader2 = wrap(CircleNotchIcon, 'Loader2')
 export const LockKeyhole = wrap(LockKeyIcon, 'LockKeyhole')
+export const Lock = wrap(LockSimpleIcon, 'Lock')
+export const Unlock = wrap(LockSimpleOpenIcon, 'Unlock')
+export const History = wrap(ClockCounterClockwiseIcon, 'History')
+export const Wallet = wrap(WalletIcon, 'Wallet')
+export const Star = wrap(StarIcon, 'Star')
+export const ArchiveBox = wrap(ArchiveBoxIcon, 'ArchiveBox')
 export const LogOut = wrap(SignOutIcon, 'LogOut')
 export const MapPin = wrap(MapPinIcon, 'MapPin')
 export const Menu = wrap(ListIcon, 'Menu')

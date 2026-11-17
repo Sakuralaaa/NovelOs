@@ -13,7 +13,7 @@ from app.db import session_scope
 from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway
 from app.models.tables import Card, utcnow
-from app.services import bible_ops, common, tropes
+from app.services import bible_ops, card_versions, common, tropes
 from app.services.common import NotFound
 from app.services.refs import SOUL_KEYS, SOUL_LABEL, TYPE_LABEL, soul_dict
 from app.skills.loader import render, system_prompt
@@ -124,7 +124,10 @@ def apply_field(book_id: int, entry_id: int, field: str, value: Any) -> Card:
     with session_scope() as s:
         c = get_card(s, book_id, entry_id)
         check_field(c, field)
+        if c.locked:
+            raise FieldError(card_versions.LOCKED_MSG, 409)
         bible_ops.snapshot(s, book_id, f"采纳 AI：{c.name}·{field_label(field)}")
+        card_versions.push(c, f"采纳 AI：{field_label(field)}")
         if field == "name":
             name = str(value or "").strip()[:40]
             if not name:

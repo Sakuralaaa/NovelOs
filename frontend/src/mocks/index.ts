@@ -702,8 +702,22 @@ on('GET', '/books/:id/cards', (m, _b, u) => {
   return db.cards.map(normCard).filter((c) => c.book_id === +m[1] && (!t || c.type === t) && (all || c.status !== 'deprecated'))
 })
 on('POST', '/books/:id/cards', (m, b) => { const c = normCard({ id: nid(), book_id: +m[1], type: b.type, name: b.name, summary: b.summary ?? '', data: b.data ?? {}, known_by: b.known_by ?? [], updated_at: now(), status: b.status ?? 'active', ref_enabled: b.ref_enabled ?? true, soul: null }); if (c.type === 'character' && b.soul) c.soul = { ...emptySoul(), ...b.soul }; db.cards.push(c); return c })
+on('GET', '/cards/:id/versions', (m) => {
+  const c: any = must(db.cards.find((x) => x.id === +m[1]), '设定卡')
+  return [...(c._versions ?? [])].map((v: any, n: number) => ({ n, ...v })).reverse()
+})
+on('POST', '/cards/:id/versions/:n/restore', (m) => {
+  const c: any = normCard(must(db.cards.find((x) => x.id === +m[1]), '设定卡'))
+  const v = (c._versions ?? [])[+m[2]]; if (!v) throw new HttpErr(404, '这个版本不存在')
+  c._versions = [...(c._versions ?? []), { label: `回滚到「${v.label}」之前`, at: now(), type: c.type, name: c.name, summary: c.summary, data: { ...c.data }, known_by: [...c.known_by] }]
+  Object.assign(c, { type: v.type, name: v.name, summary: v.summary, data: { ...v.data }, known_by: [...v.known_by], updated_at: now() })
+  return { ...c, versions: c._versions.length, _versions: undefined }
+})
 on('PUT', '/cards/:id', (m, b) => {
-  const c = normCard(must(db.cards.find((x) => x.id === +m[1]), '设定卡'))
+  const c: any = normCard(must(db.cards.find((x) => x.id === +m[1]), '设定卡'))
+  const contentKeys = ['type', 'name', 'summary', 'data', 'known_by', 'soul']
+  if (b && contentKeys.some((k) => k in b)) c._versions = [...(c._versions ?? []), { label: '手动编辑', at: now(), type: c.type, name: c.name, summary: c.summary, data: { ...c.data }, known_by: [...c.known_by] }].slice(-20)
+  c.versions = (c._versions ?? []).length
   const { soul, ...rest } = b ?? {}
   Object.assign(c, rest, { updated_at: now() })
   if (c.type === 'character' && soul && typeof soul === 'object') c.soul = { ...(c.soul ?? emptySoul()), ...soul }
@@ -1937,3 +1951,94 @@ on('POST', '/jobs/:id/resume', (m) => {
 
 // ---------------- v0.11 完本模式 / 质检（mock，见 ./wanben.ts） ----------------
 registerWanbenMocks({ on, db: db as any, createJob, HttpErr, must, bookOf, nid, now, ago, writeOne, mkReview, mkLint, countWords, chHist, recalc })
+
+
+// ---------------- v0.12 生成档案 / 预算（mock） ----------------
+type MGen = { id: number; book_id: number | null; job_id: number | null; kind: string; kind_label: string; task: string; route: string; model: string; status: 'ok' | 'empty' | 'failed'; error: string; output_words: number; target_words: number; short: boolean; in_tokens: number; out_tokens: number; cost_cny: number; ms: number; starred: boolean; parent_id: number | null; note: string; created_at: string; preview: string; prompt: string; output: string }
+const GEN_LABEL: Record<string, string> = { chapter_write: '写章', chapter_review: '审稿', bible_generate: '生成设定', outline_generate: '生成大纲', humanize: '去 AI 味', image: '生图', generation_followup: '追问' }
+const gens: MGen[] = []
+const budget = { daily_cny: 0, book_cny: 0 }
+;(() => {
+  const sample = '雨落在青石板上，林川把剑往背后一收，抬头看了眼山门。'
+  const kinds = ['chapter_write', 'chapter_review', 'bible_generate', 'outline_generate', 'humanize', 'image']
+  for (let i = 0; i < 14; i++) {
+    const k = kinds[i % kinds.length]; const failed = i === 3; const short = i === 6
+    const out = failed ? '' : k === 'image' ? '（1 张图）' : sample.repeat(short ? 6 : 30)
+    gens.push({ id: 9000 + i, book_id: 1, job_id: null, kind: k, kind_label: GEN_LABEL[k] ?? k, task: k, route: k === 'chapter_write' ? 'writer' : 'planner', model: 'DeepSeek/deepseek-chat',
+      status: failed ? 'failed' : 'ok', error: failed ? '所有渠道均失败：DeepSeek/deepseek-chat：HTTP 429: rate limit' : '', output_words: countWords(out), target_words: k === 'chapter_write' ? 2200 : 0,
+      short: false, in_tokens: 4200 + i * 300, out_tokens: failed ? 0 : 1800 + i * 90, cost_cny: failed ? 0 : +(0.004 + i * 0.0011).toFixed(4), ms: 22000 + i * 900,
+      starred: i === 1, parent_id: null, note: '', created_at: ago(i * 47), preview: out.slice(0, 160), prompt: '按章纲写第 12 章：主角初入外门，被管事刁难。', output: out })
+    const g = gens[gens.length - 1]; g.short = !!(g.target_words && g.status === 'ok' && g.output_words < g.target_words * 0.7)
+  }
+})()
+const genPub = (g: MGen, full = false): Record<string, unknown> => { const { prompt, output, ...rest } = g; return full ? { ...rest, prompt, output, children: gens.filter((x) => x.parent_id === g.id).map((x) => genPub(x)) } : rest }
+on('GET', '/generations', (_m, _b, u) => {
+  const p = u.searchParams; const q = p.get('q') ?? ''
+  let list = gens.filter((g) => (!p.get('book_id') || g.book_id === +p.get('book_id')!) && (!p.get('kind') || g.kind === p.get('kind')) && (!p.get('status') || g.status === p.get('status'))
+    && (p.get('starred') !== 'true' || g.starred) && (!q || g.output.includes(q) || g.prompt.includes(q)))
+  list = list.sort((a, b) => b.id - a.id)
+  const off = +(p.get('offset') ?? 0); const lim = +(p.get('limit') ?? 50)
+  const kinds = [...new Set(gens.map((g) => g.kind))].map((k) => ({ kind: k, label: GEN_LABEL[k] ?? k, count: gens.filter((g) => g.kind === k).length }))
+  return { items: list.slice(off, off + lim).map((g) => genPub(g)), total: list.length, cost_cny: +list.reduce((n, g) => n + g.cost_cny, 0).toFixed(4), kinds }
+})
+on('GET', '/generations/:id', (m) => genPub(must(gens.find((g) => g.id === +m[1]), '记录'), true))
+on('PATCH', '/generations/:id', (m, b) => { const g = must(gens.find((x) => x.id === +m[1]), '记录'); if (b?.starred !== undefined) g.starred = !!b.starred; return genPub(g) })
+on('DELETE', '/generations/:id', (m) => { const i = gens.findIndex((g) => g.id === +m[1]); if (i >= 0) gens.splice(i, 1); return { ok: true } })
+on('POST', '/generations/:id/followup', (m, b) => {
+  const g = must(gens.find((x) => x.id === +m[1]), '记录')
+  return createJob('generation_followup', g.book_id, 1500, ['按要求重新生成…'], () => {
+    const out = `${g.output}\n\n（已按要求修改：${String(b?.instruction ?? '').slice(0, 60)}）`
+    const n: MGen = { ...g, id: nid(), kind: 'generation_followup', kind_label: '追问', parent_id: g.id, note: String(b?.instruction ?? ''), starred: false, created_at: now(), output: out, preview: out.slice(0, 160), output_words: countWords(out), short: false }
+    gens.push(n)
+    return { parent_id: g.id, id: n.id, output: out }
+  })
+})
+on('GET', '/settings/budget', (_m, _b, u) => {
+  const bid = u.searchParams.get('book_id')
+  const today = +gens.reduce((n, g) => n + g.cost_cny, 0).toFixed(4)
+  return { ...budget, today_cny: today, ...(bid ? { book_spent_cny: +gens.filter((g) => g.book_id === +bid).reduce((n, g) => n + g.cost_cny, 0).toFixed(4) } : {}) }
+})
+on('PUT', '/settings/budget', (_m, b) => { budget.daily_cny = +b?.daily_cny || 0; budget.book_cny = +b?.book_cny || 0; return { ...budget, today_cny: +gens.reduce((n, g) => n + g.cost_cny, 0).toFixed(4) } })
+
+// ---------------- v0.12 导入已有作品 / 接管（mock） ----------------
+const importCache = new Map<string, { title: string; chapters: { index: number; raw_title: string; title: string; volume: string; words: number; flags: string[]; content: string }[] }>()
+on('POST', '/books/import', (_m, b) => {
+  const text = String(b?.__file_text ?? b?.text ?? '')
+  if (!text.trim()) throw new HttpErr(400, '没有可用的正文')
+  const lines = text.split(/\r?\n/)
+  const chs: { index: number; raw_title: string; title: string; volume: string; words: number; flags: string[]; content: string }[] = []
+  let vol = ''
+  for (const l of lines) {
+    if (/^\s*第[一二三四五六七八九十百千零\d]+[卷部]/.test(l)) { vol = l.trim(); continue }
+    if (/^\s*第[一二三四五六七八九十百千零\d]+[章节回]/.test(l)) { chs.push({ index: chs.length + 1, raw_title: l.trim(), title: l.trim().replace(/^第\S+?[章节回]\s*/, '') || l.trim(), volume: vol, words: 0, flags: [], content: '' }); continue }
+    const cur = chs[chs.length - 1]
+    if (cur && l.trim()) { cur.content += (cur.content ? '\n\n' : '') + l.trim(); cur.words = countWords(cur.content) }
+  }
+  if (!chs.length) chs.push({ index: 1, raw_title: '第1章', title: '第1章', volume: '', words: countWords(text), flags: [], content: text.trim() })
+  chs.forEach((c) => { if (!c.words) c.flags.push('空章'); else if (c.words < 300) c.flags.push('过短') })
+  const id = Math.random().toString(16).slice(2, 14)
+  const title = String(b?.__file_name || '').replace(/\.(txt|md|docx)$/i, '') || '导入的作品'
+  importCache.set(id, { title, chapters: chs })
+  const nFlag = chs.filter((c) => c.flags.length).length
+  return { import_id: id, title, encoding: 'utf-8', total_words: chs.reduce((n, c) => n + c.words, 0), volumes: [...new Set(chs.map((c) => c.volume).filter(Boolean))],
+    warnings: nFlag ? [`${nFlag} 章有疑点，导入前看一下`] : [], chapters: chs.map(({ content, ...c }) => ({ ...c, preview: content.slice(0, 80) })) }
+})
+on('POST', '/books/import/commit', (_m, b) => {
+  const got = importCache.get(String(b?.import_id)); if (!got) throw new HttpErr(404, '导入预览已过期，重新上传一次')
+  const skip = new Set<number>(b?.skip ?? [])
+  const chs = got.chapters.filter((c) => !skip.has(c.index) && c.content.trim())
+  if (!chs.length) throw new HttpErr(400, '没有可导入的章节')
+  const book: Book = { id: nid(), title: b?.title || got.title, genre: b?.genre ?? '', gender: b?.gender ?? 'male', tagline: '', status: 'writing', target_words: 1_000_000, chapter_words: 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 }, approval_mode: 'review' }
+  db.books.push(book)
+  chs.forEach((c, i) => db.chapters.push({ id: nid(), book_id: book.id, number: i + 1, title: c.title, content: c.content, words: c.words, status: 'committed', review: null, lint: null, updated_at: now() } as unknown as Chapter))
+  recalc(book.id); importCache.delete(String(b?.import_id))
+  return { book_id: book.id, chapters: chs.length, words: chs.reduce((n, c) => n + c.words, 0) }
+})
+on('POST', '/books/:id/adopt', (m) => {
+  const book = bookOf(m[1])
+  return createJob('book_adopt', book.id, 3000, ['补摘要…', '从摘要反推设定和伏笔…', '写入设定卡和账本…', '按章节生成大纲…'], () => {
+    if (!db.cards.some((c) => c.book_id === book.id && c.name === '林川')) db.cards.push(normCard({ id: nid(), book_id: book.id, type: 'character', name: '林川', summary: '主角，外门弟子，话少，记仇也记恩。', data: { role: 'protagonist' }, known_by: [], updated_at: now(), status: 'active', ref_enabled: true, soul: null }))
+    return { summaries: db.chapters.filter((c) => c.book_id === book.id).length, cards: 1, facts: 1, foreshadows: 1, outline_nodes: 0, skipped_cards: [] }
+  })
+})
+on('GET', '/books/:id/adopt', (m) => { const book = bookOf(m[1]); const n = db.chapters.filter((c) => c.book_id === book.id).length; return { chapters: n, summaries: n, cards: db.cards.filter((c) => c.book_id === book.id).length, foreshadows: 0, outline_linked: 0 } })

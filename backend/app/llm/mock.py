@@ -1218,6 +1218,33 @@ from app.llm.mock_wanben import WANBEN_HANDLERS  # noqa: E402  v0.11 完本模�
 HANDLERS.update(WANBEN_HANDLERS)
 
 
+def mock_followup(m: dict[str, Any]) -> str:
+    """v0.12 生成档案追问：在原结果后面按要求补一句，演示「出新版本、旧版保留」。"""
+    base = str(m.get("output") or "").strip()
+    ins = str(m.get("instruction") or "").strip() or "再改一版"
+    return (base + "\n\n" if base else "") + f"（已按要求修改：{ins[:60]}）"
+
+
+HANDLERS["followup"] = mock_followup
+
+
+def mock_adopt_bible(m: dict[str, Any]) -> str:
+    """v0.12 接管旧书：给一套最小的底账（主角、一个对手、金手指、一条伏笔），已有同名卡由程序跳过。"""
+    n = max(1, int(m.get("chapters") or 1))
+    return _j({
+        "cards": [
+            {"type": "character", "name": "林川", "summary": "主角，外门弟子，话少，记仇也记恩。", "data": {"role": "protagonist", "voice": "短句，爱反问"}, "known_by": []},
+            {"type": "character", "name": "赵管事", "summary": "外门管事，欺软怕硬。", "data": {"role": "antagonist"}, "known_by": []},
+            {"type": "cheat", "name": "残卷", "summary": "主角捡到的一页残卷，能看见功法破绽。", "data": {"input": "盯着对手出招", "limit": "每天三次", "growth": "境界越高看得越深"}, "known_by": ["林川"]},
+        ],
+        "facts": [{"entity": "林川", "key": "境界", "value": "淬体三层", "from_chapter": n}],
+        "foreshadows": [{"desc": "残卷背面的血字是谁写的", "status": "planted", "planted_ch": 1, "last_ch": n, "resolved_ch": None, "tier": "long"}],
+    })
+
+
+HANDLERS["adopt_bible"] = mock_adopt_bible
+
+
 def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) -> str:
     fn = HANDLERS.get(task)
     if fn is None:

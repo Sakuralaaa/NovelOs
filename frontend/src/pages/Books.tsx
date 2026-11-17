@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { MoreHorizontal, Plus, Trash2 } from '@/components/icons'
+import { CloudUpload, MoreHorizontal, Plus, Trash2 } from '@/components/icons'
+import { ImportBookDialog } from '@/components/book/ImportBook'
 import * as DM from '@radix-ui/react-dropdown-menu'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,7 @@ import { fmtNum, fmtTime } from '@/lib/utils'
 export default function Books() {
   const { data, isLoading, error, refetch } = useBooks()
   const [open, setOpen] = useState(false)
+  const [imp, setImp] = useState(false)
   const [del, setDel] = useState<Book | null>(null)
   const qc = useQueryClient()
   const rm = useMutation({
@@ -26,7 +28,10 @@ export default function Books() {
   })
   return (
     <div className="page">
-      <PageHeader title="我的书" actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>新建作品</Button>} />
+      <PageHeader title="我的书" actions={<>
+        <Button icon={<CloudUpload className="h-4 w-4" />} onClick={() => setImp(true)}>导入作品</Button>
+        <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>新建作品</Button>
+      </>} />
       {isLoading ? <GridSkeleton n={4} h="h-[300px]" cols="grid-cols-2 md:grid-cols-3 lg:grid-cols-4" /> : error ? <ErrorState error={error} onRetry={refetch} /> : !data?.length ? (
         <EmptyState kind="book" title="书架还是空的" action={<><Link to="/radar"><Button>看热点</Button></Link><Button variant="primary" onClick={() => setOpen(true)}>一键开写</Button></>} />
       ) : (
@@ -57,6 +62,7 @@ export default function Books() {
         </div>
       )}
       <QuickCreateDialog open={open} onOpenChange={setOpen} />
+      <ImportBookDialog open={imp} onOpenChange={setImp} />
       <Dialog open={!!del} onOpenChange={(o) => !o && setDel(null)}>
         <DialogContent title={`删除《${del?.title ?? ''}》？`} desc="设定、大纲、章节都会一并删除，无法恢复。"
           footer={<><Button variant="ghost" onClick={() => setDel(null)}>取消</Button><Button variant="danger" loading={rm.isPending} onClick={() => del && rm.mutate(del.id)}>确认删除</Button></>} />

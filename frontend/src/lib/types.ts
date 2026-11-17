@@ -23,7 +23,10 @@ export interface Channel {
   models: string[]
   enabled: boolean
   api_format: ApiFormat
+  /** v0.12 模型单价：元/百万输入 token、元/百万输出 token、元/张（生图） */
+  prices?: Record<string, ModelPrice>
 }
+export interface ModelPrice { in?: number; out?: number; image?: number }
 export type ApiFormat = 'openai' | 'responses' | 'anthropic' | 'gemini'
 export interface ChannelInput {
   name: string
@@ -32,6 +35,7 @@ export interface ChannelInput {
   models: string[]
   enabled?: boolean
   api_format?: ApiFormat
+  prices?: Record<string, ModelPrice>
 }
 export type RouteKey = 'planner' | 'writer' | 'reviewer' | 'search' | 'embedding' | 'image' | 'agent'
 export type ImageMode = 'images' | 'chat'
@@ -318,6 +322,19 @@ export interface Card {
   ref_enabled?: boolean
   status?: CardStatus
   soul?: Soul | null
+  /** v0.12：锁定后 AI 不能改；versions 为单卡旧版本条数 */
+  locked?: boolean
+  versions?: number
+}
+export interface CardVersion {
+  n: number
+  label: string
+  at: string
+  type: CardType
+  name: string
+  summary: string
+  data: Record<string, any>
+  known_by: string[]
 }
 export interface Fact {
   id: number
@@ -344,6 +361,7 @@ export interface OutlineNode {
   chapter_id: number | null
   versions?: number
   last_instruction?: string
+  locked?: boolean
 }
 
 export interface ReviewIssue {
@@ -626,7 +644,41 @@ export interface Estimate {
   seconds_est: number
   seconds_source?: 'history' | 'default'
   note?: string
+  /** v0.12：按渠道单价折算的人民币；priced=false 表示该模型还没填单价 */
+  cost_cny_est?: number
+  priced?: boolean
+  budget?: Budget
 }
+export interface Budget { daily_cny: number; book_cny: number; today_cny: number; book_spent_cny?: number }
+export type GenStatus = 'ok' | 'empty' | 'failed'
+export interface Generation {
+  id: number
+  book_id: number | null
+  job_id: number | null
+  kind: string
+  kind_label: string
+  task: string
+  route: string
+  model: string
+  status: GenStatus
+  error: string
+  output_words: number
+  target_words: number
+  short: boolean
+  in_tokens: number
+  out_tokens: number
+  cost_cny: number
+  ms: number
+  starred: boolean
+  parent_id: number | null
+  note: string
+  created_at: string
+  preview: string
+  prompt?: string
+  output?: string
+  children?: Generation[]
+}
+export interface GenerationList { items: Generation[]; total: number; cost_cny: number; kinds: { kind: string; label: string; count: number }[] }
 export interface UsageRow { calls: number; in_tokens: number; out_tokens: number; ms: number }
 export interface BookUsage extends UsageRow {
   book_id: number | null
@@ -954,3 +1006,8 @@ export interface HomoReport {
   llm: { overall: string; suggestions: string[] } | null
 }
 export interface PlatformStyleOpt { id: PlatformStyle | string; label: string; optional: boolean }
+
+/** v0.12 导入已有作品 */
+export interface ImportChapter { index: number; raw_title: string; title: string; volume: string; words: number; flags: string[]; preview: string }
+export interface ImportPreview { import_id: string; title: string; encoding: string; total_words: number; volumes: string[]; warnings: string[]; chapters: ImportChapter[] }
+export interface AdoptStatus { chapters: number; summaries: number; cards: number; foreshadows: number; outline_linked: number }

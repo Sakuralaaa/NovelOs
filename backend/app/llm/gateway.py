@@ -21,7 +21,7 @@ from sqlmodel import Session, select
 
 from app.config import get_settings
 from app.db import kv_get, session_scope
-from app.llm import mock
+from app.llm import archive, mock
 from app.llm import protocols as proto
 from app.llm import trace
 from app.llm import usage as usage_log
@@ -55,6 +55,7 @@ TASK_ROLE: dict[str, str] = {
     "humanize": "writer",
     "thicken": "writer",
     "summary": "reviewer",
+    "adopt_bible": "planner",
     "review": "reviewer",
     "reader": "reviewer",
     "book_revise": "planner",
@@ -336,19 +337,31 @@ class LLMGateway:
                          started=started, temperature=temperature)
             usage_log.record(task=task, route=role, model="mock", messages=messages, output=out,
                              ms=int((time.time() - started) * 1000))
+            archive.record(task=task, route=role, model="mock", messages=messages, output=out,
+                           ms=int((time.time() - started) * 1000), meta=meta)
             return out
+        try:
+            archive.check_budget()
+        except archive.BudgetExceeded as e:
+            archive.record(task=task, route=role, model=f"{targets[0].name}/{targets[0].model}", messages=messages,
+                           status="failed", error=str(e), meta=meta)
+            raise LLMError(str(e)) from e
         errors: list[str] = []
+        started = time.time()
         for t in targets:
             for attempt in range(self.settings.llm_retries + 1):
                 try:
-                    return self._chat_once(t, role, task, messages, temperature, max_tokens)
+                    return self._chat_once(t, role, task, messages, temperature, max_tokens, meta)
                 except Exception as e:  # noqa: BLE001
                     errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
                     log.warning("LLM 调用失败 %s", errors[-1])
                     if _not_retryable(e):  # 模型名错、key 无效这类请求错误，重试也没用，直接换下一个渠道
                         break
                     time.sleep(min(2.0, 0.5 * (attempt + 1)))
-        raise LLMError("所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:])))
+        err = "所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:]))
+        archive.record(task=task, route=role, model=f"{targets[-1].name}/{targets[-1].model}", messages=messages,
+                       status="failed", error=err, ms=int((time.time() - started) * 1000), meta=meta)
+        raise LLMError(err)
 
     def _post_chat(
         self, t: Target, messages: list[dict[str, str]], temperature: float | None, max_tokens: int | None,
@@ -375,6 +388,7 @@ class LLMGateway:
         messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int | None,
+        meta: dict[str, Any] | None = None,
     ) -> str:
         started = time.time()
         try:
@@ -392,6 +406,8 @@ class LLMGateway:
                          ms=int((time.time() - started) * 1000), usage=usage)
         if not content.strip():
             raise LLMError("模型返回空内容")
+        archive.record(task=task, route=role, model=f"{t.name}/{t.model}", raw_model=t.model, channel_id=t.channel_id,
+                       messages=messages, output=content, ms=int((time.time() - started) * 1000), usage=usage, meta=meta)
         return content
 
     def chat_json(
@@ -443,7 +459,13 @@ class LLMGateway:
             usage_log.record(task="agent", route="agent", model="mock", messages=messages,
                              output=str(res.get("content") or "") + str(res.get("tool_calls") or ""),
                              ms=int((time.time() - started) * 1000))
+            archive.record(task="agent", route="agent", model="mock", messages=messages,
+                           output=str(res.get("content") or "") or str(res.get("tool_calls") or ""), ms=int((time.time() - started) * 1000))
             return res
+        try:
+            archive.check_budget()
+        except archive.BudgetExceeded as e:
+            raise LLMError(str(e)) from e
         errors: list[str] = []
         for t in targets:
             for attempt in range(self.settings.llm_retries + 1):
@@ -479,6 +501,8 @@ class LLMGateway:
                      usage=usage, temperature=temperature)
         usage_log.record(task="agent", route="agent", model=f"{t.name}/{t.model}", messages=messages,
                          output=out["content"] + str(out["tool_calls"]), ms=int((time.time() - started) * 1000), usage=usage)
+        archive.record(task="agent", route="agent", model=f"{t.name}/{t.model}", raw_model=t.model, channel_id=t.channel_id,
+                       messages=messages, output=out["content"] or str(out["tool_calls"]), ms=int((time.time() - started) * 1000), usage=usage)
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")
         return out
@@ -493,6 +517,8 @@ class LLMGateway:
                      started=started, usage=usage, temperature=temperature)
         usage_log.record(task="agent", route="agent", model=f"{t.name}/{t.model}", messages=msgs, output=content,
                          ms=int((time.time() - started) * 1000), usage=usage)
+        archive.record(task="agent", route="agent", model=f"{t.name}/{t.model}", raw_model=t.model, channel_id=t.channel_id,
+                       messages=messages, output=content, ms=int((time.time() - started) * 1000), usage=usage)
         out = proto.parse_text_tool_calls(content, {f["function"]["name"] for f in tools})
         if not out["content"].strip() and not out["tool_calls"]:
             raise LLMError("模型返回空内容")
@@ -607,19 +633,35 @@ class LLMGateway:
             mode = get_image_mode(s)
         if not targets:
             return None
+        msgs = [{"role": "user", "content": prompt}]
+        try:
+            archive.check_budget()
+        except archive.BudgetExceeded as e:
+            archive.record(task="image", route="image", model=f"{targets[0].name}/{targets[0].model}", messages=msgs,
+                           status="failed", error=str(e))
+            raise LLMError(str(e)) from e
         errors: list[str] = []
+        started = time.time()
         for t in targets[:1]:
             for attempt in range(self.settings.llm_retries + 1):
                 try:
                     if mode == "chat" or t.api_format in ("anthropic", "gemini"):
-                        return self._images_via_chat(t, prompt, n)
-                    return self._images_once(t, prompt, n)
+                        imgs = self._images_via_chat(t, prompt, n)
+                    else:
+                        imgs = self._images_once(t, prompt, n)
+                    archive.record(task="image", route="image", model=f"{t.name}/{t.model}", raw_model=t.model,
+                                   channel_id=t.channel_id, messages=msgs, ms=int((time.time() - started) * 1000),
+                                   usage={"prompt_tokens": 1}, images=len(imgs))
+                    return imgs
                 except Exception as e:  # noqa: BLE001
                     errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
                     if _not_retryable(e):
                         break
                     time.sleep(0.5 * (attempt + 1))
-        raise LLMError("生图失败：" + "；".join(dict.fromkeys(errors[-3:])))
+        err = "生图失败：" + "；".join(dict.fromkeys(errors[-3:]))
+        archive.record(task="image", route="image", model=f"{targets[0].name}/{targets[0].model}", messages=msgs,
+                       status="failed", error=err, ms=int((time.time() - started) * 1000))
+        raise LLMError(err)
 
     def _images_once(self, t: Target, prompt: str, n: int) -> list[bytes]:
         body = {"model": t.model, "prompt": prompt, "n": n, "size": self.settings.image_size}

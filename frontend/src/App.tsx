@@ -30,6 +30,7 @@ const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
 const TeardownPage = lazy(() => import('@/pages/Teardown'))
 const FanficPage = lazy(() => import('@/pages/Fanfic'))
 const FanficNewPage = lazy(() => import('@/pages/FanficNew'))
+const HistoryPage = lazy(() => import('@/pages/History'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 const qc = new QueryClient({
@@ -82,6 +83,7 @@ export function App() {
                 <Route path="fanfic/new" element={<S><FanficNewPage /></S>} />
                 <Route path="fanfic/:id" element={<S><FanficPage /></S>} />
                 <Route path="aigc" element={<S><AigcDetectPage /></S>} />
+                <Route path="history" element={<S><HistoryPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />
               </Route>

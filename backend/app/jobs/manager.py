@@ -150,7 +150,7 @@ def _run_sync(job_id: int, book_id: int | None, fn: Worker, lock_book: bool, kin
               resume_state: dict[str, Any] | None = None) -> None:
     from app.llm import usage as usage_log
 
-    token = usage_log.set_job_context(kind, book_id)  # v0.9.3：模型调用记用量时读 Job.kind / book_id
+    token = usage_log.set_job_context(kind, book_id, job_id)  # v0.9.3：模型调用记用量时读 Job.kind / book_id
     try:
         _run_sync_inner(job_id, book_id, fn, lock_book, resume_state)
     finally:

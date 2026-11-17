@@ -143,7 +143,23 @@ def estimate(s: Session, kind: str, book_id: int | None = None, chapter_id: int 
     model = _model(s, route)
     if model == "mock":
         notes.append("当前没有可用模型渠道，实际会走演示模式（不花钱）")
-    return {"kind": kind, "label": spec["label"], "input_tokens_est": usage_log.est_tokens(inp),
-            "output_tokens_est": usage_log.est_tokens(out), "calls_est": calls, "route": route, "model": model,
-            "seconds_est": max(1, seconds), "seconds_source": src, "note": "；".join(notes)}
+    tin, tout = usage_log.est_tokens(inp), usage_log.est_tokens(out)
+    cost, priced = 0.0, False
+    ts = resolve_targets(s, route)
+    if ts:  # v0.12：按渠道里填的单价折算人民币
+        from app.llm import archive
+        from app.models.tables import Channel
+
+        ch_row = s.get(Channel, ts[0].channel_id)
+        prices = dict(ch_row.prices or {}) if ch_row is not None else {}
+        pi, po = archive.price_of(prices, ts[0].model)
+        priced = bool(pi or po)
+        cost = archive.cost_cny(prices, ts[0].model, tin, tout)
+    from app.llm import archive as _arc
+
+    budget = _arc.budget_status(s, book_id)
+    return {"kind": kind, "label": spec["label"], "input_tokens_est": tin,
+            "output_tokens_est": tout, "calls_est": calls, "route": route, "model": model,
+            "seconds_est": max(1, seconds), "seconds_source": src, "note": "；".join(notes),
+            "cost_cny_est": round(cost, 4), "priced": priced, "budget": budget}
 

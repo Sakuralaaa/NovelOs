@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Clock, Coins, Cpu, Loader2, Sparkles } from '@/components/icons'
+import { Clock, Coins, Cpu, Loader2, Sparkles, Wallet } from '@/components/icons'
 import { Button, type ButtonProps } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { api } from '@/lib/api'
-import { fmtSeconds, fmtTokens, setCostHint, useCostHint } from '@/lib/cost'
+import { fmtCny, fmtSeconds, fmtTokens, setCostHint, useCostHint } from '@/lib/cost'
 import type { Estimate, EstimateKind } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -29,6 +29,7 @@ export function EstimateBody({ q, compact }: { q: ReturnType<typeof useEstimate>
     { i: Coins, k: '预计 token', v: <>{fmtTokens((e.input_tokens_est || 0) + (e.output_tokens_est || 0))}<span className="ml-1 text-[11.5px] font-normal text-muted-foreground">入 {fmtTokens(e.input_tokens_est)} / 出 {fmtTokens(e.output_tokens_est)}</span></> },
     { i: Sparkles, k: '调用次数', v: `${e.calls_est} 次` },
     { i: Cpu, k: '模型', v: <span className="font-mono text-[12px]" title={e.route ? `路由：${e.route}` : undefined}>{e.model || '默认路由'}</span> },
+    ...(e.model && e.model !== 'mock' ? [{ i: Wallet, k: '预计花费', v: e.priced ? fmtCny(e.cost_cny_est ?? 0) : <span className="text-[12px] font-normal text-muted-foreground">没填单价</span> }] : []),
     { i: Clock, k: '预计耗时', v: <>{fmtSeconds(e.seconds_est)}{e.seconds_source === 'default' && <span className="ml-1 text-[11px] font-normal text-muted-foreground">经验值</span>}</> },
   ]
   return (
@@ -40,6 +41,11 @@ export function EstimateBody({ q, compact }: { q: ReturnType<typeof useEstimate>
           <span className="num ml-auto min-w-0 truncate text-right text-[13px] font-medium">{r.v}</span>
         </div>
       ))}
+      {e.budget && e.budget.daily_cny > 0 && (
+        <p className={cn('col-span-full text-[11.5px]', e.budget.today_cny >= e.budget.daily_cny ? 'text-danger' : 'text-muted-foreground')}>
+          今日已用 {fmtCny(e.budget.today_cny)} / {fmtCny(e.budget.daily_cny)}
+        </p>
+      )}
       {e.note && <p className="col-span-full text-[11.5px] leading-relaxed text-muted-foreground">{e.note}</p>}
     </div>
   )

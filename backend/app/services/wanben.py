@@ -304,6 +304,8 @@ def plan_job(book_id: int, ctx: JobContext) -> dict[str, Any]:
             s.flush()
         vols = volumes(s, book_id)
         for v in vols[n_vol:]:  # 多出来、且下面没有章细纲的卷：连同空弧一起删
+            if v.locked:
+                continue
             for a in [n for n in common.outline_nodes(s, book_id) if n.level == "arc" and n.parent_id == v.id]:
                 s.delete(a)
             s.delete(v)
@@ -321,9 +323,11 @@ def plan_job(book_id: int, ctx: JobContext) -> dict[str, Any]:
                 action = "added"
             else:
                 action = "unchanged"
-                if not (v.title or "").strip() and g.get("title"):
+                if v.locked:
+                    pass
+                elif not (v.title or "").strip() and g.get("title"):
                     v.title = str(g["title"])[:80]
-                if not (v.summary or "").strip() and g.get("summary"):
+                if not v.locked and not (v.summary or "").strip() and g.get("summary"):
                     v.summary = str(g["summary"])
             old = _vol_plan(v)
             range_changed = (old.get("start"), old.get("end")) != (a, b)
@@ -413,7 +417,7 @@ def annotate_roles(s: Session, book_id: int) -> int:
                                     "写成完整结局，不留悬念钩子，不写未完待续")
         for num, text in roles.items():
             node = chs.get(num)
-            if node is None or node.status == "written":
+            if node is None or node.status == "written" or node.locked:
                 continue
             b = dict(node.beats or {})
             if b.get("wanben_role") != text:
@@ -473,7 +477,7 @@ def ensure_nodes(book_id: int, upto: int, ctx: Any) -> int:
         created += len(r.get("created") or [])
         with session_scope() as s:
             extra = [x for x in common.outline_nodes(s, book_id) if x.level == "chapter" and x.parent_id == arc_id
-                     and x.order > vol_end and x.status != "written" and x.chapter_id is None]
+                     and x.order > vol_end and x.status != "written" and x.chapter_id is None and not x.locked]
             for x in extra:
                 s.delete(x)
                 created -= 1

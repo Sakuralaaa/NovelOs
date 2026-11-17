@@ -317,6 +317,8 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
     ctx.progress(70, "写入大纲")
     with common_session() as s:
         book = common.get_book(s, book_id)
+        if any(n.locked for n in common.outline_nodes(s, book_id)):
+            raise Conflict("大纲里有锁定的节点，整体重新生成会覆盖它们；先解锁再重新生成")
         for n in common.outline_nodes(s, book_id):
             s.delete(n)
         s.flush()
@@ -425,6 +427,7 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
         else:
             if node.status == "written":
                 raise Conflict("该章已写，不能再展开细纲")
+            ensure_node_unlocked(node)
             beats = normalize_beats({**(node.beats or {}), **(data.get("beats") or {})}, node.order, book.chapter_words)
             node.beats = beats
             node.title = beats["title"]
@@ -502,6 +505,12 @@ LEVEL_RULE = {
     "chapter": "章概要写清本章戏剧问题和冲突。",
 }
 MAX_NODE_VERSIONS = 10
+NODE_LOCKED_MSG = "这个大纲节点已锁定，AI 不能修改；先解锁再让 AI 改"
+
+
+def ensure_node_unlocked(node: OutlineNode) -> None:
+    if getattr(node, "locked", False):
+        raise Conflict(NODE_LOCKED_MSG)
 
 
 def push_node_version(node: OutlineNode, instruction: str) -> None:
@@ -517,6 +526,7 @@ def suggest_node(node_id: int, instruction: str, route: str | None, ctx: JobCont
         node = s.get(OutlineNode, node_id)
         if node is None:
             raise NotFound("大纲节点不存在")
+        ensure_node_unlocked(node)
         book = common.get_book(s, node.book_id)
         parent = s.get(OutlineNode, node.parent_id) if node.parent_id else None
         sibs = [n for n in s.exec(select(OutlineNode).where(OutlineNode.parent_id == node.parent_id, OutlineNode.book_id == node.book_id)).all()
@@ -569,7 +579,7 @@ def apply_nodes(book_id: int, items: list[dict[str, Any]], instruction: str) -> 
     with common_session() as s:
         for it in items:
             node = s.get(OutlineNode, int(it.get("node_id") or 0))
-            if node is None or node.book_id != book_id:
+            if node is None or node.book_id != book_id or node.locked:
                 continue
             title = it.get("title")
             summary = it.get("summary")

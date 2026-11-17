@@ -17,10 +17,16 @@ from app.config import get_settings
 log = logging.getLogger("novelos.usage")
 
 _job_ctx: contextvars.ContextVar[tuple[str, int | None] | None] = contextvars.ContextVar("novelos_job_ctx", default=None)
+_job_id: contextvars.ContextVar[int | None] = contextvars.ContextVar("novelos_job_id", default=None)
 
 
-def set_job_context(kind: str, book_id: int | None) -> contextvars.Token[Any]:
+def set_job_context(kind: str, book_id: int | None, job_id: int | None = None) -> contextvars.Token[Any]:
+    _job_id.set(job_id)
     return _job_ctx.set((kind, book_id))
+
+
+def current_job_id() -> int | None:
+    return _job_id.get()
 
 
 def reset_job_context(token: contextvars.Token[Any]) -> None:

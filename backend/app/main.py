@@ -113,14 +113,19 @@ def create_app() -> FastAPI:
 
     app.include_router(routes_auth.router)
     app.include_router(routes_core.router)
+    from app.api import routes_import  # v0.12 导入已有作品（要在 /books/{id} 之前注册）
+
+    app.include_router(routes_import.router)
     app.include_router(routes_books.router)
     app.include_router(routes_agent.router)
     app.include_router(routes_v093.router)
     app.include_router(routes_fanfic.router)  # v0.10 同人创作
     app.include_router(routes_bookcheck.router)  # v0.11 完本模式·质检
     from app.api import routes_wanben  # v0.11 完本模式
+    from app.api import routes_generations  # v0.12 生成档案与成本
 
     app.include_router(routes_wanben.router)
+    app.include_router(routes_generations.router)  # v0.12 生成档案与成本
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 

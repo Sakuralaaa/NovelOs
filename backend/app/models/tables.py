@@ -35,6 +35,8 @@ class Channel(SQLModel, table=True):
     enabled: bool = True
     # 接口格式：openai（Chat Completions）/ responses（OpenAI Responses）/ anthropic（Messages）/ gemini（generateContent）
     api_format: str = "openai"
+    # v0.12 模型单价：{模型名: {"in": 元/百万输入 token, "out": 元/百万输出 token}}，作者手填；没填的模型按 0 计
+    prices: Optional[dict[str, Any]] = _json_dict_nullable()
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -183,6 +185,9 @@ class Card(SQLModel, table=True):
     status: str = "active"
     ref_enabled: bool = True
     soul: Optional[dict[str, Any]] = _json_dict_nullable()
+    # v0.12：锁定后任何 AI 生成、同步、批量改都不能改这张卡（作者手动编辑不受限）；versions 为单卡旧版本，最近的在最后
+    locked: bool = False
+    versions: list[dict[str, Any]] = _json_list()
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -210,6 +215,7 @@ class OutlineNode(SQLModel, table=True):
     status: str = "planned"
     chapter_id: Optional[int] = None
     versions: list[dict[str, Any]] = _json_list()  # 标题/概要的旧版本，最近的在最后
+    locked: bool = False  # v0.12：锁定后 AI 重写、展开、同步、整体重新生成都不能改这个节点
 
 
 class Chapter(SQLModel, table=True):
@@ -441,3 +447,34 @@ class WanbenIteration(SQLModel, table=True):
     scores: Optional[dict[str, Any]] = _json_dict_nullable()
     status: str = "pending"  # pending（待采纳）/ adopted / discarded
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.12 生成档案
+
+class Generation(SQLModel, table=True):
+    """每次模型调用（对话 / 生图，含 mock）一条档案：成功、空结果、失败都记，输出全文保留，可收藏、追问、删除。
+
+    追问产生的新结果 parent_id 指向原条；原条不会被覆盖。
+    """
+    __tablename__ = "generation"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: Optional[int] = Field(default=None, index=True)
+    job_id: Optional[int] = Field(default=None, index=True)
+    kind: str = Field(default="", index=True)  # 所在任务的 Job.kind；不在任务里为 task 名
+    task: str = ""  # 提示词名（chapter / review / bible …）
+    route: str = ""  # 角色：planner / writer / reviewer / image …
+    model: str = ""  # 渠道名/模型，mock 为 mock
+    status: str = Field(default="ok", index=True)  # ok / empty / failed
+    error: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    prompt: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))  # 最后一条作者侧消息（截断）
+    output: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    output_words: int = 0
+    target_words: int = 0  # 有目标字数的生成（写章等）；0 表示没有
+    in_tokens: int = 0
+    out_tokens: int = 0
+    cost_cny: float = 0.0
+    ms: int = 0
+    starred: bool = False
+    parent_id: Optional[int] = Field(default=None, index=True)
+    note: str = ""  # 追问时作者写的要求
+    created_at: datetime = Field(default_factory=utcnow, index=True)

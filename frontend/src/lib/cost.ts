@@ -24,3 +24,6 @@ export const fmtSeconds = (s?: number | null) => {
   const m = Math.round(v / 60)
   return m < 60 ? `约 ${m} 分钟` : `约 ${(v / 3600).toFixed(1)} 小时`
 }
+
+/** v0.12：人民币金额，小额保留到分以下 */
+export const fmtCny = (v: number) => (v <= 0 ? '¥0' : v < 0.01 ? '<¥0.01' : `¥${v < 10 ? v.toFixed(2) : v.toFixed(1)}`)

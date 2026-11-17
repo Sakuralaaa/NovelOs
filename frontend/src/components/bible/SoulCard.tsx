@@ -23,7 +23,7 @@ export const emptySoul = (): Soul => ({ desire: '', fear: '', wound: '', belief:
 export const soulFilled = (s?: Partial<Soul> | null) => SOUL_DIMS.filter((d) => s?.[d.key]?.trim()).length
 
 /** 角色灵魂五维：五格卡片，每格可编辑 + 单格 AI；整卡「AI 补全」先对比再采纳 */
-export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdoptAll, autoFill }: {
+export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdoptAll, autoFill, aiOff }: {
   bookId: number
   /** 新建、还没保存的人物没有 id：只能手填 */
   entryId?: number
@@ -33,8 +33,11 @@ export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdo
   onAdoptAll: (s: Soul) => Promise<unknown>
   /** 打开时自动发起一次补全（从完整度待办跳过来） */
   autoFill?: boolean
+  /** v0.12：设定已锁定时隐藏 AI 入口 */
+  aiOff?: boolean
 }) {
   const { start } = useJobs()
+  const aiId = aiOff ? undefined : entryId
   const key = `soul:${entryId ?? 0}`
   const job = useActiveJob(key)
   const [mode, setMode] = useState<'fill' | 'rewrite'>('fill')
@@ -57,7 +60,7 @@ export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdo
     })
   }
   const auto = useRef(false)
-  useEffect(() => { if (autoFill && entryId && !auto.current) { auto.current = true; run('fill') } }, [autoFill, entryId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (autoFill && aiId && !auto.current) { auto.current = true; run('fill') } }, [autoFill, aiId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const adopt = async () => {
     if (!res) return
@@ -75,12 +78,12 @@ export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdo
           <div className="flex items-center gap-1.5 text-[13.5px] font-semibold"><Sparkles className="h-4 w-4 text-primary" />灵魂五维<span className="num ml-1 rounded-full bg-muted px-2 text-[11.5px] font-normal leading-5 text-muted-foreground">{n}/5</span></div>
           <p className="mt-0.5 text-[12px] text-muted-foreground">写作时本章出场人物会带上这五项，人物不走样</p>
         </div>
-        {entryId ? (
+        {aiId ? (
           <CostButton target={{ kind: 'soul', bookId }} label={mode === 'fill' ? 'AI 补全空着的几项' : 'AI 重写全部五项'} onRun={() => run()} confirmLabel="开始"
             size="sm" variant="soft" className="h-10" loading={!!job} icon={<Sparkles className="h-4 w-4" />}>AI 补全</CostButton>
-        ) : <span className="text-[12px] text-muted-foreground">保存后可用 AI 补全</span>}
+        ) : !entryId ? <span className="text-[12px] text-muted-foreground">保存后可用 AI 补全</span> : null}
       </div>
-      {entryId && (
+      {aiId && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Segmented size="sm" value={mode} onChange={setMode} options={[{ value: 'fill', label: '只补空项' }, { value: 'rewrite', label: '全部重写' }]} className="h-10" />
           <Input value={ins} onChange={(e) => setIns(e.target.value.slice(0, 500))} placeholder="可选：要求，如「伤痕和父亲有关」" className="h-10 min-w-0 flex-1 bg-surface text-[13px]" />
@@ -96,7 +99,7 @@ export function SoulCard({ bookId, entryId, value, onChange, onAdoptField, onAdo
                 <div className="text-[13px] font-semibold">{d.label}</div>
                 <div className="truncate text-[11.5px] text-muted-foreground">{d.sub}</div>
               </div>
-              {entryId && <FieldAiButton bookId={bookId} entryId={entryId} field={`soul.${d.key}`} label={`灵魂·${d.label}`} onAdopt={(v) => onAdoptField(d.key, String(v ?? ''))} />}
+              {aiId && <FieldAiButton bookId={bookId} entryId={aiId} field={`soul.${d.key}`} label={`灵魂·${d.label}`} onAdopt={(v) => onAdoptField(d.key, String(v ?? ''))} />}
             </div>
             <textarea value={value[d.key] ?? ''} onChange={(e) => onChange({ ...value, [d.key]: e.target.value })} rows={2} placeholder={d.ph} aria-label={d.label}
               className="min-h-[56px] w-full resize-none rounded-md bg-transparent text-[13px] leading-relaxed outline-none placeholder:text-muted-foreground/60" />

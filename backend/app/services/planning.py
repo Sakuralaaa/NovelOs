@@ -15,7 +15,7 @@ from app.models.tables import Book, Card, Fact, Idea, utcnow
 from app.radar import service as radar
 from app.services import common, tropes
 from app.services.changes import CARD_TYPES
-from app.services.common import NotFound
+from app.services.common import Conflict, NotFound
 from app.skills.loader import render, system_prompt
 
 
@@ -415,6 +415,12 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
             t = it.get("type") if it.get("type") in CARD_TYPES else "character"
             name = str(it["name"])[:40]
             card = existing.get(name) or Card(book_id=book_id, type=t, name=name)
+            if card.locked:  # v0.12：锁定卡不被重新生成覆盖
+                continue
+            if card.id is not None:
+                from app.services import card_versions
+
+                card_versions.push(card, "重新生成设定")
             card.type, card.summary = t, str(it.get("summary", ""))
             card.data = it.get("data") if isinstance(it.get("data"), dict) else {}
             card.known_by = [str(x) for x in (it.get("known_by") or [])]
@@ -464,6 +470,10 @@ def suggest_card(book_id: int, card_id: int | None, field: str | None, instructi
             c = s.get(Card, card_id)
             if c is None or c.book_id != book_id:
                 raise NotFound("卡片不存在")
+            if c.locked:
+                from app.services.card_versions import LOCKED_MSG
+
+                raise Conflict(LOCKED_MSG)
             base = {"type": c.type, "name": c.name, "summary": c.summary, "data": dict(c.data or {}), "known_by": list(c.known_by or [])}
         cur = {**base, **{k: v for k, v in (draft or {}).items() if k in ("type", "name", "summary", "data", "known_by")}}
         cur.setdefault("type", "character")

@@ -197,7 +197,7 @@ def add_batch(book_id: int, items: list[dict[str, Any]], attach: bool) -> dict[s
                 continue
             for action, ch in (("plant", f.plan_plant_ch), ("resolve", f.plan_resolve_ch)):
                 node = nodes.get(ch) if ch else None
-                if node is None or node.status == "written" or ch <= cur:
+                if node is None or node.status == "written" or node.locked or ch <= cur:
                     continue
                 beats = dict(node.beats or {})
                 fs = list(beats.get("foreshadow") or [])

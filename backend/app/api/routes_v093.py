@@ -93,6 +93,8 @@ async def field_ai(book_id: int, entry_id: int, body: FieldAiIn, s: Session = De
 
     _book(s, book_id)
     c = _entry(s, book_id, entry_id)
+    if c.locked:
+        raise HTTPException(409, "这张设定已锁定，AI 不能修改；先解锁再让 AI 改")
     try:
         bible_ai.check_field(c, body.field)
     except bible_ai.FieldError as e:
@@ -139,6 +141,8 @@ async def character_soul(book_id: int, entry_id: int, body: SoulJobIn | None = B
     c = _entry(s, book_id, entry_id)
     if c.type != "character":
         raise HTTPException(400, "只有角色条目有灵魂五维")
+    if c.locked:
+        raise HTTPException(409, "这张设定已锁定，AI 不能修改；先解锁再让 AI 改")
     b = body or SoulJobIn()
     return _job(submit("character_soul", lambda ctx: bible_ai.soul_job(book_id, entry_id, b.mode, b.instruction, b.route, ctx),
                        book_id=book_id, ref=f"card:{entry_id}"))

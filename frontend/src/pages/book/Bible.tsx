@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { AlertTriangle, Archive, At, ChevronDown, Eye, Globe2, Gem, MapPin, MessageSquareQuote, Plus, RotateCcw, Shield, Sparkles, Trash2, User, Wand2, X, Zap } from '@/components/icons'
+import { AlertTriangle, Archive, At, ChevronDown, Eye, Globe2, Gem, History, Lock, MapPin, MessageSquareQuote, Plus, RotateCcw, Shield, Sparkles, Trash2, Unlock, User, Wand2, X, Zap } from '@/components/icons'
 import { Switch } from '@/components/ui/switch'
 import { FieldAiButton } from '@/components/bible/FieldAi'
 import { SoulCard, emptySoul, soulFilled } from '@/components/bible/SoulCard'
@@ -24,7 +24,7 @@ import { BookCrumb } from './_shared'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
-import type { BibleProposal, Card as CardT, CardType, Soul } from '@/lib/types'
+import type { BibleProposal, Card as CardT, CardType, CardVersion, Soul } from '@/lib/types'
 import { CARD_TYPES, cn, fmtTime } from '@/lib/utils'
 
 const TYPE_ICON: Record<CardType, typeof Globe2> = { world: Globe2, cheat: Sparkles, power: Zap, faction: Shield, character: User, item: Gem, location: MapPin }
@@ -74,6 +74,7 @@ export default function Bible() {
       qc.invalidateQueries({ queryKey: qk.cards(id) }); qc.invalidateQueries({ queryKey: ['refs', id] }); qc.invalidateQueries({ queryKey: qk.completeness(id) })
       if (b.status === 'deprecated') toast.success(`已弃用「${r.name}」`, { description: '不再进入写作上下文，可在列表底部恢复', action: { label: '撤销', onClick: () => patchCard.mutate({ c: r, b: { status: 'active' } }) } })
       else if (b.status === 'active') toast.success(`已恢复「${r.name}」`)
+      else if (b.locked !== undefined) toast.success(b.locked ? `已锁定「${r.name}」` : `已解锁「${r.name}」`)
     },
     onError: () => qc.invalidateQueries({ queryKey: allKey(id) }),
   })
@@ -125,7 +126,7 @@ export default function Bible() {
                   <h2 className="flex items-center gap-1.5 text-[15px] font-semibold"><Icon className="h-4 w-4 text-muted-foreground" />{g.label}</h2>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {g.items.map((c) => <BibleCard key={c.id} card={c} onClick={() => open(c)} onToggleRef={(v) => patchCard.mutate({ c, b: { ref_enabled: v } })} />)}
+                  {g.items.map((c) => <BibleCard key={c.id} card={c} onClick={() => open(c)} onToggleRef={(v) => patchCard.mutate({ c, b: { ref_enabled: v } })} onToggleLock={() => patchCard.mutate({ c, b: { locked: !c.locked } })} />)}
                   <button onClick={() => openNew(g.key)} className="flex min-h-[120px] items-center justify-center gap-1.5 rounded-xl border border-dashed text-[13px] text-muted-foreground transition hover:border-primary/50 hover:bg-primary-soft/40 hover:text-primary">
                     <Plus className="h-4 w-4" />添加{g.label}
                   </button>
@@ -164,7 +165,8 @@ export default function Bible() {
       )}
 
       <CardEditor bookId={id} card={editing} onClose={() => { setEditing(null); setAutoSoul(false) }} charNames={charNames} autoSoul={autoSoul}
-        onStatus={(c, status) => patchCard.mutateAsync({ c, b: { status } }).then(() => setEditing(null))} />
+        onStatus={(c, status) => patchCard.mutateAsync({ c, b: { status } }).then(() => setEditing(null))}
+        onLock={(c, locked) => patchCard.mutateAsync({ c, b: { locked } })} />
       <BibleAiSheet bookId={id} open={aiOpen} onOpenChange={setAiOpen} />
       <SnapshotSheet bookId={id} open={histOpen} onOpenChange={setHistOpen} />
     </div>
@@ -239,7 +241,7 @@ function TypeChip({ active, children, onClick }: { active: boolean; children: Re
   return <button onClick={onClick} className={cn('flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] transition', active ? 'bg-foreground text-background' : 'bg-surface text-foreground/75 hairline hover:text-foreground')}>{children}</button>
 }
 
-function BibleCard({ card: c, onClick, onToggleRef }: { card: CardT; onClick: () => void; onToggleRef: (v: boolean) => void }) {
+function BibleCard({ card: c, onClick, onToggleRef, onToggleLock }: { card: CardT; onClick: () => void; onToggleRef: (v: boolean) => void; onToggleLock: () => void }) {
   const Icon = TYPE_ICON[c.type]
   const entries = Object.entries(c.data ?? {}).filter(([k]) => !(c.type === 'character' && (CHAR_KEYS as readonly string[]).includes(k))).slice(0, 3)
   const cp: string[] = Array.isArray(c.data?.catchphrases) ? c.data.catchphrases : []
@@ -253,6 +255,11 @@ function BibleCard({ card: c, onClick, onToggleRef }: { card: CardT; onClick: ()
         <div className="min-w-0 flex-1 truncate font-semibold group-hover:text-primary">{c.name}</div>
         {soulN >= 0 && <span title="灵魂五维已填项数" className={cn('num shrink-0 rounded px-1.5 py-0.5 text-[11px]', soulN === 5 ? 'bg-success-soft text-success' : 'bg-muted text-muted-foreground')}>魂 {soulN}/5</span>}
         {!!c.trope_hits?.length && <span title={`命中禁用套路：${c.trope_hits.map((h) => h.name).join('、')}`} className="shrink-0 rounded bg-warning-soft px-1.5 py-0.5 text-[11px] text-warning">套路</span>}
+        <button type="button" onClick={(e) => { e.stopPropagation(); onToggleLock() }} onKeyDown={(e) => e.stopPropagation()}
+          aria-label={c.locked ? '解锁' : '锁定'} title={c.locked ? '已锁定，点击解锁' : '锁定'}
+          className={cn('-my-1 -mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition hover:bg-subtle', c.locked ? 'text-primary' : 'text-muted-foreground/50 opacity-0 group-hover:opacity-100 focus:opacity-100')}>
+          {c.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+        </button>
       </div>
       <p className="mt-2.5 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{c.summary || '暂无简介'}</p>
       {c.type === 'character' && (c.data?.voice || cp.length > 0) && (
@@ -302,12 +309,17 @@ const toRows = (d: Record<string, any>, skip: readonly string[]): Row[] =>
 
 type Form = { type: CardType; name: string; summary: string; known_by: string[]; rows: Row[]; voice: string; catchphrases: string[]; habits: string[]; demeanor: string; soul: Soul; ref_enabled: boolean }
 
-function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
+function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus, onLock }: {
   bookId: number; card: Partial<CardT> | null; onClose: () => void; charNames: string[]; autoSoul?: boolean
   onStatus: (c: CardT, status: 'active' | 'deprecated') => Promise<unknown>
+  onLock: (c: CardT, locked: boolean) => Promise<unknown>
 }) {
   const open = !!card
   const isNew = !card?.id
+  const [lockOv, setLockOv] = useState<boolean | null>(null)
+  const locked = lockOv ?? !!card?.locked
+  const [verOpen, setVerOpen] = useState(false)
+  const [lockBusy, setLockBusy] = useState(false)
   const entryId = card?.id
   const deprecatedCard = card?.status === 'deprecated'
   const [form, setForm] = useState<Form>()
@@ -325,6 +337,7 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
   if (card && lastId !== card) {
     setLastId(card)
     setForm(toForm(card))
+    setLockOv(null)
   }
   const { start } = useJobs()
   const [ask, setAsk] = useState('')
@@ -421,7 +434,7 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
       onError: (j) => { setBusy(null); toast.error('AI 改写失败', { description: j.error ?? undefined }) },
     })
   }
-  const ai = (field: string, label: string) => entryId ? (
+  const ai = (field: string, label: string) => locked ? undefined : entryId ? (
     <FieldAiButton bookId={bookId} entryId={entryId} field={field.includes('.') || field === 'name' || field === 'summary' ? field : `data.${field}`} label={label}
       onAdopt={(v) => adoptField(field.includes('.') || field === 'name' || field === 'summary' ? field : `data.${field}`, v)} className="-my-1.5" />
   ) : (
@@ -438,6 +451,9 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
         {!isNew && (confirmDel
           ? <Button variant="danger" className="h-10" loading={del.isPending} onClick={() => del.mutate()}>确认删除</Button>
           : <Button variant="ghost" className="h-10 text-danger hover:bg-danger-soft hover:text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setConfirmDel(true)}>删除</Button>)}
+        {!isNew && <Button variant="ghost" className="h-10" loading={lockBusy} icon={locked ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+          onClick={async () => { setLockBusy(true); try { await onLock(card as CardT, !locked); setLockOv(!locked) } finally { setLockBusy(false) } }}>{locked ? '解锁' : '锁定'}</Button>}
+        {!isNew && <Button variant="ghost" className="h-10" icon={<History className="h-4 w-4" />} onClick={() => setVerOpen(true)}>版本{card?.versions ? <span className="num ml-1 opacity-60">{card.versions}</span> : null}</Button>}
         {!isNew && <Button variant="ghost" className="h-10" loading={statusBusy} icon={deprecatedCard ? <RotateCcw className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
           onClick={async () => { setStatusBusy(true); try { await onStatus(card as CardT, deprecatedCard ? 'active' : 'deprecated') } finally { setStatusBusy(false) } }}>{deprecatedCard ? '恢复' : '弃用'}</Button>}
         <div className="ml-auto flex gap-2">
@@ -447,8 +463,9 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
       </div>}>
       <div className="space-y-5">
         {deprecatedCard && <div className="flex items-center gap-2 rounded-lg bg-muted px-3.5 py-2.5 text-[13px] text-muted-foreground"><Archive className="h-4 w-4 shrink-0" />这条设定已弃用：不进入写作上下文、不能被 @ 引用。点底部「恢复」重新启用。</div>}
-        {!isNew && <TropeAlert hits={(card as CardT | null)?.trope_hits} busy={busy === '__card'} onReplace={() => suggest(null, tropeReplaceInstruction((card as CardT).trope_hits ?? []))} />}
-        <div className="space-y-2 rounded-xl bg-primary-soft/40 p-3 hairline">
+        {locked && <div className="flex items-center gap-2 rounded-lg bg-primary-soft/50 px-3.5 py-2.5 text-[13px] text-primary"><Lock className="h-4 w-4 shrink-0" />已锁定，AI 不会改动这张设定</div>}
+        {!isNew && !locked && <TropeAlert hits={(card as CardT | null)?.trope_hits} busy={busy === '__card'} onReplace={() => suggest(null, tropeReplaceInstruction((card as CardT).trope_hits ?? []))} />}
+        {!locked && <div className="space-y-2 rounded-xl bg-primary-soft/40 p-3 hairline">
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-[13px] font-semibold"><Wand2 className="h-4 w-4 text-primary" />{isNew ? '让 AI 写这张' : '让 AI 改这张'}</span>
             <div className="w-[200px]"><Select value={model} onChange={setRoute} options={opts} allowEmpty emptyLabel="默认（策划模型）" placeholder="默认（策划模型）" /></div>
@@ -459,7 +476,7 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
               placeholder={isNew ? '例如：反派宗门的大长老，笑面虎' : '例如：口头禅换一句更狠的，境界压到炼气三层'} />
             <Button size="sm" className="h-9 shrink-0" loading={busy === '__card'} disabled={!!busy || (!ask.trim() && isNew && !form.name.trim())} onClick={() => suggest(null, ask.trim())}>{isNew ? 'AI 写' : '整张改'}</Button>
           </div>
-        </div>
+        </div>}
         <div className="grid grid-cols-[140px_1fr] gap-3">
           <Field label="类型"><Select value={form.type} onChange={(v) => v && set({ type: v as CardType })} options={CARD_TYPES.map((t) => ({ value: t.key, label: t.label }))} /></Field>
           <Field label="名称" hint={entryId ? ai('name', '名称') : undefined}><Input autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder={isChar ? '人物名' : '设定名称'} /></Field>
@@ -473,7 +490,7 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
 
         {isChar && (
           <SoulCard bookId={bookId} entryId={entryId} value={form.soul} onChange={(soul) => set({ soul })} autoFill={autoSoul}
-            onAdoptField={(k, v) => adoptField(`soul.${k}`, v)} onAdoptAll={adoptSoul} />
+            onAdoptField={(k, v) => adoptField(`soul.${k}`, v)} onAdoptAll={adoptSoul} aiOff={locked} />
         )}
         {isChar && (
           <div className="space-y-4 rounded-xl bg-amber-500/[0.06] p-4 hairline">
@@ -498,7 +515,7 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
               <div key={i} className="flex gap-1.5">
                 <Input value={r.k} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} placeholder="属性" className="w-[120px] shrink-0" />
                 <Input value={r.v} onChange={(e) => set({ rows: form.rows.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} placeholder="内容" className={cn(r.json && 'font-mono text-xs')} />
-                {entryId && r.k.trim() && (card?.data ?? {})[LABEL_KEY[r.k.trim()] ?? r.k.trim()] !== undefined
+                {locked ? null : entryId && r.k.trim() && (card?.data ?? {})[LABEL_KEY[r.k.trim()] ?? r.k.trim()] !== undefined
                   ? <FieldAiButton bookId={bookId} entryId={entryId} field={`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`} label={r.k.trim()} onAdopt={(v) => adoptField(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, v)} className="h-9 shrink-0" />
                   : <Button size="icon" variant="ghost" disabled={!!busy || !r.k.trim()} onClick={() => suggest(`data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}`, ask.trim())} aria-label="AI 改这一项" title="AI 改这一项"><Wand2 className={cn('h-4 w-4', busy === `data.${LABEL_KEY[r.k.trim()] ?? r.k.trim()}` && 'animate-pulse text-primary')} /></Button>}
                 <Button size="icon" variant="ghost" onClick={() => set({ rows: form.rows.filter((_, j) => j !== i) })} aria-label="删除"><X className="h-4 w-4" /></Button>
@@ -511,7 +528,55 @@ function CardEditor({ bookId, card, onClose, charNames, autoSoul, onStatus }: {
           <TagInput value={form.known_by} onChange={(v) => set({ known_by: v })} placeholder="输入人物名，回车添加" suggestions={charNames.filter((n) => n !== form.name)} />
         </Field>
       </div>
+      {entryId && <CardVersionSheet bookId={bookId} cardId={entryId} name={card?.name ?? ''} open={verOpen} onOpenChange={setVerOpen}
+        onRestored={(c) => { setForm(toForm(c)); setLastId(card) }} />}
     </Sheet>
+  )
+}
+
+/** v0.12 单卡版本：每次手动保存、采纳 AI、批量改之前的样子，可逐条回滚（回滚前也会存一版） */
+function CardVersionSheet({ bookId, cardId, name, open, onOpenChange, onRestored }: {
+  bookId: number; cardId: number; name: string; open: boolean; onOpenChange: (o: boolean) => void; onRestored: (c: CardT) => void
+}) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: [...qk.cards(bookId), 'versions', cardId], queryFn: () => api.cardVersions(cardId), enabled: open })
+  const [sel, setSel] = useState<number | null>(null)
+  const m = useMutation({
+    mutationFn: (n: number) => api.restoreCardVersion(cardId, n),
+    meta: { errorTitle: '回滚失败' },
+    onSuccess: (c) => { qc.invalidateQueries({ queryKey: qk.cards(bookId) }); setSel(null); onRestored(c); onOpenChange(false); toast.success(`「${c.name}」已回滚`) },
+  })
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} title={`「${name}」的版本`}>
+      {!q.data?.length ? <p className="py-10 text-center text-sm text-muted-foreground">{q.isLoading ? '加载中…' : '还没有旧版本'}</p> : (
+        <div className="space-y-2">
+          {q.data.map((v) => <VersionRow key={v.n} v={v} open={sel === v.n} onToggle={() => setSel(sel === v.n ? null : v.n)} busy={m.isPending && m.variables === v.n} onRestore={() => m.mutate(v.n)} />)}
+        </div>
+      )}
+    </Sheet>
+  )
+}
+
+function VersionRow({ v, open, onToggle, busy, onRestore }: { v: CardVersion; open: boolean; onToggle: () => void; busy: boolean; onRestore: () => void }) {
+  const rows = Object.entries(v.data ?? {})
+  return (
+    <div className="rounded-lg bg-surface p-3 hairline">
+      <div className="flex items-center justify-between gap-2">
+        <button className="min-w-0 flex-1 text-left" onClick={onToggle} aria-expanded={open}>
+          <div className="truncate text-[13.5px] font-medium">{v.label || '旧版本'}</div>
+          <div className="text-xs text-muted-foreground">{fmtTime(v.at)} · {v.name}</div>
+        </button>
+        <Button size="sm" variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} loading={busy} onClick={onRestore}>回滚到这版</Button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-1.5 border-t pt-2 text-[12.5px]">
+          <p className="leading-relaxed text-foreground/80">{v.summary || '暂无简介'}</p>
+          {rows.length > 0 && <dl className="space-y-1">{rows.map(([k, x]) => (
+            <div key={k} className="flex gap-2"><dt className="shrink-0 text-muted-foreground">{keyLabel(k)}</dt><dd className="min-w-0 break-words">{typeof x === 'string' ? (k === 'role' ? (ROLE_LABEL[x] ?? x) : x) : Array.isArray(x) ? x.join('；') : JSON.stringify(x)}</dd></div>
+          ))}</dl>}
+        </div>
+      )}
+    </div>
   )
 }
 

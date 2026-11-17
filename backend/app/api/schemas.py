@@ -38,6 +38,7 @@ class ChannelIn(BaseModel):
     models: list[str] = []
     enabled: bool = True
     api_format: Literal["openai", "responses", "anthropic", "gemini"] = "openai"
+    prices: dict[str, dict[str, float]] = {}
 
 
 class ChannelUpdate(BaseModel):
@@ -47,6 +48,19 @@ class ChannelUpdate(BaseModel):
     models: list[str] | None = None
     enabled: bool | None = None
     api_format: Literal["openai", "responses", "anthropic", "gemini"] | None = None
+    prices: dict[str, dict[str, float]] | None = None  # v0.12：{模型: {in, out, image}}，元/百万 token、元/张
+
+
+def clean_prices(p: dict[str, Any] | None) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for m, v in (p or {}).items():
+        if not str(m).strip() or not isinstance(v, dict):
+            continue
+        row = {k: round(max(0.0, float(v.get(k) or 0)), 6) for k in ("in", "out", "image") if v.get(k) not in (None, "")}
+        row = {k: x for k, x in row.items() if x}
+        if row:
+            out[str(m).strip()] = row
+    return out
 
 
 class ModelFetchIn(BaseModel):
@@ -284,6 +298,7 @@ class CardUpdate(BaseModel):
     status: Literal["active", "deprecated"] | None = None
     ref_enabled: bool | None = None
     soul: SoulIn | None = None
+    locked: bool | None = None
 
 
 def merge_soul(old: dict[str, Any] | None, patch: SoulIn | dict[str, Any] | None) -> dict[str, str] | None:
@@ -309,6 +324,7 @@ class OutlineUpdate(BaseModel):
     beats: dict[str, Any] | None = None
     status: Literal["planned", "expanded", "written"] | None = None
     order: int | None = None
+    locked: bool | None = None  # v0.12：锁定后 AI 不能改
     instruction: str | None = Field(default=None, max_length=1000)  # 记进旧版本的说明：采纳 AI 建议时传作者要求
 
 
@@ -514,7 +530,8 @@ def channel_out(c: Channel) -> dict[str, Any]:
     except ValueError:
         masked = "****（无法解密）"
     return {"id": c.id, "name": c.name, "base_url": c.base_url, "api_key_masked": masked,
-            "models": list(c.models or []), "enabled": c.enabled, "api_format": c.api_format or "openai"}
+            "models": list(c.models or []), "enabled": c.enabled, "api_format": c.api_format or "openai",
+            "prices": dict(c.prices or {})}
 
 
 def snapshot_out(sn: RadarSnapshot) -> dict[str, Any]:
@@ -581,7 +598,8 @@ def card_out(c: Card, trope_list: list[dict[str, Any]] | None = None) -> dict[st
     out = {"id": c.id, "book_id": c.book_id, "type": c.type, "name": c.name, "summary": c.summary,
            "data": c.data or {}, "known_by": list(c.known_by or []), "updated_at": iso(c.updated_at),
            "status": c.status if c.status in ("active", "deprecated") else "active",
-           "ref_enabled": bool(c.ref_enabled) if c.ref_enabled is not None else True, "soul": soul_out(c)}
+           "ref_enabled": bool(c.ref_enabled) if c.ref_enabled is not None else True, "soul": soul_out(c),
+           "locked": bool(getattr(c, "locked", False)), "versions": len(c.versions or [])}
     if trope_list is not None:
         from app.services import tropes
 
@@ -598,7 +616,8 @@ def node_out(n: OutlineNode) -> dict[str, Any]:
     vs = list(n.versions or [])
     return {"id": n.id, "book_id": n.book_id, "parent_id": n.parent_id, "level": n.level, "order": n.order,
             "title": n.title, "summary": n.summary, "beats": n.beats, "status": n.status, "chapter_id": n.chapter_id,
-            "versions": len(vs), "last_instruction": str(vs[-1].get("instruction") or "") if vs else ""}
+            "versions": len(vs), "last_instruction": str(vs[-1].get("instruction") or "") if vs else "",
+            "locked": bool(getattr(n, "locked", False))}
 
 
 LINT_KEYS = ("ai_score", "dialogue_ratio", "repeated_ngrams", "banned_hits", "warnings",

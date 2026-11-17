@@ -1,11 +1,12 @@
 import type {
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
-  Book, Card, CardType, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
+  Book, Card, CardType, CardVersion, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
   OutlineNode, Package, RadarConfig, RadarSnapshot, RankBoard, RankItem, Routing, Teardown, Style, TrendTopic, WritingSettings,
   BookTest, BookTestField, BookTestVariant, PlatformStyle, TrendReport, RadarAiKind, RadarBookDetail, ZhuqueSettings, ZhuqueSettingsInput,
   IdeaSeed, FusionRef, ImitateExtract, RadarReportConfig,
   Completeness, OnboardingState, OnboardingKey, FieldAiMode, RefEntry, Estimate, EstimateKind, BookUsage, TeardownRecord, TeardownListItem, TeardownSourceType, TeardownBiblePart, ApprovalMode,
+  Budget, Generation, GenerationList, ImportPreview, AdoptStatus,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -169,6 +170,16 @@ export const api = {
     const fd = new FormData(); fd.append('file', src)
     return request<ImitateExtract>('POST', '/radar/imitate/extract', fd)
   },
+  /** v0.12 导入已有作品：上传 TXT/MD/DOCX 或粘贴 → 预览；commit 建书；adopt 接管（Job） */
+  importPreview: (src: File | string) => {
+    if (typeof src === 'string') return post<ImportPreview>('/books/import', { text: src })
+    const fd = new FormData(); fd.append('file', src)
+    return request<ImportPreview>('POST', '/books/import', fd)
+  },
+  importCommit: (b: { import_id: string; title: string; genre?: string; gender?: Gender; tagline?: string; skip?: number[] }) =>
+    post<{ book_id: number; chapters: number; words: number }>('/books/import/commit', b),
+  adoptBook: (bookId: number, steps?: string[]) => post<Job>(`/books/${bookId}/adopt`, steps ? { steps } : {}),
+  adoptStatus: (bookId: number) => get<AdoptStatus>(`/books/${bookId}/adopt`),
   generateIdeas: (b: { genre?: string; gender?: Gender; from_trends: boolean; count: number }) => post<Job>('/ideas/generate', b),
   ideas: () => get<Idea[]>('/ideas'),
   deleteIdea: (id: number) => del<{ ok: boolean }>(`/ideas/${id}`),
@@ -188,6 +199,8 @@ export const api = {
   updateCard: (id: number, b: Partial<Card>) => put<Card>(`/cards/${id}`, b),
   deleteChapter: (id: number) => del<{ ok: boolean }>(`/chapters/${id}`),
   deleteCard: (id: number) => del<void>(`/cards/${id}`),
+  cardVersions: (id: number) => get<CardVersion[]>(`/cards/${id}/versions`),
+  restoreCardVersion: (id: number, n: number) => post<Card>(`/cards/${id}/versions/${n}/restore`),
   facts: (bookId: number) => get<Fact[]>(`/books/${bookId}/facts`),
 
   generateOutline: (bookId: number) => post<Job>(`/books/${bookId}/outline/generate`),
@@ -292,6 +305,15 @@ export const api = {
   setApprovalMode: (bookId: number, mode: ApprovalMode) => patch<Book>(`/books/${bookId}`, { approval_mode: mode }),
   estimate: (b: { kind: EstimateKind; book_id?: number; chapter_id?: number; words?: number }) => post<Estimate>('/estimate', b),
   usage: (bookId: number) => get<BookUsage>(`/books/${bookId}/usage`),
+  /** v0.12 生成档案 */
+  generations: (p: { book_id?: number; kind?: string; status?: string; q?: string; starred?: boolean; days?: number; limit?: number; offset?: number } = {}) =>
+    get<GenerationList>(`/generations${qs({ ...p, starred: p.starred || undefined })}`),
+  generation: (id: number) => get<Generation>(`/generations/${id}`),
+  patchGeneration: (id: number, b: { starred?: boolean }) => patch<Generation>(`/generations/${id}`, b),
+  deleteGeneration: (id: number) => del<{ ok: boolean }>(`/generations/${id}`),
+  followupGeneration: (id: number, b: { instruction: string; route?: string | null }) => post<Job>(`/generations/${id}/followup`, b),
+  budget: (bookId?: number) => get<Budget>(`/settings/budget${qs({ book_id: bookId })}`),
+  saveBudget: (b: { daily_cny: number; book_cny: number }) => put<Budget>('/settings/budget', b),
   teardowns: () => get<TeardownListItem[]>('/teardowns'),
   teardownDetail: (id: number) => get<TeardownRecord>(`/teardowns/${id}`),
   /** Job.result = {teardown, teardown_id} */

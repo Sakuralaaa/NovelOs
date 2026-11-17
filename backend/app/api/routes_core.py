@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 from app import __version__
 from app.api.schemas import (
     BookWritingSettingsIn, AigcDetectIn, ChannelIn, RadarReportConfigIn, ChannelUpdate, ModelFetchIn, RadarBookAiIn, RadarConfigIn, ZhuqueSettingsIn, RoutingIn, TeardownDeepIn, TrendReportIn, TropesIn, WritingSettingsIn, channel_out, idea_out, job_out, rank_item_out,
-    snapshot_out,
+    clean_prices, snapshot_out,
 )
 from app.db import get_session, kv_set, session_scope
 from app.jobs.manager import NotResumable, resume as resume_job, resume_info, submit
@@ -105,7 +105,8 @@ def list_channels(s: Session = Depends(get_session)) -> list[dict[str, Any]]:
 @router.post("/settings/channels")
 def create_channel(body: ChannelIn, s: Session = Depends(get_session)) -> dict[str, Any]:
     c = Channel(name=body.name, base_url=body.base_url.strip(), api_key_enc=encrypt(body.api_key.strip()),
-                models=[m.strip() for m in body.models if m.strip()], enabled=body.enabled, api_format=body.api_format)
+                models=[m.strip() for m in body.models if m.strip()], enabled=body.enabled, api_format=body.api_format,
+                prices=clean_prices(body.prices))
     s.add(c)
     s.commit()
     s.refresh(c)
@@ -129,6 +130,8 @@ def update_channel(cid: int, body: ChannelUpdate, s: Session = Depends(get_sessi
         c.enabled = body.enabled
     if body.api_format is not None:
         c.api_format = body.api_format
+    if body.prices is not None:
+        c.prices = clean_prices(body.prices)
     s.add(c)
     s.commit()
     s.refresh(c)

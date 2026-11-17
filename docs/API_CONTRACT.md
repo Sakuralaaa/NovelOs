@@ -669,7 +669,7 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - 章节 `fanfic_meta`（新列，`chapter_out` 暂不输出，用上面的 GET 取）：`{ooc?: OocResult, overlap?: Overlap}`。
 
 ### 审稿/写章接入点（后端内部，前端无感）
-- `app.services.fanfic.ooc_block(session, chapter, content=None) -> list[issue]`：审稿格式的 issues（`{severity, dimension: "character"|"semantics", quote, comment}`），来源为已存且未过期的 OOC 结果、口癖刷屏、原著重合 warn/high；原创书返回 `[]`。审稿合并进 `review.issues` 即可（尚未接入）。
+- `app.services.fanfic.ooc_block(session, chapter, content=None) -> list[issue]`：审稿格式的 issues（`{severity, dimension: "character"|"semantics", quote, comment}`），来源为已存且未过期的 OOC 结果、口癖刷屏、原著重合 warn/high；原创书返回 `[]`。审稿合并进 `review.issues`（v0.10 起已在 `writing._fanfic_issues` 接入）。
 - `app.services.fanfic.text_overlap(book_id, text) -> Overlap`：写章/改写后可调，用于生成 warnings（尚未接入）。
 
 ## v0.9.4 提交前修中等问题、数值一致性、补丁后重审、任务断点续跑、lint 阈值校准
@@ -711,3 +711,23 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 ### lint 阈值档
 - 阈值集中在后端配置 `Settings.lint_profiles`（`fanqie` 番茄档、`publish` 出版档）与 `lint_platform_map`（fanqie→fanqie，qidian/generic→publish）；环境变量 `NOVELOS_LINT_PROFILES` 可整体覆盖。
 - 番茄档长段：>100 字（原 70），且长段 ≥3 段、占全章段落 ≥10% 才计问题、出警告并点名最多 3 段定点修；`Lint.long_paragraphs` 仍是 >100 字段落数。校准记录见 `docs/research/lint-calibration-v094.md`。
+
+
+## v0.12.0
+
+### 锁定与单卡版本
+- `Card` 输出新增 `locked: bool`、`versions: int`（旧版本条数）；`PUT /api/cards/{id}` 可传 `locked`。
+- `GET /api/cards/{id}/versions` → `[{n, label, at, type, name, summary, data, known_by, status, ref_enabled, soul}]`（最近的在前）；`POST /api/cards/{id}/versions/{n}/restore` → Card。
+- `OutlineNode` 输出新增 `locked`；`PUT /api/outline/{id}` 可传 `locked`。锁定节点：`POST /outline/{id}/suggest`、章节点 `POST /outline/{id}/expand` 返回 409；有锁定节点时 `POST /books/{id}/outline/generate` 返回 409。
+- 锁定卡：`field-ai`、`characters/{id}/soul`、`cards/suggest` 返回 409；`bible/propose` 结果新增 `skipped_locked: string[]`，`bible/apply` 结果新增 `skipped_locked`。
+
+### 生成档案与成本
+- `Generation = {id, book_id, job_id, kind, kind_label, task, route, model, status: "ok"|"empty"|"failed", error, output_words, target_words, short, in_tokens, out_tokens, cost_cny, ms, starred, parent_id, note, created_at, preview, prompt?, output?, children?}`
+- `GET /api/generations?book_id&kind&status&q&starred&days&limit&offset` → `{items, total, cost_cny, kinds:[{kind,label,count}]}`；`GET /api/generations/{id}`（带 prompt、output、children）；`PATCH {starred}`；`DELETE`；`POST /api/generations/{id}/followup {instruction, route?}` → Job，result `{parent_id, id, output}`。
+- `Channel.prices: {model: {in?, out?, image?}}`（创建/更新渠道可传）。`POST /api/estimate` 新增 `cost_cny_est`、`priced`、`budget`。
+- `GET /api/settings/budget?book_id` → `{daily_cny, book_cny, today_cny, book_spent_cny?}`；`PUT /api/settings/budget {daily_cny, book_cny}`。超预算的模型调用报错「今日预算已用完…」/「这本书的预算已用完…」，并记一条 failed 档案。
+
+### 导入已有作品
+- `POST /api/books/import`（multipart `file` 或 JSON `{text, filename?}`）→ `{import_id, title, encoding, total_words, volumes, warnings, chapters:[{index, raw_title, title, volume, words, flags, preview}]}`。
+- `POST /api/books/import/commit {import_id, title, genre?, gender?, tagline?, skip?: number[]}` → `{book_id, chapters, words}`；预览过期 404。
+- `POST /api/books/{id}/adopt {steps?}` → Job（`book_adopt`），result `{summaries, cards, facts, foreshadows, outline_nodes, skipped_cards}`；`GET /api/books/{id}/adopt` → `{chapters, summaries, cards, foreshadows, outline_linked}`。

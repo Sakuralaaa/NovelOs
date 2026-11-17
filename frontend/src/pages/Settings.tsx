@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, CheckCircle2, Copy, Download, LogOut, RotateCcw, X, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, XCircle, Zap } from '@/components/icons'
+import { AlertTriangle, Check, CheckCircle2, Copy, Download, LogOut, RotateCcw, X, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, Wallet, XCircle, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,9 +17,9 @@ import { useChannels } from '@/hooks/queries'
 import { useAuth } from '@/components/auth/AuthGate'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { api, qk, type ApiKey } from '@/lib/api'
-import type { ApiFormat, Channel, ImageMode, RouteKey, Routing, Trope } from '@/lib/types'
+import type { ApiFormat, Channel, ImageMode, ModelPrice, RouteKey, Routing, Trope } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { setCostHint, useCostHint } from '@/lib/cost'
+import { fmtCny, setCostHint, useCostHint } from '@/lib/cost'
 
 const PRESETS: { key: string; name: string; base_url: string; format: ApiFormat; models: string[]; color: string }[] = [
   { key: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', format: 'openai', models: ['gpt-4o', 'gpt-4o-mini', 'text-embedding-3-small', 'gpt-image-1'], color: '#10a37f' },
@@ -65,6 +65,7 @@ export default function SettingsPage() {
         <Channels />
         <RoutingCard />
         <WritingCard />
+        <BudgetCard />
         <AigcCard />
         <TropesCard />
         <RadarCard />
@@ -152,7 +153,7 @@ function Channels() {
 
 function ChannelSheet({ value, onClose }: { value: Channel | 'new' | null; onClose: () => void }) {
   const isNew = value === 'new' || (value !== null && value.id === 0)
-  const empty = { name: '', base_url: '', api_key: '', models: [] as string[], api_format: 'openai' as ApiFormat }
+  const empty = { name: '', base_url: '', api_key: '', models: [] as string[], api_format: 'openai' as ApiFormat, prices: {} as Record<string, ModelPrice> }
   const [f, setF] = useState(empty)
   const [show, setShow] = useState(false)
   const [fetched, setFetched] = useState<string[] | null>(null)
@@ -160,13 +161,14 @@ function ChannelSheet({ value, onClose }: { value: Channel | 'new' | null; onClo
   if (value !== cur) {
     setCur(value)
     setFetched(null)
-    if (value && value !== 'new') setF({ name: value.name, base_url: value.base_url, api_key: '', models: value.models, api_format: value.api_format ?? 'openai' })
+    if (value && value !== 'new') setF({ name: value.name, base_url: value.base_url, api_key: '', models: value.models, api_format: value.api_format ?? 'openai', prices: value.prices ?? {} })
     else if (value === 'new') setF(empty)
   }
   const qc = useQueryClient()
   const m = useMutation({
     mutationFn: () => {
-      const body = { name: f.name.trim(), base_url: f.base_url.trim().replace(/\/+$/, ''), models: f.models, api_format: f.api_format, ...(f.api_key ? { api_key: f.api_key.trim() } : {}) }
+      const prices = Object.fromEntries(Object.entries(f.prices).filter(([k]) => f.models.includes(k)))
+      const body = { name: f.name.trim(), base_url: f.base_url.trim().replace(/\/+$/, ''), models: f.models, api_format: f.api_format, prices, ...(f.api_key ? { api_key: f.api_key.trim() } : {}) }
       return isNew ? api.createChannel({ ...body, api_key: f.api_key.trim() }) : api.updateChannel((value as Channel).id, body)
     },
     meta: { errorTitle: '保存失败' },
@@ -235,6 +237,29 @@ function ChannelSheet({ value, onClose }: { value: Channel | 'new' | null; onClo
           </div>
           <TagInput value={f.models} onChange={(v) => setF({ ...f, models: v })} placeholder="输入模型 ID 回车添加" suggestions={preset?.models} />
         </div>
+        {f.models.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-[13px] font-medium text-foreground/85">单价（元）</div>
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[1fr_88px_88px_76px] gap-1.5 px-1 text-[11.5px] text-muted-foreground"><span>模型</span><span>输入/百万</span><span>输出/百万</span><span>生图/张</span></div>
+              {f.models.map((mdl) => {
+                const p = f.prices[mdl] ?? {}
+                const setP = (k: keyof ModelPrice, v: string) => {
+                  const n = v === '' ? undefined : Math.max(0, Number(v))
+                  setF({ ...f, prices: { ...f.prices, [mdl]: { ...p, [k]: Number.isFinite(n as number) ? n : undefined } } })
+                }
+                return (
+                  <div key={mdl} className="grid grid-cols-[1fr_88px_88px_76px] items-center gap-1.5">
+                    <span className="truncate font-mono text-[12px]" title={mdl}>{mdl}</span>
+                    {(['in', 'out', 'image'] as const).map((k) => (
+                      <Input key={k} type="number" min={0} step="0.01" inputMode="decimal" value={p[k] ?? ''} onChange={(e) => setP(k, e.target.value)} placeholder="0" className="h-9 px-2 text-[12.5px]" />
+                    ))}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
       <ModelPicker models={fetched} selected={f.models} onClose={() => setFetched(null)}
         onConfirm={(v) => { setF({ ...f, models: v }); setFetched(null) }} />
@@ -754,6 +779,45 @@ function ApiKeysCard() {
       <Dialog open={!!del} onOpenChange={(o) => !o && setDel(null)}>
         <DialogContent title={`删除密钥「${del?.name}」？`} desc="使用它的程序会立刻无法访问。" footer={<><Button variant="ghost" onClick={() => setDel(null)}>取消</Button><Button variant="danger" loading={rm.isPending} onClick={() => del && rm.mutate(del.id)}>删除</Button></>} />
       </Dialog>
+    </Card>
+  )
+}
+
+/** v0.12 预算上限：超出后模型调用前直接拦下；0 表示不限 */
+function BudgetCard() {
+  const q = useQuery({ queryKey: ['budget', 0], queryFn: () => api.budget() })
+  const qc = useQueryClient()
+  const [daily, setDaily] = useState<string | null>(null)
+  const [book, setBook] = useState<string | null>(null)
+  const d = q.data
+  const m = useMutation({
+    mutationFn: () => api.saveBudget({ daily_cny: Number(daily ?? d?.daily_cny ?? 0) || 0, book_cny: Number(book ?? d?.book_cny ?? 0) || 0 }),
+    meta: { errorTitle: '保存失败' },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); setDaily(null); setBook(null); toast.success('预算已保存') },
+  })
+  const dirty = daily !== null || book !== null
+  return (
+    <Card id="budget">
+      <CardHeader divider title="花费与预算" icon={<Wallet className="h-4 w-4" />} />
+      <CardBody className="p-0">
+        {!d ? <Skeleton className="m-5 h-24" /> : (
+          <div className="divide-y divide-border/70">
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">今日已用</div>
+              <div className="num text-[14px] font-semibold">{fmtCny(d.today_cny)}</div>
+            </div>
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">每日上限（元）</div>
+              <Input type="number" min={0} step="1" inputMode="decimal" className="w-[140px]" value={daily ?? (d.daily_cny || '')} placeholder="不限" onChange={(e) => setDaily(e.target.value)} />
+            </div>
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">单本书上限（元）</div>
+              <Input type="number" min={0} step="1" inputMode="decimal" className="w-[140px]" value={book ?? (d.book_cny || '')} placeholder="不限" onChange={(e) => setBook(e.target.value)} />
+            </div>
+            {dirty && <div className="flex justify-end gap-2 px-5 py-3"><Button variant="ghost" onClick={() => { setDaily(null); setBook(null) }}>取消</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>保存</Button></div>}
+          </div>
+        )}
+      </CardBody>
     </Card>
   )
 }
