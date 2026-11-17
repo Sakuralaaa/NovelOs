@@ -26,11 +26,12 @@ import { AigcPanel, useSha256 } from '@/components/aigc/Aigc'
 import { CostButton } from '@/components/cost/CostButton'
 import { FanficChapterPanel } from '@/components/FanficChapterPanel'
 import { DuanjuPanel } from '@/components/chapter/DuanjuPanel'
+import { ChapterToolsMenu } from '@/components/chapter/ChapterTools'
 import { useBook } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { useDebouncedCallback } from '@/hooks/useDebounced'
 import { modKey, useHotkey } from '@/hooks/useHotkey'
-import { api, qk } from '@/lib/api'
+import { api, qk, v013Api } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import { analyzeText } from '@/lib/textAnalysis'
 import type { AigcSegment, ApprovalMode, Book, Chapter, ChapterVariant, EstimateKind } from '@/lib/types'
@@ -290,10 +291,12 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
     start(api.reviewChapter(id), { key: `review:${id}`, label: '审稿', successMsg: '审稿完成', onSuccess: () => setTab('review') })
   }
 
-  const openRewrite = () => {
+  const [rwSeed, setRwSeed] = useState('')
+  const openRewrite = (seed?: string) => {
     const sel = editor.current?.getSelection()
     const text = sel && sel.end > sel.start ? latest.current.content.slice(sel.start, sel.end) : ''
     setRwSel(text.trim() ? { start: sel!.start, end: sel!.end, text } : null)
+    setRwSeed(typeof seed === 'string' ? seed : '')
     setRwOpen(true)
   }
   const runCustomRewrite = async (o: { instruction: string; scope: 'all' | 'selection'; route: string | null; autoReview: boolean }) => {
@@ -462,7 +465,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
           <AigcPanel aigc={aigc} text={content} job={aigcJob} onRun={runAigc} stale={aigcStale}
             staleNote={localEdited ? '正文有未保存或检测后的修改，结果已过期' : '检测后正文有修改，结果已过期'}
             showHl={showAigc && !hasVariants} onToggleHl={setShowAigc} onLocate={locateSeg}
-            disabled={hasVariants ? '先采纳一个版本再检测' : rewriting ? '改写任务进行中' : false} />
+            disabled={hasVariants ? '先采纳一个版本再检测' : rewriting ? '改写任务进行中' : false} reportUrl={aigc ? v013Api.aigcReportUrl(ch.id) : undefined} />
         </TabsContent>
         <TabsContent value="changes" className="focus:outline-none"><ChangesPanel changes={ch.changes} /></TabsContent>
         <TabsContent value="duanju" className="focus:outline-none"><DuanjuPanel chapterId={ch.id} unsaved={saveState !== 'saved'} onLocate={locateQuote} /></TabsContent>
@@ -492,7 +495,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
               <ToolSep />
               <Tip content="写要求让 AI 改写全章或选中的文字，对比后再决定采纳">
                 <span className="inline-flex shrink-0"><CostButton target={{ kind: 'chapter_rewrite', bookId, chapterId: id }} label="按要求改写" confirmLabel="写要求"
-                  size="sm" variant="ghost" className={TB} loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onRun={openRewrite}>改写</CostButton></span>
+                  size="sm" variant="ghost" className={TB} loading={!!rewriteJob} disabled={busy || hasVariants || !!diff} icon={<PenLine className="h-3.5 w-3.5" />} onRun={() => openRewrite()}>改写</CostButton></span>
               </Tip>
               <Tip content="语感重塑：短句、动作先行、去套话；不改情节和数值">
                 <span className="inline-flex shrink-0"><CostButton target={{ kind: 'polish_voice', bookId, chapterId: id }} label="语感重塑"
@@ -521,6 +524,9 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                 if (fixed === content) { toast.info('段落格式已经是整齐的'); return }
                 edit({ content: fixed }); toast.success('已整理段落', { description: '可随时手动再改' })
               }} icon={<Rows3 className="h-3.5 w-3.5" />}>整理段落</Button></Tip>
+              <ChapterToolsMenu bookId={bookId} chapterId={id} title={title} content={content} className={TB} disabled={hasVariants || !!diff}
+                onTitle={(t) => edit({ title: t })} onLocate={locateQuote} onRewrite={(ins) => openRewrite(ins)}
+                onFormat={() => { void v013Api.format(content).then((r) => { if (!r.changed) { toast.info('排版已经是规范的'); return } edit({ content: r.text }); toast.success('已规范排版', { description: r.notes.join('；') }) }) }} />
               <Tip content={serif ? '切换为黑体' : '切换为宋体'}><Button size="icon-sm" variant="ghost" className={TBI} onClick={() => { setSerif(!serif); localStorage.setItem('novelos-serif', serif ? '0' : '1') }} aria-label="字体"><Type className="h-4 w-4" /></Button></Tip>
               {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" className={TBI} disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
               <ToolSep />
@@ -542,7 +548,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <DialogContent title="撤回到上一版正文？" desc={`恢复「${ch.last_history_label || '上一版'}」时的正文，之后的修改会丢掉。`}
               footer={<><Button variant="ghost" onClick={() => setConfirmUndo(false)}>取消</Button><Button variant="primary" loading={undoMut.isPending} onClick={() => undoMut.mutate()}>撤回</Button></>} />
           </Dialog>
-          <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} />
+          <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} seed={rwSeed} />
           <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
             <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
               footer={<><Button variant="ghost" onClick={() => setConfirmDel(false)}>取消</Button><Button variant="danger" loading={rmDraft.isPending} onClick={() => rmDraft.mutate()}>删除</Button></>} />
@@ -643,8 +649,8 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   )
 }
 
-function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit }: {
-  open: boolean; onOpenChange: (o: boolean) => void; selection: { start: number; end: number; text: string } | null; committed: boolean
+function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit, seed }: {
+  open: boolean; onOpenChange: (o: boolean) => void; selection: { start: number; end: number; text: string } | null; committed: boolean; seed?: string
   onSubmit: (o: { instruction: string; scope: 'all' | 'selection'; route: string | null; autoReview: boolean }) => void
 }) {
   const [ask, setAsk] = useState('')
@@ -653,6 +659,7 @@ function RewriteDialog({ open, onOpenChange, selection, committed, onSubmit }: {
   const storage = useModelRoute('novelos.rewrite-route')
   const refBookId = useBookId()
   useEffect(() => { if (open) setScope(selection ? 'selection' : 'all') }, [open, selection])
+  useEffect(() => { if (open && seed) setAsk(seed) }, [open, seed])
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent wide title="按要求改写" desc="AI 只生成改写稿，逐段对比后你决定接受哪些；采纳后旧正文保留，可撤回。">

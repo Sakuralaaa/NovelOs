@@ -21,7 +21,8 @@ import { cn, fmtNum, fmtTime } from '@/lib/utils'
 import { Delta, parseRanges } from './bits'
 
 const METHODS: { value: IterMethod; label: string }[] = [{ value: 'auto', label: '自动' }, { value: 'patch', label: '定点修' }, { value: 'rewrite', label: '整章重写' }]
-const METHOD_LABEL: Record<string, string> = { patch: '定点修', rewrite: '整章重写', auto: '自动' }
+const METHOD_LABEL: Record<string, string> = { patch: '定点修', rewrite: '整章重写', auto: '自动', humanize: '去 AI 味', polish: '语感重塑', format: '排版' }
+const ITER_METHODS = ['patch', 'rewrite']
 const IT_STATUS: Record<string, { label: string; tone: 'primary' | 'success' | 'neutral' }> = {
   pending: { label: '待采纳', tone: 'primary' }, adopted: { label: '已采纳', tone: 'success' }, discarded: { label: '已弃用', tone: 'neutral' },
 }
@@ -52,13 +53,14 @@ export function IterateCard({ bookId, maxChapter, className }: { bookId: number;
   }).then(refresh)
   const stop = useMutation({ mutationFn: () => wanbenApi.stopIterate(bookId), meta: { errorTitle: '停止失败' }, onSuccess: (r) => toast.success('已请求停止', { description: r.message }) })
 
-  const rows = (list.data ?? []).filter((x) => view === 'all' || x.status === 'pending' || adopted[x.id] != null)
+  const mine = (list.data ?? []).filter((x) => ITER_METHODS.includes(x.method))
+  const rows = mine.filter((x) => view === 'all' || x.status === 'pending' || adopted[x.id] != null)
   const groups = useMemo(() => {
     const m = new Map<number, WanbenIteration[]>()
     for (const it of rows) m.set(it.number, [...(m.get(it.number) ?? []), it])
     return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([n, its]) => [n, [...its].sort((a, b) => b.round - a.round)] as const)
   }, [rows])
-  const pendingN = (list.data ?? []).filter((x) => x.status === 'pending').length
+  const pendingN = mine.filter((x) => x.status === 'pending').length
 
   return (
     <Card className={className}>
@@ -143,6 +145,8 @@ function useIterActions(bookId: number, onAdopted?: (iterId: number, chapterId: 
   return { adopt, discard, undo }
 }
 
+const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100))
+
 function ScorePair({ label, before, after, delta }: { label: string; before: number | null | undefined; after: number | null | undefined; delta: number | null | undefined }) {
   return (
     <span className="num inline-flex items-center gap-1 whitespace-nowrap text-[12px]">
@@ -169,8 +173,13 @@ function IterRow({ it, bookId, onOpen, canUndo, onAdopted, onUndone }: {
           {it.stale && it.status === 'pending' && <Badge tone="warning" title="这一版的底稿不是当前正文（基于上一轮版本，或生成后正文又改过）；采纳会覆盖当前正文，旧正文进历史可撤回"><AlertTriangle className="h-3 w-3" />底稿非当前正文</Badge>}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-          <ScorePair label="审稿" before={sc?.before.overall} after={sc?.after.overall} delta={sc?.delta.overall} />
-          <ScorePair label="读者" before={sc?.before.reader} after={sc?.after.reader} delta={sc?.delta.reader} />
+          {ITER_METHODS.includes(it.method) ? <>
+            <ScorePair label="审稿" before={sc?.before.overall} after={sc?.after.overall} delta={sc?.delta.overall} />
+            <ScorePair label="读者" before={sc?.before.reader} after={sc?.after.reader} delta={sc?.delta.reader} />
+          </> : <>
+            {sc?.before.ai != null && <ScorePair label="AI 味" before={sc.before.ai} after={sc.after.ai} delta={sc.delta.ai != null ? -sc.delta.ai : null} />}
+            {sc?.before.aigc != null && <ScorePair label="AI 率" before={pct(sc.before.aigc)} after={pct(sc.after.aigc)} delta={sc.delta.aigc != null ? -Math.round(sc.delta.aigc * 100) : null} />}
+          </>}
           <span className="num text-[12px] text-muted-foreground">{fmtNum(it.words)} 字 · {fmtTime(it.created_at)}</span>
         </div>
       </div>
@@ -247,6 +256,58 @@ function DiffLine({ r }: { r: DiffRow }) {
         <div className="mb-1 text-[11px] font-medium text-muted-foreground">新版</div>
         <p className="prose-zh break-words font-serif text-[14px]">{after ?? <span className="text-muted-foreground">（删除此段）</span>}</p>
       </div>
+    </div>
+  )
+}
+
+/** v0.13 批量处理出的待采纳版本列表（按章分组，对比 / 采纳 / 弃用 / 撤回） */
+export function IterationList({ bookId, methods, active }: { bookId: number; methods: string[]; active?: boolean }) {
+  const [view, setView] = useState<'pending' | 'all'>('pending')
+  const [openId, setOpenId] = useState<number | null>(null)
+  const [adopted, setAdopted] = useState<Record<number, number>>({})
+  const list = useQuery({ queryKey: wqk.iterations(bookId), queryFn: () => wanbenApi.iterations(bookId), refetchInterval: active ? 3000 : false })
+  const mine = (list.data ?? []).filter((x) => methods.includes(x.method))
+  const rows = mine.filter((x) => view === 'all' || x.status === 'pending' || adopted[x.id] != null)
+  const groups = useMemo(() => {
+    const m = new Map<number, WanbenIteration[]>()
+    for (const it of rows) m.set(it.number, [...(m.get(it.number) ?? []), it])
+    return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([n, its]) => [n, [...its].sort((a, b) => b.round - a.round)] as const)
+  }, [rows])
+  const pending = mine.filter((x) => x.status === 'pending')
+  const { adopt } = useIterActions(bookId)
+  const [bulk, setBulk] = useState(false)
+  const adoptAll = async () => {
+    setBulk(true)
+    try { for (const it of pending) await adopt.mutateAsync(it.id) } finally { setBulk(false) }
+  }
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[13.5px] font-semibold">待采纳版本</div>
+        <div className="flex items-center gap-2">
+          {pending.length > 1 && <Button size="sm" variant="soft" loading={bulk} icon={<Check className="h-3.5 w-3.5" />} onClick={() => void adoptAll()}>全部采纳</Button>}
+          <Segmented size="sm" value={view} onChange={setView} options={[{ value: 'pending', label: `待采纳 ${pending.length}` }, { value: 'all', label: '全部' }]} />
+        </div>
+      </div>
+      {list.isLoading ? <Skeleton className="h-24 rounded-xl" /> : !groups.length ? (
+        <p className="rounded-xl border border-dashed px-4 py-6 text-center text-[12.5px] text-muted-foreground">{view === 'pending' ? '没有待采纳的版本' : '还没有批量改过'}</p>
+      ) : (
+        <div className="space-y-3">
+          {groups.map(([n, its]) => (
+            <div key={n} className="overflow-hidden rounded-xl hairline">
+              <div className="flex items-center justify-between gap-2 border-b bg-subtle/70 px-3.5 py-2">
+                <span className="text-[13px] font-semibold">第 {n} 章</span>
+                <Link to={`/books/${bookId}/chapters/${its[0].chapter_id}`} className="inline-flex h-8 items-center gap-1 text-[12.5px] text-primary hover:underline">打开章节<ArrowUpRight className="h-3.5 w-3.5" /></Link>
+              </div>
+              <div className="divide-y">
+                {its.map((it) => <IterRow key={it.id} it={it} onOpen={() => setOpenId(it.id)} canUndo={adopted[it.id] != null} bookId={bookId}
+                  onAdopted={(cid) => setAdopted((m) => ({ ...m, [it.id]: cid }))} onUndone={() => setAdopted((m) => { const x = { ...m }; delete x[it.id]; return x })} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <CompareSheet bookId={bookId} id={openId} onClose={() => setOpenId(null)} onAdopted={(id, cid) => setAdopted((m) => ({ ...m, [id]: cid }))} />
     </div>
   )
 }

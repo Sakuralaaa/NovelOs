@@ -171,10 +171,12 @@ class FanficAttachIn(FanficSpec):
 
 class FanficPatchIn(BaseModel):
     fidelity: Literal["strict", "moderate", "loose"] | None = None
-    direction: Literal["canon_fill", "if_line", "transmigration", "rebirth", "system", "au_modern", "au_ancient", "side_pov",
-                       "cp", "villain_redemption", "epilogue", "crossover"] | None = None
+    direction: str | None = Field(default=None, max_length=40)
     extra_source_ids: list[int] | None = Field(default=None, max_length=9)
     notes: str | None = Field(default=None, max_length=1000)
+    protagonist: dict[str, Any] | None = None
+    pov: str | None = None
+    slots: dict[str, str] | None = None
 
 
 class FanficImportIn(BaseModel):
@@ -251,6 +253,17 @@ async def chapter_ooc_check(chapter_id: int) -> dict[str, Any]:
     except ff.FanficError as e:
         raise _http(e) from e
     return _job(submit("fanfic_ooc", lambda ctx: ff.run_ooc(chapter_id, ctx), book_id=book_id, ref=f"chapter:{chapter_id}"))
+
+
+@router.post("/books/{book_id}/fanfic/oc/generate")
+async def book_fanfic_oc(book_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.13 原创主角：按原著设定补全身份、能力与上限、成长路线、性格与说话方式、想接触的原著人物、初始关系，写进设定库。"""
+    from app.services import fanfic as ff
+
+    b = _book(s, book_id)
+    if not b.fanfic:
+        raise HTTPException(409, "这本书不是同人书")
+    return _job(submit("fanfic_oc", lambda ctx: ff.generate_oc(book_id, ctx), book_id=book_id, lock_book=True))
 
 
 @router.get("/chapters/{chapter_id}/ooc")

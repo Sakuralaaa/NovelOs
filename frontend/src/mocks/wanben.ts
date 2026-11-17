@@ -551,6 +551,54 @@ export function registerWanbenMocks(c: MockCtx) {
   seedJob('book_check', bookCheck(1, false), 60 * 30)
   seedJob('book_check', bookCheck(1, true), 60 * 3)
   seedJob('adaptability', adapt(1, 1, 6, true), 60 * 2)
+
+  // ---------------- v0.13 批量后台质检（mock） ----------------
+  const batchStop = new Map<number, boolean>()
+  const OPL: Record<string, string> = { humanize: '去 AI 味', polish: '语感重塑', format: '排版', review: '审稿', aigc: 'AI 率检测', titles: '起章名' }
+  on('POST', '/books/:id/batch', (m, b) => {
+    const id = bookOf(m[1]).id
+    const op = String(b?.op ?? '')
+    if (!OPL[op]) throw new HttpErr(422, 'op 不对')
+    const targets = selectChs(id, b ?? {})
+    if (!targets.length) throw new HttpErr(409, '所选范围内没有已写正文的章节')
+    batchStop.set(id, false)
+    return createJob('book_batch', id, 800 + targets.length * 500, targets.map((ch) => `第${ch.number}章 ${OPL[op]}…`), () => {
+      const rows: any[] = []
+      for (const ch of targets) {
+        if (batchStop.get(id)) break
+        const base = ch.content ?? ''
+        if (['humanize', 'polish', 'format'].includes(op)) {
+          const content = op === 'format' ? base.replace(/\n+/g, '\n\n') : tweak(base, 1, 'patch')
+          if (content === base) { rows.push({ chapter_id: ch.id, number: ch.number, status: 'unchanged' }); continue }
+          const aiB = 42 + (ch.number % 9), aiA = aiB - 9
+          const rc = !!b?.options?.recheck
+          const prevN = iterations.filter((x) => x.chapter_id === ch.id).length
+          const none = { overall: null, reader: null, passed: null, issues: 0 }
+          const it = { id: nid(), book_id: id, chapter_id: ch.id, number: ch.number, job_id: null, round: prevN + 1, method: op, instruction: `批量${OPL[op]}`, base_content: base, content,
+            words: c.countWords(content), review: null, lint: c.mkLint(content),
+            scores: { before: { ...none, ai: aiB, aigc: rc ? 0.62 : null }, after: { ...none, ai: aiA, aigc: rc ? 0.38 : null }, delta: { overall: null, reader: null, ai: aiA - aiB, aigc: rc ? -0.24 : null } },
+            status: 'pending', created_at: now() }
+          iterations.push(it)
+          rows.push({ chapter_id: ch.id, number: ch.number, status: 'ok', iteration_id: it.id, adopted: false, ai_before: aiB, ai_after: aiA, aigc_before: rc ? 0.62 : null, aigc_after: rc ? 0.38 : null, rounds: 1, notes: [] })
+        } else if (op === 'review') {
+          const rv = c.mkReview(ch.number + 7, base)
+          ch.review = rv
+          rows.push({ chapter_id: ch.id, number: ch.number, status: 'ok', overall: rv.scores.overall, passed: rv.passed })
+        } else if (op === 'aigc') {
+          rows.push({ chapter_id: ch.id, number: ch.number, status: 'ok', aigc: 0.3 + (ch.number % 5) / 10, level: 'suspect' })
+        } else {
+          const ts = ['账本上的血手印', '一拳砸穿演武台', '管事的脸色变了', '三息之内', '他把门槛踩碎了']
+          rows.push({ chapter_id: ch.id, number: ch.number, status: 'ok', current: ch.title, titles: ts.map((t, i) => ({ title: t, reason: '有画面，有冲突', score: 90 - i * 6, notes: [] })) })
+        }
+      }
+      const ok = rows.filter((r) => r.status === 'ok')
+      const avg = (k: string) => { const v = ok.map((r) => r[k]).filter((x) => typeof x === 'number') as number[]; return v.length ? Math.round(v.reduce((a, x) => a + x, 0) / v.length * 1000) / 1000 : null }
+      return { op, op_label: OPL[op], chapters: targets.length, rows, stopped: !!batchStop.get(id),
+        summary: { ok: ok.length, failed: 0, unchanged: rows.filter((r) => r.status === 'unchanged').length, skipped: 0, ai_before: avg('ai_before'), ai_after: avg('ai_after'),
+          aigc_before: avg('aigc_before'), aigc_after: avg('aigc_after'), pending: ok.filter((r) => r.iteration_id).length, avg_overall: avg('overall'), avg_aigc: avg('aigc') } }
+    }, `batch:${op}`)
+  })
+  on('POST', '/books/:id/batch/stop', (m) => { batchStop.set(bookOf(m[1]).id, true); return { ok: true, message: '当前这一章处理完就停' } })
 }
 
 /** 续跑支持的任务类型（mock） */

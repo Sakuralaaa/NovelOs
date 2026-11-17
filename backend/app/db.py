@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -32,8 +32,28 @@ def init_engine(settings: Settings) -> Engine:
 
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
+    _migrate_cheat_cards(engine)
     _engine = engine
     return engine
+
+
+def _migrate_cheat_cards(engine: Engine) -> None:
+    """v0.13：v0.3.10 之前把金手指存成 power 类型的旧卡，自动改成 cheat。
+    判断：power 卡的 data 里有金手指专用键（input / growth），且没有力量体系的 levels。只改类型，不动内容。"""
+    import json as _json
+
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT id, data FROM card WHERE type = 'power'")).fetchall()
+            for cid, raw in rows:
+                try:
+                    d = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+                except ValueError:
+                    continue
+                if isinstance(d, dict) and (d.get("input") or d.get("growth")) and not d.get("levels"):
+                    conn.execute(text("UPDATE card SET type = 'cheat' WHERE id = :i"), {"i": cid})
+    except Exception:  # noqa: BLE001  迁移失败不影响启动
+        pass
 
 
 def _add_missing_columns(engine: Engine) -> None:

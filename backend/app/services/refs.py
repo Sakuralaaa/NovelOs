@@ -36,8 +36,24 @@ def list_refs(s: Session, book_id: int, q: str = "", limit: int = 20) -> list[di
     order = {k: i for i, k in enumerate(TYPE_LABEL)}
     rows = [c for c in ref_cards(s, book_id) if not q or q in c.name.lower()]
     rows.sort(key=lambda c: (0 if q and c.name.lower().startswith(q) else 1, order.get(c.type, 99), c.id or 0))
-    return [{"id": c.id, "name": c.name, "type": c.type, "type_label": TYPE_LABEL.get(c.type, c.type), "brief": brief(c)}
-            for c in rows[: max(1, min(100, limit))]]
+    out = [{"id": c.id, "name": c.name, "type": c.type, "type_label": TYPE_LABEL.get(c.type, c.type), "brief": brief(c)}
+           for c in rows[: max(1, min(100, limit))]]
+    if len(out) < limit:  # v0.13 写作笔记：@笔记:标题
+        from sqlmodel import select
+
+        from app.models.tables import Note
+
+        nq = q[3:] if q.startswith("笔记:") or q.startswith("笔记：") else q
+        notes = [n for n in s.exec(select(Note).where(Note.book_id == book_id)) if n.title and (not nq or nq in n.title.lower())]
+        notes.sort(key=lambda n: (not n.pinned, -(n.id or 0)))
+        out += [{"id": -(n.id or 0), "name": f"笔记:{n.title}", "type": "note", "type_label": "笔记",
+                 "brief": n.content.strip().replace("\n", " ")[:40]} for n in notes[: limit - len(out)]]
+    if len(out) < limit:  # v0.13 @变量
+        from app.services.vars import CATALOG
+
+        vs = [(n, ins) for n, ins in CATALOG if not q or q in n.lower() or q in ins.lower()]
+        out += [{"id": -100000 - i, "name": ins[1:], "type": "var", "type_label": "变量", "brief": n} for i, (n, ins) in enumerate(vs[: limit - len(out)])]
+    return out
 
 
 def find_mentions(text: str, cards: list[Card]) -> list[Card]:
@@ -84,17 +100,49 @@ def card_full_text(c: Card) -> str:
     return "\n".join(lines)
 
 
-def refs_block(s: Session, book_id: int, *texts: str) -> str:
-    """把文本里 @ 到的条目完整写成提示词片段；没有 @ 命中返回空串。"""
+def note_mentions(s: Session, book_id: int, text: str) -> list[Any]:
+    """v0.13「@笔记:标题」（或 @笔记：标题）命中的写作笔记，标题最长优先。"""
+    t = (text or "").replace("＠", "@").replace("@笔记：", "@笔记:")
+    if "@笔记:" not in t:
+        return []
+    from sqlmodel import select
+
+    from app.models.tables import Note
+
+    notes = sorted([n for n in s.exec(select(Note).where(Note.book_id == book_id)) if n.title], key=lambda n: -len(n.title))
+    out, seen = [], set()
+    i = t.find("@笔记:")
+    while i >= 0:
+        rest = t[i + 4:]
+        for n in notes:
+            if rest.startswith(n.title) and n.id not in seen:
+                seen.add(n.id)
+                out.append(n)
+                break
+        i = t.find("@笔记:", i + 1)
+    return out
+
+
+def refs_block(s: Session, book_id: int, *texts: str, chapter_number: int | None = None) -> str:
+    """把文本里 @ 到的条目（设定卡、v0.13 起含「@笔记:标题」与 @变量）完整写成提示词片段；没有 @ 命中返回空串。"""
     joined = "\n".join(t for t in texts if t)
-    hits = find_mentions(joined, ref_cards(s, book_id))[:MAX_REFS]
-    if not hits:
+    if "@" not in joined and "＠" not in joined:
         return ""
+    from app.services import vars as _vars
+
+    try:
+        vb = _vars.resolve(s, book_id, joined, chapter_number)["block"]
+    except Exception:  # noqa: BLE001
+        vb = ""
+    hits = find_mentions(joined, ref_cards(s, book_id))[:MAX_REFS]
+    notes = note_mentions(s, book_id, joined)[:MAX_REFS]
+    if not hits and not notes:
+        return vb
     body, used = [], 0
-    for c in hits:
-        t = card_full_text(c)
+    for t in [card_full_text(c) for c in hits] + [f"[笔记] {n.title}：{n.content.strip()[:1500]}" for n in notes]:
         if used + len(t) > REF_BLOCK_BUDGET and body:
             break
         body.append(t)
         used += len(t)
-    return "【@引用设定（作者点名，写作时严格以此为准）】\n" + "\n".join(body)
+    out = "【@引用设定（作者点名，写作时严格以此为准）】\n" + "\n".join(body)
+    return out + ("\n\n" + vb if vb else "")

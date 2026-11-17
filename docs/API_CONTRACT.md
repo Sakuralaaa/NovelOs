@@ -731,3 +731,38 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - `POST /api/books/import`（multipart `file` 或 JSON `{text, filename?}`）→ `{import_id, title, encoding, total_words, volumes, warnings, chapters:[{index, raw_title, title, volume, words, flags, preview}]}`。
 - `POST /api/books/import/commit {import_id, title, genre?, gender?, tagline?, skip?: number[]}` → `{book_id, chapters, words}`；预览过期 404。
 - `POST /api/books/{id}/adopt {steps?}` → Job（`book_adopt`），result `{summaries, cards, facts, foreshadows, outline_nodes, skipped_cards}`；`GET /api/books/{id}/adopt` → `{chapters, summaries, cards, foreshadows, outline_linked}`。
+
+
+## v0.13.0
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | /api/books/{id}/batch | `{op: humanize\|polish\|format\|review\|aigc\|titles, start?, end?, numbers?, ranges?, options?: {recheck, aigc_target, max_rounds, n}}` → Job `book_batch`，result `{op, op_label, chapters, rows[], summary, stopped}` |
+| POST | /api/books/{id}/batch/stop | 当前章结束后停 |
+| POST | /api/chapters/{id}/titles | `{n}` → Job，result `{chapter_id, number, current, titles[{title, reason, score, notes[]}]}` |
+| POST | /api/books/{id}/sparks | `{n, use_context, hint}` → Job，result `{book_id, sparks[{title, beat, payoff, fit}]}` |
+| POST | /api/chapters/{id}/reader-comments | `{personas}` → Job，result `{comments[{persona, quote, text, mood, offset, paragraph}], verdicts[], dropped, continue_rate, instruction}` |
+| GET | /api/chapters/{id}/freq、/api/books/{id}/freq?start&end | 高频词 `items[{word, count, per_10k}]` |
+| POST | /api/format | `{text}` → `{text, changed, notes[]}` |
+| GET | /api/books/{id}/search?q&scope&regex&case | 预览 `{total, by_scope, hits[{scope, id, field, label, offset, before, match, after, locked}], truncated}` |
+| POST | /api/books/{id}/replace | `{q, replacement, scopes, regex, case, expect?, skip[]}`；expect 不符 409 |
+| GET/POST | /api/books/{id}/notes | 列表（q、folder）/ 新建 |
+| PUT/DELETE | /api/books/{id}/notes/{nid} | 改 / 删 |
+| GET | /api/books/{id}/notes/export | Markdown |
+| POST | /api/books/{id}/notes/import、/notes/from-spark | 导入 Markdown / 脑洞存笔记 |
+| GET | /api/chapters/{id}/aigc/report | HTML 检测报告 |
+| GET | /api/books/{id}/context-preview?chapter_id | `{chapter, fixed_chars, blocks[{label, chars, excluded, pinned}], total_chars, exclude}` |
+| PUT | /api/books/{id}/context-exclude | `{blocks[]}` |
+| GET | /api/books/{id}/vars；POST /vars/resolve | @变量目录 / 展开 `{block, used[], chars}` |
+| GET | /api/spark/tracks?gender | 赛道（热度、细分、标签组） |
+| GET/POST | /api/spark/sessions | 会话列表 / 新建 `{gender, track, sub, tags, inspiration}` |
+| GET | /api/spark/sessions/{sid} | 会话 |
+| POST | /api/spark/sessions/{sid}/draw | `{axis: world\|hero\|cheat, keep[], custom}` → Job，result 为会话 |
+| POST | /api/spark/sessions/{sid}/pick | `{axis, card_id?, custom?}` |
+| POST/PATCH | /api/spark/sessions/{sid}/proposal | 生成立项书（Job）/ 修改 |
+| POST | /api/spark/sessions/{sid}/adopt | 存为选题 `{idea_id}`（Idea.source.kind = spark，含 seed_cards） |
+| POST | /api/books/{id}/fanfic/oc/generate | Job `fanfic_oc`，生成原创主角卡 |
+
+- `POST /api/books` 新增 `target_words`、`chapter_words`、`mode`、`volume_chapters`；同人 `fanfic` 新增 `protagonist`、`pov`、`slots`，`direction` 取值见 `/fanfic/directions`（16 个）。
+- `GET /api/fanfic/directions` 方向带 `slots`，并返回 `povs`、`oc_types`。
+- OOC 问题类型新增 `world_rule`。章节 `aigc.history` 保留最近 20 次检测。

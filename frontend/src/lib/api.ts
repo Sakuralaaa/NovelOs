@@ -7,6 +7,8 @@ import type {
   IdeaSeed, FusionRef, ImitateExtract, RadarReportConfig,
   Completeness, OnboardingState, OnboardingKey, FieldAiMode, RefEntry, Estimate, EstimateKind, BookUsage, TeardownRecord, TeardownListItem, TeardownSourceType, TeardownBiblePart, ApprovalMode,
   Budget, Generation, GenerationList, ImportPreview, AdoptStatus,
+  BatchInput, Spark, FreqItem, SearchResult, SearchScope, Note, ContextPreview,
+  SparkTrack, SparkSessionData, SparkAxis, SparkProposal,
 } from './types'
 
 export interface ApiKey { id: string; name: string; preview: string; created_at: number; last_used_at: number | null }
@@ -452,7 +454,9 @@ export const fanficApi = {
   /** 有书在用时 409，force=true 强删 */
   deleteSource: (id: number, force = false) => del<{ ok: boolean }>(`/fanfic/sources/${id}${qs({ force: force || undefined })}`),
   /** 建同人书：copyright_ack 必须 true */
-  createBook: (b: { title?: string; genre: string; gender: Gender; premise?: string; platform_style?: PlatformStyle; fanfic: FanficSpecInput; copyright_ack: boolean }) => post<Book>('/books', b),
+  createBook: (b: { title?: string; genre: string; gender: Gender; premise?: string; platform_style?: PlatformStyle; fanfic: FanficSpecInput; copyright_ack: boolean
+    target_words?: number; chapter_words?: number; mode?: 'serial' | 'wanben'; volume_chapters?: number }) => post<Book>('/books', b),
+  generateOc: (bookId: number) => post<Job>(`/books/${bookId}/fanfic/oc/generate`),
   bookFanfic: (bookId: number) => get<FanficInfo>(`/books/${bookId}/fanfic`),
   attachFanfic: (bookId: number, b: FanficSpecInput & { copyright_ack: true }) => post<FanficInfo>(`/books/${bookId}/fanfic`, b),
   patchFanfic: (bookId: number, b: FanficPatchInput) => patch<FanficInfo>(`/books/${bookId}/fanfic`, b),
@@ -553,4 +557,39 @@ export const wqk = {
   adaptHistory: (bookId: number) => ['adaptability', bookId, 'history'] as const,
   platformStyles: ['platform-styles'] as const,
   duanju: (chapterId: number) => ['duanju', chapterId] as const,
+}
+
+/** v0.13 批量质检、章节工具、笔记、抽卡立项、@变量与上下文构成 */
+export const v013Api = {
+  batch: (bookId: number, b: BatchInput) => post<Job>(`/books/${bookId}/batch`, b),
+  stopBatch: (bookId: number) => post<{ ok: boolean; message: string }>(`/books/${bookId}/batch/stop`),
+  titles: (chapterId: number, n = 6) => post<Job>(`/chapters/${chapterId}/titles`, { n }),
+  sparks: (bookId: number, b: { n?: number; use_context?: boolean; hint?: string }) => post<Job>(`/books/${bookId}/sparks`, b),
+  readerComments: (chapterId: number, personas = 4) => post<Job>(`/chapters/${chapterId}/reader-comments`, { personas }),
+  chapterFreq: (chapterId: number) => get<{ chapter_id: number; items: FreqItem[] }>(`/chapters/${chapterId}/freq`),
+  bookFreq: (bookId: number, start?: number, end?: number) => get<{ book_id: number; chapters: number; items: FreqItem[] }>(`/books/${bookId}/freq${start || end ? `?${new URLSearchParams({ ...(start ? { start: String(start) } : {}), ...(end ? { end: String(end) } : {}) })}` : ''}`),
+  format: (text: string) => post<{ text: string; changed: boolean; notes: string[] }>('/format', { text }),
+  search: (bookId: number, q: string, scopes: SearchScope[], regex: boolean, ci = false) =>
+    get<SearchResult>(`/books/${bookId}/search?${new URLSearchParams({ q, scope: scopes.join(','), regex: String(regex), case: String(!ci) })}`),
+  replace: (bookId: number, b: { q: string; replacement: string; scopes: SearchScope[]; regex: boolean; case: boolean; expect?: number; skip?: string[] }) =>
+    post<{ replaced: number; changed: Record<string, number>; skipped_locked: string[] }>(`/books/${bookId}/replace`, b),
+  notes: (bookId: number, q = '') => get<Note[]>(`/books/${bookId}/notes${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  createNote: (bookId: number, b: Partial<Note>) => post<Note>(`/books/${bookId}/notes`, b),
+  updateNote: (bookId: number, id: number, b: Partial<Note>) => put<Note>(`/books/${bookId}/notes/${id}`, b),
+  deleteNote: (bookId: number, id: number) => del<{ ok: boolean }>(`/books/${bookId}/notes/${id}`),
+  exportNotesUrl: (bookId: number) => `/api/books/${bookId}/notes/export`,
+  importNotes: (bookId: number, text: string, folder = '') => post<{ created: number }>(`/books/${bookId}/notes/import`, { text, folder }),
+  sparkToNote: (bookId: number, sp: Spark) => post<Note>(`/books/${bookId}/notes/from-spark`, sp),
+  aigcReportUrl: (chapterId: number) => `/api/chapters/${chapterId}/aigc/report`,
+  contextPreview: (bookId: number, chapterId?: number) => get<ContextPreview>(`/books/${bookId}/context-preview${chapterId ? `?chapter_id=${chapterId}` : ''}`),
+  setContextExclude: (bookId: number, blocks: string[]) => put<{ blocks: string[] }>(`/books/${bookId}/context-exclude`, { blocks }),
+  sparkTracks: (gender: Gender) => get<{ gender: Gender; tracks: SparkTrack[]; tag_groups: string[] }>(`/spark/tracks?gender=${gender}`),
+  sparkSessions: () => get<{ id: number; track: string; gender: Gender; idea_id: number | null; title: string | null; updated_at: string | null }[]>('/spark/sessions'),
+  sparkCreate: (b: { gender: Gender; track: string; sub?: string; tags?: string[]; inspiration?: Record<string, string> }) => post<SparkSessionData>('/spark/sessions', b),
+  sparkGet: (id: number) => get<SparkSessionData>(`/spark/sessions/${id}`),
+  sparkDraw: (id: number, axis: SparkAxis, keep: string[], custom = '') => post<Job>(`/spark/sessions/${id}/draw`, { axis, keep, custom }),
+  sparkPick: (id: number, axis: SparkAxis, card_id: string | null, custom?: { title: string; desc: string }) => post<SparkSessionData>(`/spark/sessions/${id}/pick`, { axis, card_id, custom }),
+  sparkProposal: (id: number) => post<Job>(`/spark/sessions/${id}/proposal`),
+  sparkPatchProposal: (id: number, b: Partial<SparkProposal>) => patch<SparkSessionData>(`/spark/sessions/${id}/proposal`, b),
+  sparkAdopt: (id: number) => post<{ idea_id: number }>(`/spark/sessions/${id}/adopt`),
 }

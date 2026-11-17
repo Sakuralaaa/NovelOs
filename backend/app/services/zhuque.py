@@ -310,10 +310,70 @@ def check_chapter(chapter_id: int, book_id: int | None = None, progress=None, is
         ch = s.get(Chapter, chapter_id)
         if ch is None:
             raise NotFound("章节不存在")
+        old = ch.aigc or {}
+        hist = list(old.get("history") or [])
+        if old.get("checked_at"):  # v0.13 保留历史：每次检测的时间、分数、正文指纹
+            hist.append({k: old.get(k) for k in ("checked_at", "softmax", "level", "ai_segment_ratio", "content_hash", "chars")})
+        aigc["history"] = hist[-20:]
         ch.aigc = aigc
         s.add(ch)
         s.commit()
     return {"chapter_id": chapter_id, "aigc": {**aigc, "stale": False}}
+
+
+LEVEL_LABEL = {"human": "人工写作", "suspect": "疑似 AI", "ai": "AI 生成"}
+
+
+def report_html(chapter_id: int) -> str:
+    """v0.13 自包含 HTML 检测报告：总分、各类占比、逐段标色、历史分数。浏览器里直接打印成 PDF。"""
+    import html as _h
+
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        if ch is None:
+            raise NotFound("章节不存在")
+        a = ch.aigc or {}
+        if not a.get("checked_at"):
+            raise Conflict("这一章还没有检测过")
+        from app.models.tables import Book
+
+        book = s.get(Book, ch.book_id)
+        title, content, number, ctitle = (book.title if book else ""), ch.content, ch.number, ch.title
+    stale = a.get("content_hash") != content_hash(content)
+    segs = sorted(a.get("segments") or [], key=lambda x: x.get("start", 0))
+    color = {"ai": "#f6d5cf", "suspect": "#f7e7c4", "human": "transparent"}
+    body, pos = [], 0
+    if not stale:
+        for sg in segs:
+            st, en = int(sg.get("start", 0)), int(sg.get("end", 0))
+            if st > pos:
+                body.append(_h.escape(content[pos:st]))
+            body.append(f'<mark style="background:{color.get(sg.get("label"), "transparent")}" title="{LEVEL_LABEL.get(sg.get("label"), "")} {sg.get("conf", "")}">'
+                        f'{_h.escape(content[st:en])}</mark>')
+            pos = max(pos, en)
+    body.append(_h.escape(content[pos:]))
+    text_html = "".join(body).replace("\n", "<br>")
+    lr = a.get("labels_ratio") or {}
+
+    def pct(v: Any) -> str:
+        return f"{float(v) * 100:.1f}%" if isinstance(v, (int, float)) else "—"
+    hist = "".join(f"<tr><td>{_h.escape(str(x.get('checked_at', ''))[:16].replace('T', ' '))}</td><td>{pct(x.get('softmax'))}</td>"
+                   f"<td>{LEVEL_LABEL.get(x.get('level'), '—')}</td></tr>" for x in reversed(a.get("history") or []))
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>《{_h.escape(title)}》第{number}章 AI 率检测报告</title>
+<style>body{{font-family:"Songti SC","Noto Serif CJK SC",serif;max-width:860px;margin:40px auto;padding:0 24px;color:#2b2622;background:#fbf8f1;line-height:1.9}}
+h1{{font-size:22px;margin:0 0 4px}}.sub{{color:#8a7f72;font-size:13px}}.grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}}
+.k{{border:1px solid #e6dccb;border-radius:10px;padding:12px;background:#fff}}.k b{{display:block;font-size:22px;color:#b23a2a}}.k span{{font-size:12px;color:#8a7f72}}
+.text{{background:#fff;border:1px solid #e6dccb;border-radius:10px;padding:20px 24px;font-size:15px}}mark{{border-radius:3px;padding:0 1px}}
+table{{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px}}td,th{{border-bottom:1px solid #eee3d3;padding:6px 8px;text-align:left}}
+.warn{{color:#b06b00;font-size:13px}}@media print{{body{{background:#fff;margin:0}}}}</style></head><body>
+<h1>《{_h.escape(title)}》第{number}章 {_h.escape(ctitle or '')}</h1>
+<div class="sub">朱雀 AIGC 检测 · {_h.escape(str(a.get('checked_at', ''))[:16].replace('T', ' '))} · {a.get('chars', len(content))} 字</div>
+{'<p class="warn">正文在检测后改过，下面的标色已不对应当前正文，只显示分数。</p>' if stale else ''}
+<div class="grid"><div class="k"><b>{pct(a.get('softmax'))}</b><span>AI 率</span></div><div class="k"><b>{LEVEL_LABEL.get(a.get('level'), '—')}</b><span>判定</span></div>
+<div class="k"><b>{pct(lr.get('ai'))}</b><span>AI 生成占比</span></div><div class="k"><b>{pct(lr.get('suspect'))}</b><span>疑似 AI 占比</span></div></div>
+<div class="text">{text_html}</div>
+{f'<h3>历史检测</h3><table><tr><th>时间</th><th>AI 率</th><th>判定</th></tr>{hist}</table>' if hist else ''}
+</body></html>"""
 
 
 def maybe_auto_check(chapter_id: int) -> bool:

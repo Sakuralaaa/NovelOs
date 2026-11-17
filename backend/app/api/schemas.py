@@ -193,10 +193,13 @@ class FanficSpec(BaseModel):
     """v0.10 同人书设置（建书时 fanfic 字段 / POST /books/{id}/fanfic 共用）。"""
     source_id: int
     fidelity: Literal["strict", "moderate", "loose"] = "moderate"
-    direction: Literal["canon_fill", "if_line", "transmigration", "rebirth", "system", "au_modern", "au_ancient", "side_pov",
-                       "cp", "villain_redemption", "epilogue", "crossover"] = "canon_fill"
+    direction: str = Field(default="canon_fill", max_length=40)  # 取值见 GET /fanfic/directions
     extra_source_ids: list[int] = Field(default_factory=list, max_length=9)
     notes: str = Field(default="", max_length=1000)
+    # v0.13 三步立项
+    protagonist: dict[str, Any] | None = None  # {source: canon|oc, oc_type, name, brief, canon_name, entry_event}
+    pov: str | None = None
+    slots: dict[str, str] = Field(default_factory=dict)
 
 
 class BookCreate(BaseModel):
@@ -207,6 +210,11 @@ class BookCreate(BaseModel):
     platform_style: PlatformStyle = "fanqie"
     fanfic: FanficSpec | None = None  # v0.10 同人建书；给了就必须 copyright_ack=true
     copyright_ack: bool = False
+    # v0.13：建书时直接定篇幅与模式
+    target_words: int | None = Field(default=None, ge=10_000, le=20_000_000)
+    chapter_words: int | None = Field(default=None, ge=500, le=10_000)
+    mode: Literal["serial", "wanben"] | None = None
+    volume_chapters: int | None = Field(default=None, ge=5, le=500)
 
 
 class BookPatch(BaseModel):

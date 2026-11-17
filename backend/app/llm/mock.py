@@ -1245,6 +1245,84 @@ def mock_adopt_bible(m: dict[str, Any]) -> str:
 HANDLERS["adopt_bible"] = mock_adopt_bible
 
 
+def mock_chapter_titles(m: dict[str, Any]) -> str:
+    n = int(m.get("number") or 1)
+    base = ["账本上的血手印", "一拳砸穿演武台", f"第{n}个跪下的人", "管事的脸色变了", "残卷第二页", "他把门槛踩碎了", "三息之内"]
+    return _j({"titles": [{"title": t, "reason": "有画面，有冲突"} for t in base[: int(m.get("n") or 6)]]})
+
+
+def mock_sparks(m: dict[str, Any]) -> str:
+    ideas = [("拍卖会上反向竞价", "主角故意抬价，让反派花光家底买下假货。", "反派当众吃哑巴亏", "下一章"),
+             ("师姐的赌约", "师姐押上全部资源赌主角输，主角赢了反手把赌注还她一半。", "打脸 + 收人心", "本卷高潮"),
+             ("残卷认主", "残卷突然发热，指向宗门禁地。", "揭秘新能力", "支线"),
+             ("外门大比的黑箱", "主角发现大比名单被调包，当场点破。", "众人震惊", "下一章"),
+             ("老对手求和", "被打服的赵管事带着情报上门。", "势力反转", "支线"),
+             ("天降悬赏", "主角的人头被挂上悬赏榜，悬赏金比他全部身家还高。", "压迫感拉满", "本卷高潮")]
+    return _j({"sparks": [{"title": a, "beat": b, "payoff": c, "fit": d} for a, b, c, d in ideas[: int(m.get("n") or 5)]]})
+
+
+def mock_reader_comments(m: dict[str, Any]) -> str:
+    content = str(m.get("content") or "")
+    sents = [x for x in re.split(r"(?<=[。！？])", content.replace("\n", "")) if len(x.strip()) >= 6]
+    pick = lambda k: sents[k % len(sents)].strip() if sents else ""  # noqa: E731
+    personas = m.get("personas") or ["老书虫", "通勤党", "爽点猎人", "段子手"]
+    texts = ["这里有点意思", "主角终于支棱起来了！", "催更催更", "这个反派活不过三章", "前面有点拖，跳了"]
+    comments = [{"persona": p, "quote": pick(i * 3 + j), "text": texts[(i + j) % len(texts)], "mood": "爽"} for i, p in enumerate(personas) for j in range(2)]
+    comments.append({"persona": personas[0], "quote": "这句话正文里没有", "text": "瞎编的", "mood": "烦"})
+    verdicts = [{"persona": p, "will_continue": i != 1, "drop": pick(5) if i == 1 else "", "why": "这段太慢" if i == 1 else ""} for i, p in enumerate(personas)]
+    return _j({"comments": comments, "verdicts": verdicts})
+
+
+def mock_fanfic_oc(m: dict[str, Any]) -> str:
+    name = m.get("name") or "沈渡"
+    return _j({"name": name, "summary": "从现代穿来的外卖骑手，熟读原著，嘴硬手快。",
+               "data": {"role": "protagonist", "origin": "oc", "identity": "外门杂役", "ability": "记得原著剧情，能提前避坑",
+                        "limit": "原著没写到的事他不知道；修为从零开始", "growth": "跟着原著大事件一步步卡位",
+                        "goal": "在原著主角崛起前抢下第一份机缘", "voice": "说话带梗，关键时刻一句话噎死人", "personality": "精明、记仇、讲义气",
+                        "contacts": [{"name": "原著主角", "relation": "同屋室友"}]},
+               "ai_filled": ["identity", "growth", "contacts"]})
+
+
+def mock_spark_round(m: dict[str, Any]) -> str:
+    axis = m.get("axis") or "world"
+    track = m.get("track") or "玄幻"
+    pools = {
+        "world": ["灵气复苏的末法城市", "被天道标价的修仙界", "九州共用一本账簿的王朝", "每天重置一次的宗门", "以寿命为货币的江湖",
+                  "妖族统治的人间", "神明打工的天庭", "考试决定一切的武道世界", "海底城邦的修真文明", "被封印的上古战场"],
+        "hero": ["被退婚的外门杂役", "天生废脉的世家庶子", "替人坐牢十年的狱卒", "装傻的皇子", "穷到吃土的符师",
+                 "送葬队的抬棺人", "失忆的前任剑尊", "被逐出师门的丹童", "背锅的宗门账房", "镇守荒村的老兵之子"],
+        "cheat": ["能看见别人功法破绽的残卷", "每杀一敌返还一次修为的系统", "可以抽取仇人气运的铜钱", "能和死人对话的灯",
+                  "复制他人一招的玉简", "把伤害转成经验的体质", "每天签到送一件法宝", "预知三息后战局的眼睛", "能收服妖兽的笛子"],
+    }
+    pool = pools.get(axis, pools["world"])
+    keep = [str(x) for x in m.get("keep_titles") or []]
+    items = [t for t in pool if t not in keep][:9]
+    return _j({"cards": [{"title": t, "desc": f"{track}向：{t}，开局就有冲突，后期能撑起长线。", "tags": [track, "爽文"]} for t in items]})
+
+
+def mock_spark_proposal(m: dict[str, Any]) -> str:
+    picks = m.get("picks") or {}
+    w, h, c = (picks.get("world") or {}).get("title", "灵气复苏的城市"), (picks.get("hero") or {}).get("title", "外门杂役"), (picks.get("cheat") or {}).get("title", "残卷")
+    return _j({"titles": ["退婚当天，我觉醒了万倍返还", "开局签到十年修为", "我在宗门当账房，全宗都欠我钱", "废脉少年一拳破天",
+                          "三息之后，你已经输了", "被逐出师门后我成了丹神", "杂役？我是来收债的", "残卷一出，天下无敌", "全城都在等我出手"],
+               "tagline": f"{h}得到{c}，在{w}里一路打穿。", "logline": f"{h}靠{c}翻身，在{w}里步步登顶。",
+               "selling_points": ["开局打脸", "金手指有成长线", "反派层层升级"], "hook": "第一章当众打脸退婚的世家",
+               "expectations": ["揭开残卷来历", "回到世家清算旧账"], "endgame": "登顶九州，查清当年灭门真相", "arc": ["外门崛起", "内门争锋", "九州大比", "上界清算"],
+               "style": "短句快节奏，每章一个爽点，章末留钩子", "conflict": "世家与宗门联手打压主角，背后是想夺取残卷的上界势力",
+               "power": {"name": "九境", "levels": ["淬体", "通脉", "凝元", "化神", "合道"]},
+               "seed_cards": [{"type": "world", "name": w[:12], "summary": w, "data": {}},
+                              {"type": "cheat", "name": c[:12], "summary": c, "data": {"input": "盯住对手", "limit": "一天三次", "growth": "境界越高看得越深"}},
+                              {"type": "character", "name": "林川", "summary": h, "data": {"role": "protagonist"}}]})
+
+
+HANDLERS["fanfic_oc"] = mock_fanfic_oc
+HANDLERS["spark_round"] = mock_spark_round
+HANDLERS["spark_proposal"] = mock_spark_proposal
+HANDLERS["chapter_titles"] = mock_chapter_titles
+HANDLERS["sparks"] = mock_sparks
+HANDLERS["reader_comments"] = mock_reader_comments
+
+
 def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) -> str:
     fn = HANDLERS.get(task)
     if fn is None:

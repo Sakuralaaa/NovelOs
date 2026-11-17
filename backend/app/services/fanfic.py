@@ -22,7 +22,8 @@ from app.jobs.manager import JobContext
 from app.llm.gateway import get_gateway, is_mock_mode
 from app.models.tables import Book, Card, Chapter, FanficSource
 from app.services.common import Conflict, NotFound
-from app.services.fanfic_directions import DIRECTION_BY_ID, DIRECTION_IDS, FIDELITY, FIDELITIES
+from app.services import common
+from app.services.fanfic_directions import DIRECTION_BY_ID, DIRECTION_IDS, FIDELITY, FIDELITIES, OC_TYPES, POVS
 from app.services.imitate import OVERLAP_N, _norm
 from app.services.teardown_ws import _leaves, _s, _strs, fingerprint, fp_hits
 from app.skills.loader import render, system_prompt
@@ -35,7 +36,7 @@ SOURCES = ("paste", "txt", "search")  # v0.11.1 search：联网取材（只填�
 CARD_PARTS = ("characters", "world", "factions", "timeline", "scenes")
 IMPORT_PARTS = ("characters", "factions", "world", "locations")
 MAX_CHARS_CARDS = 30
-OOC_TYPES = {"speech": "言行", "catchphrase": "口癖", "relation": "关系", "ability": "能力越界", "timeline": "时间线"}
+OOC_TYPES = {"speech": "言行", "catchphrase": "口癖", "relation": "关系", "ability": "能力越界", "timeline": "时间线", "world_rule": "世界规则"}
 PENALTY = {"high": 25, "mid": 10, "low": 3}
 OOC_CONTENT = 12_000
 CATCHPHRASE_MAX = 3  # 同一口癖一章出现超过这个次数算滥用
@@ -783,8 +784,25 @@ def validate_spec(s: Session, spec: dict[str, Any], ack: bool) -> dict[str, Any]
     extra = [int(x) for x in dict.fromkeys(spec.get("extra_source_ids") or []) if int(x) != sid][:9]
     for x in extra:
         _get(s, x)
-    return {"source_id": sid, "source_title": src.title, "fidelity": fidelity, "direction": direction,
-            "extra_source_ids": extra, "notes": _s(spec.get("notes"), 1000)}
+    out = {"source_id": sid, "source_title": src.title, "fidelity": fidelity, "direction": direction,
+           "extra_source_ids": extra, "notes": _s(spec.get("notes"), 1000)}
+    p = spec.get("protagonist")
+    if isinstance(p, dict):  # v0.13 原创主角 / 原著角色当主角
+        src_kind = "oc" if p.get("source") == "oc" else "canon"
+        prot = {"source": src_kind, "name": _s(p.get("name"), 20), "brief": _s(p.get("brief"), 500),
+                "entry_event": _s(p.get("entry_event"), 120)}
+        if src_kind == "oc":
+            prot["oc_type"] = p.get("oc_type") if p.get("oc_type") in OC_TYPES else "transmigrator"
+            if prot["oc_type"] == "soul_swap":
+                prot["canon_name"] = _s(p.get("canon_name"), 20)
+        else:
+            prot["canon_name"] = _s(p.get("canon_name") or p.get("name"), 20)
+        out["protagonist"] = prot
+    if spec.get("pov") in POVS:
+        out["pov"] = spec["pov"]
+    if isinstance(spec.get("slots"), dict):
+        out["slots"] = {str(k)[:10]: _s(v, 200) for k, v in list(spec["slots"].items())[:8] if _s(v, 200)}
+    return out
 
 
 def attach(s: Session, book: Book, spec: dict[str, Any], ack: bool) -> dict[str, Any]:
@@ -919,6 +937,37 @@ def context_block(s: Session, book: Book, budget: int = CONTEXT_BUDGET) -> str:
         lines.append(f"创作方向：{d['label']}——{d['desc']} 要点：{'；'.join(d['tips'])}")
     if ff.get("notes"):
         lines.append("作者补充：" + str(ff["notes"])[:300])
+    if d and ff.get("slots"):
+        lab = {x["key"]: x["label"] for x in d.get("slots") or []}
+        lines.append("作者的想法：" + "；".join(f"{lab.get(k, k)}：{v}" for k, v in ff["slots"].items()))
+    if ff.get("pov") in POVS:
+        lines.append("视角：" + POVS[ff["pov"]]["rule"])
+    prot = ff.get("protagonist") if isinstance(ff.get("protagonist"), dict) else None
+    if prot:
+        oc = next((c for c in common.cards(s, book.id or 0) if (c.data or {}).get("origin") == "oc"), None)
+        if prot.get("source") == "oc":
+            kind = OC_TYPES.get(str(prot.get("oc_type")), "原创角色")
+            if oc is not None:
+                d2 = oc.data or {}
+                bits = [f"{lab}：{d2[k]}" for k, lab in (("identity", "身份"), ("ability", "能力"), ("limit", "现阶段上限"), ("growth", "成长路线"),
+                                                         ("goal", "目标"), ("voice", "说话方式")) if d2.get(k)]
+                lines.append(f"原创主角（{kind}）{oc.name}：{oc.summary}" + ("；" + "；".join(bits) if bits else ""))
+            elif prot.get("name") or prot.get("brief"):
+                lines.append(f"原创主角（{kind}）{prot.get('name') or ''}：{prot.get('brief') or ''}")
+            if prot.get("oc_type") == "soul_swap" and prot.get("canon_name"):
+                lines.append(f"魂穿对象：{prot['canon_name']}（外人眼里他还是{prot['canon_name']}，身体身份按原著，内在换了人）")
+            lines.append("原创主角的能力与成长不得越过原著力量体系的上限，不得和原著时间线冲突。")
+        elif prot.get("canon_name"):
+            lines.append(f"主角：原著角色{prot['canon_name']}")
+    entry = str((prot or {}).get("entry_event") or "")
+    if src is not None and entry:
+        tl = normalize_cards(src.cards)["timeline"]
+        k = next((i for i, t in enumerate(tl) if entry in t["event"] or t["event"] in entry), None)
+        if k is not None:
+            near = tl[max(0, k - 3):k + 4]
+            lines.append(f"切入时间点：{tl[k]['event']}。前后原著事件：" + " → ".join(t["event"] for t in near))
+        else:
+            lines.append(f"切入时间点：{entry}")
     lines.append("写作要求：情节、对白全部原创，不要复述或照抄原著句子（与原著连续 8 字相同会被标记）。")
     if src is None:
         lines.append("（原著资料已删除，只按上面的规则把握）")
@@ -1116,6 +1165,7 @@ def run_ooc(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
         book, src = _book_source(s, ch.book_id)
         assert src is not None
         ff = dict(book.fanfic or {})
+        _bid = ch.book_id
         content = ch.content or ""
         cards = normalize_cards(src.cards)
         fp, ex = _fp_all(s, book, src)
@@ -1123,6 +1173,13 @@ def run_ooc(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
     rule = FIDELITY[fidelity]
     d = DIRECTION_BY_ID.get(str(ff.get("direction")), {})
     present = _present(cards, content)
+    with session_scope() as s:  # v0.13 原创主角：只查世界规则（能力越过原著上限、和时间线冲突）
+        oc = next((c for c in common.cards(s, _bid) if (c.data or {}).get("origin") == "oc"), None)
+        if oc is not None and oc.name in content:
+            od = oc.data or {}
+            present.append(_norm_char({"name": oc.name, "role": "原创主角", "personality": od.get("personality") or oc.summary,
+                                       "speech_style": od.get("voice") or "", "abilities": [str(od.get("ability") or "")],
+                                       "limits": [str(od.get("limit") or "")], "notes": f"原创角色，只检查世界规则：成长路线 {od.get('growth') or ''}"}))
     ctx.progress(15, f"对照原著角色卡：本章出场 {len(present)} 人")
     raw: dict[str, Any] = {}
     if present:
@@ -1256,3 +1313,66 @@ def ooc_block(s: Session, chapter: Chapter, content: str | None = None) -> list[
         out.append({"severity": "high" if ov["level"] == "high" else "mid", "dimension": "semantics", "quote": ov["samples"][0],
                     "comment": f"[原著重合] {ov['warning']}"})
     return out
+
+
+# ------------------------------------------------------------------ v0.13 原创主角
+
+def generate_oc(book_id: int, ctx: JobContext) -> dict[str, Any]:
+    from app.models.tables import Card
+    from app.services import bible_ops
+
+    with session_scope() as s:
+        book, src = _book_source(s, book_id)
+        ff = dict(book.fanfic or {})
+        prot = ff.get("protagonist") if isinstance(ff.get("protagonist"), dict) else {}
+        cards = normalize_cards(src.cards if src else {})
+        d = DIRECTION_BY_ID.get(str(ff.get("direction")), {})
+        fid = FIDELITY.get(str(ff.get("fidelity")), FIDELITY["moderate"])
+        lab = {x["key"]: x["label"] for x in d.get("slots") or []}
+        idea = "；".join(f"{lab.get(k, k)}：{v}" for k, v in (ff.get("slots") or {}).items()) or (book.premise or "")
+        title = book.title
+        existing = {c.name: c for c in common.cards(s, book_id, include_deprecated=True)}
+        meta = {**common.kit_meta(s, book), "name": prot.get("name") or ""}
+    w = cards["world"]
+    user = render("fanfic_oc", title=title, source_title=ff.get("source_title") or "原著", fidelity_label=fid["label"],
+                  direction=f"{d.get('label', '')}：{d.get('desc', '')}" if d else "未指定",
+                  oc_type=OC_TYPES.get(str(prot.get("oc_type")), "穿越者"), oc_name=prot.get("name") or "（未定）",
+                  brief=prot.get("brief") or "（无）", entry_event=prot.get("entry_event") or "（未定）", idea=idea[:600] or "（无）",
+                  world=(w["summary"] + "；" + "；".join(w["rules"][:8])) or "（原著资料没有世界观）",
+                  characters="\n".join(f"- {_char_line(c, 'strict')}" for c in cards["characters"][:10]) or "（无）")
+    ctx.progress(20, "设计原创主角")
+    out = get_gateway().chat_json("fanfic_oc", system_prompt("bible"), user, role="planner", meta=meta)
+    if not isinstance(out, dict) or not str(out.get("name") or prot.get("name") or "").strip():
+        raise FanficError("模型没有给出原创主角")
+    name = _s(prot.get("name") or out.get("name"), 20)
+    data = {k: v for k, v in (out.get("data") or {}).items() if v not in (None, "", [])} if isinstance(out.get("data"), dict) else {}
+    data.update({"role": "protagonist", "origin": "oc", "oc_type": prot.get("oc_type") or data.get("oc_type") or "transmigrator"})
+    if prot.get("entry_event"):
+        data["entry_event"] = prot["entry_event"]
+    with session_scope() as s:
+        if existing:
+            bible_ops.snapshot(s, book_id, "生成原创主角前")
+        c = s.exec(select(Card).where(Card.book_id == book_id, Card.name == name)).first()
+        if c is not None and c.locked:
+            raise FanficError("同名设定卡已锁定，不能覆盖", 409)
+        if c is None:
+            c = Card(book_id=book_id, type="character", name=name, summary=_s(out.get("summary"), 300), data=data, known_by=[name])
+        else:
+            from app.services import card_versions
+
+            card_versions.push(c, "生成原创主角前")
+            c.summary = _s(out.get("summary"), 300) or c.summary
+            c.data = {**(c.data or {}), **data}
+        s.add(c)
+        b = s.get(Book, book_id)
+        if b is not None and isinstance(b.fanfic, dict):
+            b.fanfic = {**b.fanfic, "protagonist": {**(b.fanfic.get("protagonist") or {}), "source": "oc", "name": name, "card_id": None}}
+            s.add(b)
+        s.commit()
+        s.refresh(c)
+        if b is not None and isinstance(b.fanfic, dict):
+            b.fanfic = {**b.fanfic, "protagonist": {**b.fanfic["protagonist"], "card_id": c.id}}
+            s.add(b)
+            s.commit()
+        return {"card_id": c.id, "name": c.name, "summary": c.summary, "data": c.data,
+                "ai_filled": [str(x) for x in out.get("ai_filled") or []][:12]}

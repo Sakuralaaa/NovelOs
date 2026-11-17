@@ -798,6 +798,7 @@ export type FanficFidelity = 'strict' | 'moderate' | 'loose'
 export type FanficDirectionId =
   | 'canon_fill' | 'if_line' | 'transmigration' | 'rebirth' | 'system' | 'au_modern' | 'au_ancient' | 'side_pov'
   | 'cp' | 'villain_redemption' | 'epilogue' | 'crossover'
+  | 'multi_transmigration' | 'reverse_transmigration' | 'revival' | 'unfinished'
 export type FanficSourceType = 'paste' | 'txt' | 'search'
 export interface SourceCharacter {
   name: string; aliases: string[]; role: string; personality: string; speech_style: string; catchphrases: string[]
@@ -836,16 +837,21 @@ export interface FanficInfoDetail extends BookFanfic {
   direction_label: string; fidelity_label: string; source: FanficSourceBrief | null; source_missing: boolean
 }
 export interface FanficInfo { book_id: number; fanfic: FanficInfoDetail | null }
+export type FanficPov = 'first' | 'third_limited' | 'third_multi' | 'canon_pov' | 'omniscient'
+export type FanficOcType = 'transmigrator' | 'native' | 'soul_swap'
+export interface FanficProtagonist { source: 'canon' | 'oc'; oc_type?: FanficOcType; name?: string; brief?: string; canon_name?: string; entry_event?: string; card_id?: number | null }
 export interface FanficSpecInput {
   source_id: number; fidelity?: FanficFidelity; direction?: FanficDirectionId; extra_source_ids?: number[]; notes?: string
+  protagonist?: FanficProtagonist; pov?: FanficPov; slots?: Record<string, string>
 }
+export interface FanficSlot { key: string; label: string; placeholder: string; optional: boolean }
 export interface FanficDirection {
-  id: FanficDirectionId; label: string; desc: string; tips: string[]; risks: string[]; suggested_fidelity: FanficFidelity; template: string
+  id: FanficDirectionId; label: string; desc: string; tips: string[]; risks: string[]; suggested_fidelity: FanficFidelity; template: string; slots?: FanficSlot[]
 }
 export interface FanficFidelityInfo { id: FanficFidelity; label: string; desc: string; pass_score: number }
-export interface FanficCatalog { directions: FanficDirection[]; fidelities: FanficFidelityInfo[]; copyright_notice: string }
+export interface FanficCatalog { directions: FanficDirection[]; fidelities: FanficFidelityInfo[]; copyright_notice: string; povs?: { id: FanficPov; label: string }[]; oc_types?: { id: FanficOcType; label: string }[] }
 export type FanficImportPart = 'characters' | 'factions' | 'world' | 'locations'
-export type OocIssueType = 'speech' | 'catchphrase' | 'relation' | 'ability' | 'timeline'
+export type OocIssueType = 'speech' | 'catchphrase' | 'relation' | 'ability' | 'timeline' | 'world_rule'
 export type OocLevel = 'pass' | 'warn' | 'fail'
 export interface OocIssue {
   type: OocIssueType; type_label: string; severity: 'high' | 'mid' | 'low'; quote: string; problem: string; suggestion: string; source: 'model' | 'program'
@@ -935,11 +941,11 @@ export interface RefineSummary {
   chapters: RefineChapter[]
 }
 export type IterMethod = 'auto' | 'patch' | 'rewrite'
-export interface IterScore { overall: number | null; reader: number | null; passed: boolean | null; issues: number }
+export interface IterScore { overall: number | null; reader: number | null; passed: boolean | null; issues: number; ai?: number | null; aigc?: number | null }
 export interface WanbenIteration {
   id: number; book_id: number; chapter_id: number; number: number; job_id: number | null; round: number
-  method: 'patch' | 'rewrite'; instruction: string; words: number
-  scores: { before: IterScore; after: IterScore; delta: { overall: number | null; reader: number | null } } | null
+  method: 'patch' | 'rewrite' | 'humanize' | 'polish' | 'format'; instruction: string; words: number
+  scores: { before: IterScore; after: IterScore; delta: { overall: number | null; reader: number | null; ai?: number | null; aigc?: number | null } } | null
   status: 'pending' | 'adopted' | 'discarded'; created_at: string | null; stale?: boolean
   content?: string; base_content?: string; review?: Review | null; lint?: Record<string, any> | null
 }
@@ -1011,3 +1017,39 @@ export interface PlatformStyleOpt { id: PlatformStyle | string; label: string; o
 export interface ImportChapter { index: number; raw_title: string; title: string; volume: string; words: number; flags: string[]; preview: string }
 export interface ImportPreview { import_id: string; title: string; encoding: string; total_words: number; volumes: string[]; warnings: string[]; chapters: ImportChapter[] }
 export interface AdoptStatus { chapters: number; summaries: number; cards: number; foreshadows: number; outline_linked: number }
+
+// ---------------------------------------------------------------- v0.13 批量质检 / 章节工具 / 笔记 / 抽卡立项 / @变量
+export type BatchOp = 'humanize' | 'polish' | 'format' | 'review' | 'aigc' | 'titles'
+export interface BatchInput { op: BatchOp; ranges: RangeItem[]; options?: { recheck?: boolean; aigc_target?: number; max_rounds?: number; n?: number } }
+export interface TitleCandidate { title: string; reason: string; score: number; notes: string[] }
+export interface BatchRow {
+  chapter_id: number; number: number; status: 'ok' | 'failed' | 'unchanged' | 'skipped'; error?: string
+  iteration_id?: number; adopted?: boolean; ai_before?: number | null; ai_after?: number | null; aigc_before?: number | null; aigc_after?: number | null
+  overall?: number | null; passed?: boolean; aigc?: number | null; level?: string; current?: string; titles?: TitleCandidate[]; notes?: string[]
+}
+export interface BatchResult { op: BatchOp; op_label: string; chapters: number; rows: BatchRow[]; summary: Record<string, number | null>; stopped: boolean }
+export interface ChapterTitles { chapter_id: number; number: number; current: string; titles: TitleCandidate[] }
+export interface Spark { title: string; beat: string; payoff: string; fit: string }
+export interface ReaderComment { persona: string; quote: string; text: string; mood: string; offset: number; paragraph: number }
+export interface ReaderVerdict { persona: string; will_continue: boolean; drop: string; drop_offset: number | null; why: string }
+export interface ReaderComments { chapter_id: number; number: number; comments: ReaderComment[]; verdicts: ReaderVerdict[]; dropped: number; continue_rate: number | null; instruction: string }
+export interface FreqItem { word: string; count: number; per_10k: number }
+export type SearchScope = 'chapters' | 'cards' | 'outline' | 'notes'
+export interface SearchHit { scope: SearchScope; id: number; field: string; label: string; offset: number; before: string; match: string; after: string; locked: boolean; chapter_id: number | null }
+export interface SearchResult { q: string; regex: boolean; total: number; by_scope: Partial<Record<SearchScope, number>>; hits: SearchHit[]; truncated: boolean }
+export interface Note { id: number; book_id: number; folder: string; title: string; content: string; tags: string[]; pinned: boolean; source: Record<string, any> | null; created_at: string | null; updated_at: string | null }
+export interface ContextBlock { label: string; chars: number; excluded: boolean; pinned: boolean }
+export interface ContextPreview { chapter: number; fixed_chars: number; blocks: ContextBlock[]; total_chars: number; exclude: string[] }
+export interface SparkTrack { track: string; heat: number | null; rising: number | null; subs: string[]; sample_titles: string[]; from_rank: boolean }
+export interface SparkCard { id: string; title: string; desc: string; tags: string[]; heat: number | null; similarity: number; similar_to: string; trope_hits: string[] }
+export type SparkAxis = 'world' | 'hero' | 'cheat'
+export interface SparkProposal {
+  title: string; titles: { title: string; score: number }[]; tagline: string; logline: string; hook: string; endgame: string; style: string; conflict: string
+  selling_points: string[]; expectations: string[]; arc: string[]; power: { name: string; levels: string[] }
+  seed_cards: { type: string; name: string; summary: string; data: Record<string, any> }[]; completeness: number
+}
+export interface SparkSessionData {
+  id: number; idea_id: number | null; gender: Gender; track: string; sub: string; tags: string[]; inspiration: Record<string, string>
+  cards: Record<SparkAxis, SparkCard[]>; keep: Record<SparkAxis, string[]>; picks: Partial<Record<SparkAxis, SparkCard | null>>
+  rounds: Record<SparkAxis, number>; proposal: SparkProposal | null
+}

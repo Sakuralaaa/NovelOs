@@ -21,6 +21,7 @@ import { JobInline } from '@/components/common/JobInline'
 import { BatchWriteButton, WriteNextButton } from '@/components/common/WriteActions'
 import { BookCrumb } from './_shared'
 import { CompletenessCard, UsageCard } from '@/components/book/Completeness'
+import { AdoptCard } from '@/components/book/ImportBook'
 import { FanficInfoCard } from '@/components/fanfic/FanficInfoCard'
 import { AttachFanficDialog } from '@/components/fanfic/AttachFanficDialog'
 import { HomogeneityButton } from '@/components/check/Homogeneity'
@@ -75,6 +76,9 @@ export default function BookOverview() {
 
       {/* v0.9.3：作品完整度 + 待办 */}
       <CompletenessCard bookId={id} />
+
+      {/* v0.12/0.13：导入的旧书接管进度 */}
+      <AdoptCard bookId={id} />
 
       {/* v0.10：同人书信息 */}
       {book.fanfic && <FanficInfoCard bookId={id} />}

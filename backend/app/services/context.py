@@ -114,7 +114,7 @@ def relevant_cards(all_cards: list[Card], beats: dict[str, Any], protagonist: Ca
     return out
 
 
-def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: str = "") -> ContextPack:
+def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: str = "", ignore_exclude: bool = False) -> ContextPack:
     bid = book.id or 0
     beats = node.beats or {}
     all_cards = common.cards(s, bid)
@@ -207,7 +207,7 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
 
     if instruction.strip():
         parts.append("【作者对本章的额外要求】\n" + instruction.strip())
-    rb = refs_block(s, bid, _plan_text(beats), node.title or "", node.summary or "", instruction)
+    rb = refs_block(s, bid, _plan_text(beats), node.title or "", node.summary or "", instruction, chapter_number=node.order)
     if rb:
         parts.append(rb)
 
@@ -227,6 +227,10 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
             kw = (c.data or {}).get("keywords")
             if isinstance(kw, list):
                 cheat_terms.extend(str(k) for k in kw if k)
+    if not ignore_exclude:  # v0.13 作者在「上下文构成」里关掉的块不进提示词
+        from app.services.vars import filter_parts
+
+        parts = filter_parts(s, bid, parts)
     return ContextPack(
         prefix=prefix,
         suffix="\n\n".join(parts),

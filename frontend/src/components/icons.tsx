@@ -2,6 +2,16 @@
 import { forwardRef } from 'react'
 import type { Icon as PhIcon, IconProps } from '@phosphor-icons/react'
 import {
+  NotebookIcon,
+  DeviceMobileIcon,
+  ChatCircleDotsIcon,
+  DiceFiveIcon,
+  TextAaIcon,
+  PushPinIcon,
+  FolderIcon,
+  SlidersHorizontalIcon,
+  ToolboxIcon,
+  UserCircleIcon,
   ArrowClockwiseIcon,
   CompassIcon,
   FlaskIcon,
@@ -195,6 +205,17 @@ export const History = wrap(ClockCounterClockwiseIcon, 'History')
 export const Wallet = wrap(WalletIcon, 'Wallet')
 export const Star = wrap(StarIcon, 'Star')
 export const ArchiveBox = wrap(ArchiveBoxIcon, 'ArchiveBox')
+export const Notebook = wrap(NotebookIcon, 'Notebook')
+export const Smartphone = wrap(DeviceMobileIcon, 'Smartphone')
+export const MessageDots = wrap(ChatCircleDotsIcon, 'MessageDots')
+export const Dice = wrap(DiceFiveIcon, 'Dice')
+export const TextAa = wrap(TextAaIcon, 'TextAa')
+export const Pin = wrap(PushPinIcon, 'Pin')
+export const Folder = wrap(FolderIcon, 'Folder')
+export const Sliders = wrap(SlidersHorizontalIcon, 'Sliders')
+export const Toolbox = wrap(ToolboxIcon, 'Toolbox')
+export const UserCircle = wrap(UserCircleIcon, 'UserCircle')
+export const StackSimple = wrap(StackSimpleIcon, 'StackSimple')
 export const LogOut = wrap(SignOutIcon, 'LogOut')
 export const MapPin = wrap(MapPinIcon, 'MapPin')
 export const Menu = wrap(ListIcon, 'Menu')

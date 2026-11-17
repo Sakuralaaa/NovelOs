@@ -376,8 +376,16 @@ def adopt_idea(idea_id: int) -> Book:
             + (f"\n长线阶段：{' → '.join(idea.arc)}" if idea.arc else "") + _seed_premise(idea), status="bible",
             target_words=st.default_target_words, chapter_words=st.default_chapter_words,
         )
+        src = idea.source if isinstance(idea.source, dict) else {}
+        if src.get("kind") == "spark":  # v0.13 抽卡立项：文风标准、核心冲突进简介，种子卡进设定库
+            book.premise += (f"\n核心冲突：{src['conflict']}" if src.get("conflict") else "") + (f"\n文风：{src['style']}" if src.get("style") else "")
         s.add(book)
         s.flush()
+        if src.get("kind") == "spark":
+            from app.services import spark
+
+            if spark.seed_cards_for_book(s, book.id or 0, idea):
+                book.status = "bible"
         idea.book_id = book.id
         idea.chosen = True
         s.add(idea)

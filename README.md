@@ -26,7 +26,7 @@ bash deploy.sh
 
 ```bash
 cp .env.example .env        # 按需修改端口、填一个随机的 NOVELOS_SECRET
-docker compose up -d --build
+docker compose up -d        # 默认拉取发布好的 ghcr 镜像；升级：docker compose pull && docker compose up -d
 ```
 
 ## 第一次打开要做什么
@@ -197,4 +197,4 @@ docker run -d --name novelos -p 8000:8000 -v novelos-data:/data \
   -e NOVELOS_PASSWORD=你的密码 ghcr.io/sakuralaaa/novelos:latest
 ```
 
-在 `docker-compose.yml` 里把 `build: .` 换成 `image: ghcr.io/sakuralaaa/novelos:latest` 即可直接拉取。
+`docker-compose.yml` 默认就用这个镜像；想用本地源码构建，按文件里的注释把 `image` 改成 `novelos:local` 并打开 `build: .`。

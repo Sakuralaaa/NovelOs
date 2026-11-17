@@ -25,6 +25,9 @@ const PackagePage = lazy(() => import('@/pages/book/Package'))
 const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const WanbenPage = lazy(() => import('@/pages/book/Wanben'))
 const BookCheckPage = lazy(() => import('@/pages/book/BookCheck'))
+const BatchPage = lazy(() => import('@/pages/book/Batch'))
+const NotesPage = lazy(() => import('@/pages/book/Notes'))
+const SparkPage = lazy(() => import('@/pages/Spark'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
 const TeardownPage = lazy(() => import('@/pages/Teardown'))
@@ -77,6 +80,8 @@ export function App() {
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
                 <Route path="books/:bookId/wanben" element={<S><WanbenPage /></S>} />
                 <Route path="books/:bookId/check" element={<S><BookCheckPage /></S>} />
+                <Route path="books/:bookId/batch" element={<S><BatchPage /></S>} />
+                <Route path="books/:bookId/notes" element={<S><NotesPage /></S>} />
                 <Route path="teardown" element={<S><TeardownPage /></S>} />
                 <Route path="teardown/:id" element={<S><TeardownPage /></S>} />
                 <Route path="fanfic" element={<S><FanficPage /></S>} />
@@ -84,6 +89,8 @@ export function App() {
                 <Route path="fanfic/:id" element={<S><FanficPage /></S>} />
                 <Route path="aigc" element={<S><AigcDetectPage /></S>} />
                 <Route path="history" element={<S><HistoryPage /></S>} />
+                <Route path="spark" element={<S><SparkPage /></S>} />
+                <Route path="spark/:sid" element={<S><SparkPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />
               </Route>

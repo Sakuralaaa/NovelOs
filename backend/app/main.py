@@ -116,6 +116,9 @@ def create_app() -> FastAPI:
     from app.api import routes_import  # v0.12 导入已有作品（要在 /books/{id} 之前注册）
 
     app.include_router(routes_import.router)
+    from app.api import routes_v013  # v0.13 批量质检、章节工具、笔记
+
+    app.include_router(routes_v013.router)
     app.include_router(routes_books.router)
     app.include_router(routes_agent.router)
     app.include_router(routes_v093.router)

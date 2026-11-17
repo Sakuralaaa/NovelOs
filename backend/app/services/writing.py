@@ -580,6 +580,16 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None, instr
             warns2 += planned_foreshadow_gaps(beats, cs)
             book = common.get_book(s, book_id)
             review, lint, dropped = _evaluate(s, book, pack, content, number, plan, meta, None)
+            is_ff = bool(book.fanfic)
+        if is_ff:  # v0.13 同人：新写的章节和原著重合偏高时直接提醒
+            try:
+                from app.services import fanfic as _ff
+
+                ov = _ff.text_overlap(book_id, content)
+                if ov.get("level") in ("warn", "high") and ov.get("warning"):
+                    warns2.append(str(ov["warning"]))
+            except Exception:  # noqa: BLE001
+                pass
         vlist.append({
             "id": v + 1, "content": content, "words": count_words(content), "lint": lint.to_dict(),
             "review_overall": review["scores"]["overall"], "review": review, "changes": cs.model_dump(),
@@ -1403,7 +1413,7 @@ def _banned_for(text: str, k: int = 30) -> str:
     return "、".join(words[:k + len(base)])
 
 
-def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = None) -> dict[str, Any]:
+def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = None, base: str | None = None) -> dict[str, Any]:
     """语感重塑：只生成润色稿（不落库），结构同改写稿（before/after…），作者对比后 apply-rewrite 采纳、undo 撤回。
     生成后做程序校验，不符的写进 warnings；不会因为任何检测分数自动再改。"""
     with session_scope() as s:
@@ -1411,7 +1421,7 @@ def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = Non
         if book_id is not None and ch.book_id != book_id:
             raise NotFound("章节不存在")
         pack, meta, _ = _pack_for_chapter(s, ch)
-        content, number = ch.content, ch.number
+        content, number = (base if base is not None else ch.content), ch.number  # v0.13 批量：可指定底稿
         names = [c.name for c in common.cards(s, ch.book_id) if c.type == "character"]
         for n in (meta.get("beats") or {}).get("characters") or []:
             n = str(n.get("name") if isinstance(n, dict) else n or "").strip()

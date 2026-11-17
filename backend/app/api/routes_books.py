@@ -52,11 +52,16 @@ def create_book(body: BookCreate, s: Session = Depends(get_session)) -> dict[str
 
         ff_svc.validate_spec(s, body.fanfic.model_dump(), body.copyright_ack)
     b = Book(title=body.title or "未命名作品", genre=body.genre, gender=body.gender, premise=body.premise or "",
-             status="idea", target_words=st.default_target_words, chapter_words=st.default_chapter_words,
-             platform_style=body.platform_style)
+             status="idea", target_words=body.target_words or st.default_target_words, chapter_words=body.chapter_words or st.default_chapter_words,
+             platform_style=body.platform_style, mode=body.mode or "serial")
     s.add(b)
     s.commit()
     s.refresh(b)
+    if body.mode == "wanben" or body.volume_chapters:  # v0.13 建书时定好完本篇幅 / 每卷章数
+        from app.services import wanben as wb
+
+        wb.update_settings(s, b, {"target_words": b.target_words, "chapter_words": b.chapter_words,
+                                  "volume_chapters": body.volume_chapters or 0})
     if body.fanfic is not None:
         ff_svc.attach(s, b, body.fanfic.model_dump(), body.copyright_ack)
     return book_out(s, b)

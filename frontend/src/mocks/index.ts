@@ -615,7 +615,7 @@ on('PUT', '/radar/config', (_m, b) => (db.radarConfig = { ...db.radarConfig, ...
 
 on('GET', '/books', () => [...db.books].sort((a, b) => b.updated_at.localeCompare(a.updated_at)))
 on('POST', '/books', (_m, b) => {
-  const book: Book = { id: nid(), title: b.title || `未命名 · ${b.genre}`, genre: b.genre, gender: b.gender, tagline: b.premise ?? '', status: 'bible', target_words: 1_000_000, chapter_words: 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 }, approval_mode: 'review' }
+  const book: Book = { id: nid(), title: b.title || `未命名 · ${b.genre}`, genre: b.genre, gender: b.gender, tagline: b.premise ?? '', status: 'bible', target_words: b.target_words || 1_000_000, chapter_words: b.chapter_words || 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 }, approval_mode: 'review' }
   db.books.push(book); return book
 })
 on('GET', '/books/:id', (m) => bookOf(m[1]))
@@ -1583,6 +1583,10 @@ const FF_DIRS: [string, string, string, string][] = [
   ['villain_redemption', '反派洗白', 'moderate', '给原著反派补动机、补过去，让读者理解甚至同情他。'],
   ['epilogue', '后日谈', 'moderate', '写原著结局之后的故事：众人各自的去处、新的日常或新的危机。'],
   ['crossover', '跨作品联动', 'loose', '让两部（或多部）作品的角色相遇，碰撞出新的故事。'],
+  ['multi_transmigration', '多本穿越', 'moderate', '主角在多部作品的世界之间穿梭，每个世界完成目标后进入下一个。'],
+  ['reverse_transmigration', '反向穿越', 'moderate', '原著角色穿到现实世界，用原著里的本事在新世界生活。'],
+  ['revival', '角色复活', 'moderate', '原著里死去的角色活了下来，故事从他的存活开始改写。'],
+  ['unfinished', '烂尾续写', 'strict', '原著烂尾或断更，接着原著最后一章往下写。'],
 ]
 const FF_CATALOG = {
   directions: FF_DIRS.map(([id, label, sf, desc]) => ({
@@ -1590,7 +1594,10 @@ const FF_CATALOG = {
     tips: ['先确定切入的原著时间点', '角色言行以原著性格为准', `「${label}」的爽点要尽早让读者看到`],
     risks: ['人物 OOC', '和原著情节重合过多'],
     template: `方向：${label}。切入点：；涉及角色：；想看到的走向：`,
+    slots: [{ key: 's0', label: '切入点', placeholder: '', optional: true }, { key: 's1', label: '涉及角色', placeholder: '', optional: true }, { key: 's2', label: '想看到的走向', placeholder: '', optional: true }],
   })),
+  povs: [{ id: 'first', label: '第一人称主角' }, { id: 'third_limited', label: '第三人称主角限知' }, { id: 'third_multi', label: '第三人称多视角' }, { id: 'canon_pov', label: '原著角色视角' }, { id: 'omniscient', label: '全知视角' }],
+  oc_types: [{ id: 'transmigrator', label: '穿越者' }, { id: 'native', label: '原住民原创角色' }, { id: 'soul_swap', label: '魂穿原著角色' }],
   fidelities: Object.entries(FF_FIDELITY).map(([id, f]) => ({ id, label: f.label, desc: f.desc, pass_score: f.pass })),
   copyright_notice: '同人创作仅供个人创作与学习交流使用。原著资料只能来自你有权使用的文本；本工具不保存原文，只保存提炼出的设定卡与无法还原原文的指纹。对外发布前，请遵守发布平台的同人创作规则，并自行确认原著的授权范围；未经原著版权方授权，不得用于任何商业用途。',
 }
@@ -1748,7 +1755,7 @@ const ffInfo = (book: any) => {
 // 覆盖 POST /books：同人建书（routes 先匹配先用，所以放到最前）
 routes.unshift(['POST', /^\/books$/, (_m, b) => {
   if (b?.fanfic) ffValidate(b.fanfic, b.copyright_ack)
-  const book: Book = { id: nid(), title: b.title || `未命名 · ${b.genre}`, genre: b.genre, gender: b.gender, tagline: b.premise ?? '', status: 'bible', target_words: 1_000_000, chapter_words: 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 }, approval_mode: 'review' }
+  const book: Book = { id: nid(), title: b.title || `未命名 · ${b.genre}`, genre: b.genre, gender: b.gender, tagline: b.premise ?? '', status: 'bible', target_words: b.target_words || 1_000_000, chapter_words: b.chapter_words || 2200, cover_url: null, created_at: now(), updated_at: now(), stats: { chapters: 0, words: 0, foreshadow_open: 0 }, approval_mode: 'review' }
   if (b?.premise) book.premise = b.premise
   if (b?.fanfic) ffSet(book, b.fanfic)
   db.books.push(book); return book
@@ -2042,3 +2049,160 @@ on('POST', '/books/:id/adopt', (m) => {
   })
 })
 on('GET', '/books/:id/adopt', (m) => { const book = bookOf(m[1]); const n = db.chapters.filter((c) => c.book_id === book.id).length; return { chapters: n, summaries: n, cards: db.cards.filter((c) => c.book_id === book.id).length, foreshadows: 0, outline_linked: 0 } })
+
+
+// ---------------- v0.13 章节工具 / 笔记 / 抽卡立项 / 上下文（mock） ----------------
+on('POST', '/chapters/:id/titles', (m) => {
+  const ch = must(db.chapters.find((c) => c.id === +m[1]), '章节')
+  return createJob('chapter_titles', ch.book_id, 1200, ['起章名…'], () => ({ chapter_id: ch.id, number: ch.number, current: ch.title,
+    titles: ['账本上的血手印', '一拳砸穿演武台', `第${ch.number}个跪下的人`, '管事的脸色变了', '风云再起', '三息之内', '他把门槛踩碎了']
+      .map((t, i) => ({ title: t, reason: '有画面，有冲突', score: t === '风云再起' ? 35 : 92 - i * 4, notes: t === '风云再起' ? ['套话'] : [] })).sort((a, b) => b.score - a.score) }), `chapter:${ch.id}`)
+})
+on('POST', '/books/:id/sparks', (m, b) => {
+  const book = bookOf(m[1])
+  const ideas = [['拍卖会上反向竞价', '主角故意抬价，让反派花光家底买下假货。', '反派当众吃哑巴亏', '下一章'], ['师姐的赌约', '师姐押上全部资源赌主角输，主角赢了反手把赌注还她一半。', '打脸 + 收人心', '本卷高潮'],
+    ['残卷认主', '残卷突然发热，指向宗门禁地。', '揭秘新能力', '支线'], ['外门大比的黑箱', '主角发现大比名单被调包，当场点破。', '众人震惊', '下一章'], ['老对手求和', '被打服的管事带着情报上门。', '势力反转', '支线']]
+  return createJob('sparks', book.id, 1200, ['抽脑洞…'], () => ({ book_id: book.id, sparks: ideas.slice(0, b?.n ?? 5).map(([title, beat, payoff, fit]) => ({ title, beat, payoff, fit })) }))
+})
+on('POST', '/chapters/:id/reader-comments', (m) => {
+  const ch = must(db.chapters.find((c) => c.id === +m[1]), '章节')
+  const sents = (ch.content ?? '').split(/(?<=[。！？])/).map((x) => x.trim()).filter((x) => x.length >= 6)
+  const pick = (k: number) => sents[k % Math.max(1, sents.length)] ?? ''
+  const ps = ['老书虫', '通勤党', '爽点猎人', '段子手']
+  const texts = ['这里有点意思', '主角终于支棱起来了！', '催更催更', '这个反派活不过三章', '前面有点拖，跳了']
+  const moods = ['猜', '爽', '急', '笑', '烦']
+  return createJob('reader_comments', ch.book_id, 1500, ['四位读者在刷…'], () => {
+    const comments = ps.flatMap((p, i) => [0, 1].map((j) => { const q = pick(i * 3 + j); const off = (ch.content ?? '').indexOf(q); return { persona: p, quote: q, text: texts[(i + j) % 5], mood: moods[(i + j) % 5], offset: off, paragraph: 0 } })).filter((c) => c.offset >= 0).sort((a, b) => a.offset - b.offset)
+    const drop = pick(5)
+    return { chapter_id: ch.id, number: ch.number, comments, dropped: 1, continue_rate: 0.75,
+      verdicts: ps.map((p, i) => ({ persona: p, will_continue: i !== 1, drop: i === 1 ? drop : '', drop_offset: i === 1 ? (ch.content ?? '').indexOf(drop) : null, why: i === 1 ? '这段太慢' : '' })),
+      instruction: `按读者段评修改：\n- 「${drop.slice(0, 40)}」这里通勤党想划走：这段太慢` }
+  }, `chapter:${ch.id}`)
+})
+const mockFreq = (text: string, names: string[]) => {
+  const cnt = new Map<string, number>()
+  for (const run of text.match(/[\u4e00-\u9fff]{2,}/g) ?? []) for (let n = 2; n <= 3; n++) for (let i = 0; i + n <= run.length; i++) { const g = run.slice(i, i + n); if (/^[的了是在我你他她这那就也]|[的了是在我你他她这那就也]$/.test(g) || names.some((x) => x.includes(g) || g.includes(x))) continue; cnt.set(g, (cnt.get(g) ?? 0) + 1) }
+  const total = Math.max(1, text.length)
+  return [...cnt.entries()].filter(([, c]) => c >= 3).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([word, count]) => ({ word, count, per_10k: Math.round(count * 100000 / total) / 10 }))
+}
+on('GET', '/chapters/:id/freq', (m) => { const ch = must(db.chapters.find((c) => c.id === +m[1]), '章节'); return { chapter_id: ch.id, items: mockFreq(ch.content ?? '', db.cards.filter((c) => c.book_id === ch.book_id).map((c) => c.name)) } })
+on('GET', '/books/:id/freq', (m, _b, u) => {
+  const book = bookOf(m[1]); const a = +(u.searchParams.get('start') ?? 0), z = +(u.searchParams.get('end') ?? 0)
+  const chs = db.chapters.filter((c) => c.book_id === book.id && (!a || c.number >= a) && (!z || c.number <= z))
+  return { book_id: book.id, chapters: chs.length, items: mockFreq(chs.map((c) => c.content ?? '').join('\n'), db.cards.filter((c) => c.book_id === book.id).map((c) => c.name)) }
+})
+on('POST', '/format', (_m, b) => {
+  const t = String(b?.text ?? '')
+  const out = t.replace(/\r\n/g, '\n').split('\n').map((p) => p.trim().replace(/\.{3,}|。{3,}/g, '……')).filter(Boolean).join('\n\n')
+  return { text: out, changed: out !== t, notes: out !== t ? ['段落间距已统一'] : [] }
+})
+const notes: { id: number; book_id: number; folder: string; title: string; content: string; tags: string[]; pinned: boolean; source: any; created_at: string; updated_at: string }[] = [
+  { id: 8801, book_id: 1, folder: '人物', title: '林野的底线', content: '不碰毒品，不卖人。被逼到绝路也不改。', tags: ['人设'], pinned: true, source: null, created_at: ago(300), updated_at: ago(300) },
+  { id: 8802, book_id: 1, folder: '伏笔', title: '冷库里的第二把钥匙', content: '第 3 章出现，第 12 章揭晓是前任店长留下的。', tags: [], pinned: false, source: null, created_at: ago(200), updated_at: ago(120) },
+]
+on('GET', '/books/:id/notes', (m, _b, u) => { const q = (u.searchParams.get('q') ?? '').toLowerCase(); return notes.filter((n) => n.book_id === +m[1] && (!q || (n.title + n.content).toLowerCase().includes(q))).sort((a, b) => +b.pinned - +a.pinned || b.updated_at.localeCompare(a.updated_at)) })
+on('POST', '/books/:id/notes/import', (m, b) => {
+  const parts = String(b?.text ?? '').split(/^###?\s+/m).filter((x) => x.trim())
+  parts.forEach((p) => { const [t, ...rest] = p.split('\n'); notes.push({ id: nid(), book_id: +m[1], folder: b?.folder ?? '', title: t.trim().slice(0, 80), content: rest.join('\n').trim(), tags: [], pinned: false, source: null, created_at: now(), updated_at: now() }) })
+  return { created: parts.length }
+})
+on('POST', '/books/:id/notes/from-spark', (m, b) => { const n = { id: nid(), book_id: +m[1], folder: '脑洞', title: b?.title ?? '脑洞', content: `${b?.beat ?? ''}\n\n爽点：${b?.payoff ?? ''}`, tags: [], pinned: false, source: { kind: 'spark' }, created_at: now(), updated_at: now() }; notes.push(n); return n })
+on('POST', '/books/:id/notes', (m, b) => { const n = { id: nid(), book_id: +m[1], folder: b?.folder ?? '', title: b?.title || '未命名笔记', content: b?.content ?? '', tags: b?.tags ?? [], pinned: !!b?.pinned, source: b?.source ?? null, created_at: now(), updated_at: now() }; notes.push(n); return n })
+on('PUT', '/books/:id/notes/:nid', (m, b) => { const n = must(notes.find((x) => x.id === +m[2] && x.book_id === +m[1]), '笔记'); Object.assign(n, b ?? {}, { updated_at: now() }); return n })
+on('DELETE', '/books/:id/notes/:nid', (m) => { const i = notes.findIndex((x) => x.id === +m[2]); if (i >= 0) notes.splice(i, 1); return { ok: true } })
+on('GET', '/books/:id/search', (m, _b, u) => {
+  const book = bookOf(m[1]); const q = u.searchParams.get('q') ?? ''; const regex = u.searchParams.get('regex') === 'true'
+  const scopes = (u.searchParams.get('scope') ?? 'chapters').split(',')
+  let re: RegExp
+  try { re = new RegExp(regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g') } catch { throw new HttpErr(422, '正则写得不对') }
+  const hits: any[] = []; const by: Record<string, number> = {}
+  const scan = (scope: string, id: number, field: string, label: string, text: string, locked = false) => { for (const mm of text.matchAll(re)) { if (!mm[0]) continue; by[scope] = (by[scope] ?? 0) + 1; hits.push({ scope, id, field, label, offset: mm.index ?? 0, before: text.slice(Math.max(0, (mm.index ?? 0) - 24), mm.index), match: mm[0], after: text.slice((mm.index ?? 0) + mm[0].length, (mm.index ?? 0) + mm[0].length + 24), locked, chapter_id: scope === 'chapters' ? id : null }) } }
+  if (scopes.includes('chapters')) db.chapters.filter((c) => c.book_id === book.id).forEach((c) => { scan('chapters', c.id, 'title', `第${c.number}章 章名`, c.title); scan('chapters', c.id, 'content', `第${c.number}章 ${c.title}`, c.content ?? '') })
+  if (scopes.includes('cards')) db.cards.filter((c) => c.book_id === book.id).forEach((c) => scan('cards', c.id, 'summary', `设定·${c.name}`, c.summary, !!(c as any).locked))
+  if (scopes.includes('outline')) db.outline.filter((o) => o.book_id === book.id).forEach((o) => scan('outline', o.id, 'summary', `大纲·${o.title}`, o.summary ?? '', !!(o as any).locked))
+  if (scopes.includes('notes')) notes.filter((n) => n.book_id === book.id).forEach((n) => scan('notes', n.id, 'content', `笔记·${n.title}`, n.content))
+  return { q, regex, total: hits.length, by_scope: by, hits: hits.slice(0, 500), truncated: hits.length > 500 }
+})
+on('POST', '/books/:id/replace', (m, b) => {
+  const book = bookOf(m[1]); const q = String(b?.q ?? ''); const rep = String(b?.replacement ?? '')
+  const re = new RegExp(b?.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')
+  let n = 0; const changed: Record<string, number> = {}
+  const sub = (scope: string, t: string) => { const out = t.replace(re, () => { n++; return rep }); if (out !== t) changed[scope] = (changed[scope] ?? 0) + 1; return out }
+  if ((b?.scopes ?? ['chapters']).includes('chapters')) db.chapters.filter((c) => c.book_id === book.id).forEach((c) => { c.content = sub('chapters', c.content ?? ''); c.title = sub('chapters', c.title) })
+  if ((b?.scopes ?? []).includes('cards')) db.cards.filter((c) => c.book_id === book.id && !(c as any).locked).forEach((c) => { c.summary = sub('cards', c.summary) })
+  if ((b?.scopes ?? []).includes('notes')) notes.filter((x) => x.book_id === book.id).forEach((x) => { x.content = sub('notes', x.content) })
+  return { replaced: n, changed, skipped_locked: [] }
+})
+const ctxExclude = new Map<number, string[]>()
+on('GET', '/books/:id/context-preview', (m) => {
+  const book = bookOf(m[1]); const ex = ctxExclude.get(book.id) ?? []
+  const blocks = [['本章相关设定', 1800], ['人物当前状态', 600], ['相关旧章回读', 1200], ['最近章节摘要', 1500], ['上一章结尾原文', 600], ['未回收伏笔', 400], ['本章写作任务', 900], ['后两章章纲', 500]] as [string, number][]
+  const out = blocks.map(([label, chars]) => ({ label, chars, excluded: ex.includes(label), pinned: label === '本章写作任务' }))
+  return { chapter: 7, fixed_chars: 4200, blocks: out, total_chars: 4200 + out.filter((x) => !x.excluded).reduce((a, x) => a + x.chars, 0), exclude: ex }
+})
+on('PUT', '/books/:id/context-exclude', (m, b) => { const blocks = (b?.blocks ?? []).filter((x: string) => x !== '本章写作任务'); ctxExclude.set(bookOf(m[1]).id, blocks); return { blocks } })
+on('GET', '/chapters/:id/aigc/report', () => '<html></html>')
+on('POST', '/books/:id/fanfic/oc/generate', (m) => {
+  const book = bookOf(m[1])
+  return createJob('fanfic_oc', book.id, 1500, ['设计原创主角…'], () => {
+    const name = (book.fanfic as any)?.protagonist?.name || '沈渡'
+    if (!db.cards.some((c) => c.book_id === book.id && c.name === name)) db.cards.push(normCard({ id: nid(), book_id: book.id, type: 'character', name, summary: '从现代穿来的外卖骑手，熟读原著，嘴硬手快。', data: { role: 'protagonist', origin: 'oc' }, known_by: [name], updated_at: now(), status: 'active', ref_enabled: true, soul: null }))
+    return { card_id: 0, name, summary: '从现代穿来的外卖骑手，熟读原著，嘴硬手快。', data: {}, ai_filled: ['identity', 'growth'] }
+  })
+})
+// 抽卡立项
+const sparkSessions: any[] = []
+const SPARK_POOL: Record<string, string[]> = {
+  world: ['灵气复苏的末法城市', '被天道标价的修仙界', '九州共用一本账簿的王朝', '每天重置一次的宗门', '以寿命为货币的江湖', '妖族统治的人间', '神明打工的天庭', '考试决定一切的武道世界', '海底城邦的修真文明', '被封印的上古战场'],
+  hero: ['被退婚的外门杂役', '天生废脉的世家庶子', '替人坐牢十年的狱卒', '装傻的皇子', '穷到吃土的符师', '送葬队的抬棺人', '失忆的前任剑尊', '被逐出师门的丹童', '背锅的宗门账房', '镇守荒村的老兵之子'],
+  cheat: ['能看见别人功法破绽的残卷', '每杀一敌返还一次修为', '可以抽取仇人气运的铜钱', '能和死人对话的灯', '复制他人一招的玉简', '把伤害转成经验的体质', '每天签到送一件法宝', '预知三息后战局的眼睛', '能收服妖兽的笛子', '一页会自己续写的功法'],
+}
+on('GET', '/spark/tracks', (_m, _b, u) => {
+  const g = u.searchParams.get('gender') === 'female' ? 'female' : 'male'
+  const list = g === 'male' ? [['玄幻', ['高武', '东方玄幻', '异世大陆']], ['都市', ['都市高武', '神医', '异能']], ['仙侠', ['修真', '洪荒']], ['历史', ['架空', '争霸']], ['科幻', ['末世', '星际']], ['悬疑', ['灵异', '规则怪谈']]]
+    : [['古言', ['宫斗', '宅斗', '种田']], ['现言', ['豪门', '甜宠']], ['玄幻言情', ['修仙', '快穿']], ['年代', ['七零', '八零']]]
+  return { gender: g, tracks: (list as [string, string[]][]).map(([track, subs], i) => ({ track, heat: Math.round((92 - i * 9) * 10) / 10, rising: 5 - i, subs, sample_titles: i < 2 ? ['开局签到荒古圣体', '我在末世开超市'] : [], from_rank: i < 3 })),
+    tag_groups: g === 'male' ? ['系统', '重生', '无敌', '扮猪吃虎', '打脸', '签到', '热血', '种田'] : ['甜宠', '大女主', '双强', '穿书', '重生', '团宠', '马甲', '追妻'] }
+})
+on('GET', '/spark/sessions', () => sparkSessions.map((x) => ({ id: x.id, track: x.track, gender: x.gender, idea_id: x.idea_id, title: x.proposal?.title ?? null, updated_at: now() })))
+on('POST', '/spark/sessions', (_m, b) => {
+  if (!b?.track) throw new HttpErr(422, '请选择赛道')
+  const x = { id: nid(), idea_id: null, gender: b.gender ?? 'male', track: b.track, sub: b.sub ?? '', tags: b.tags ?? [], inspiration: b.inspiration ?? {}, cards: { world: [], hero: [], cheat: [] }, keep: { world: [], hero: [], cheat: [] }, picks: {}, rounds: { world: 0, hero: 0, cheat: 0 }, proposal: null }
+  sparkSessions.push(x); return x
+})
+on('GET', '/spark/sessions/:id', (m) => must(sparkSessions.find((x) => x.id === +m[1]), '抽卡会话'))
+on('POST', '/spark/sessions/:id/draw', (m, b) => {
+  const x = must(sparkSessions.find((y) => y.id === +m[1]), '抽卡会话'); const axis = b?.axis as 'world' | 'hero' | 'cheat'
+  return createJob('spark_draw', null, 1400, ['抽卡…'], () => {
+    const kept = (x.cards[axis] ?? []).filter((c: any) => (b?.keep ?? []).includes(c.id))
+    const pool = SPARK_POOL[axis].filter((t) => !kept.some((k: any) => k.title === t))
+    const off = (x.rounds[axis] * 3) % pool.length
+    const fresh = [...pool.slice(off), ...pool.slice(0, off)].slice(0, 9 - kept.length).map((t, i) => ({ id: Math.random().toString(16).slice(2, 10), title: t, desc: `${x.track}向：${t}，开局就有冲突，后期能撑起长线。`, tags: [x.track, '爽文'], heat: 88.5, similarity: (i * 13) % 55, similar_to: i % 4 === 3 ? '开局签到荒古圣体' : '', trope_hits: i === 5 ? ['退婚流'] : [] }))
+    x.cards[axis] = [...kept, ...fresh]; x.keep[axis] = kept.map((k: any) => k.id); x.rounds[axis] += 1
+    return x
+  }, `spark:${x.id}`)
+})
+on('POST', '/spark/sessions/:id/pick', (m, b) => {
+  const x = must(sparkSessions.find((y) => y.id === +m[1]), '抽卡会话')
+  x.picks[b.axis] = b?.custom?.title ? { id: 'custom', title: b.custom.title, desc: b.custom.desc ?? '', tags: [], heat: null, similarity: 0, similar_to: '', trope_hits: [] } : (x.cards[b.axis] ?? []).find((c: any) => c.id === b.card_id) ?? null
+  return x
+})
+on('POST', '/spark/sessions/:id/proposal', (m) => {
+  const x = must(sparkSessions.find((y) => y.id === +m[1]), '抽卡会话')
+  if (!x.picks.world || !x.picks.hero || !x.picks.cheat) throw new HttpErr(409, '世界观、主角、金手指都要选')
+  return createJob('spark_proposal', null, 1800, ['写立项书…'], () => {
+    const titles = ['退婚当天，我觉醒了万倍返还', '开局签到十年修为', '我在宗门当账房，全宗都欠我钱', '废脉少年一拳破天', '三息之后，你已经输了', '被逐出师门后我成了丹神', '杂役？我是来收债的', '残卷一出，天下无敌', '全城都在等我出手'].map((t, i) => ({ title: t, score: 100 - i * 8 }))
+    x.proposal = { title: titles[0].title, titles, tagline: `${x.picks.hero.title}得到${x.picks.cheat.title}，在${x.picks.world.title}里一路打穿。`, logline: '一句话梗概', hook: '第一章当众打脸退婚的世家', endgame: '登顶九州', style: '短句快节奏，每章一个爽点', conflict: '世家与宗门联手打压主角',
+      selling_points: ['开局打脸', '金手指有成长线', '反派层层升级'], expectations: ['揭开残卷来历'], arc: ['外门崛起', '内门争锋', '九州大比', '上界清算'], power: { name: '九境', levels: ['淬体', '通脉', '凝元', '化神', '合道'] },
+      seed_cards: [{ type: 'world', name: x.picks.world.title.slice(0, 12), summary: x.picks.world.title, data: {} }, { type: 'cheat', name: x.picks.cheat.title.slice(0, 12), summary: x.picks.cheat.title, data: { input: '盯住对手', limit: '一天三次', growth: '境界越高看得越深' } }, { type: 'character', name: '林川', summary: x.picks.hero.title, data: { role: 'protagonist' } }], completeness: 100 }
+    return x
+  }, `spark:${x.id}`)
+})
+on('PATCH', '/spark/sessions/:id/proposal', (m, b) => { const x = must(sparkSessions.find((y) => y.id === +m[1]), '抽卡会话'); x.proposal = { ...x.proposal, ...(b ?? {}) }; return x })
+on('POST', '/spark/sessions/:id/adopt', (m) => {
+  const x = must(sparkSessions.find((y) => y.id === +m[1]), '抽卡会话')
+  if (x.idea_id) return { idea_id: x.idea_id }
+  const idea: any = { id: nid(), book_id: null, title: x.proposal.title, logline: x.proposal.logline, selling_points: x.proposal.selling_points, hook: x.proposal.hook, genre: x.track, gender: x.gender, scores: null, chosen: false, source: { kind: 'spark', seed_cards: x.proposal.seed_cards } }
+  db.ideas.unshift(idea); x.idea_id = idea.id
+  return { idea_id: idea.id }
+})

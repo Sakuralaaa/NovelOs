@@ -384,9 +384,14 @@ def _build_outline(book_id: int) -> int:
             made += 2
             for c in items:
                 first = re.split(r"(?<=[。！？])", (c.summary or "").strip(), maxsplit=1)[0]
-                s.add(OutlineNode(book_id=book_id, parent_id=arc.id, level="chapter", order=c.number, title=c.title or f"第{c.number}章",
-                                  summary=first[:200], status="written", chapter_id=c.id,
-                                  beats={"title": c.title or f"第{c.number}章", "goal": first[:120]}))
+                node = OutlineNode(book_id=book_id, parent_id=arc.id, level="chapter", order=c.number, title=c.title or f"第{c.number}章",
+                                   summary=first[:200], status="written", chapter_id=c.id,
+                                   beats={"title": c.title or f"第{c.number}章", "goal": first[:120]})
+                s.add(node)
+                s.flush()
+                if not c.outline_node_id:
+                    c.outline_node_id = node.id
+                    s.add(c)
                 made += 1
         s.commit()
         return made

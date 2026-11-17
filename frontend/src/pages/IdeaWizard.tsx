@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
-  AlertTriangle, ArrowRight, Check, ChevronLeft, ClipboardPaste, CloudUpload, Feather, FileText, Layers3, Lightbulb, RefreshCw, Sparkles, Wand2, X,
+  AlertTriangle, ArrowRight, Check, ChevronLeft, Dice, ClipboardPaste, CloudUpload, Feather, FileText, Layers3, Lightbulb, RefreshCw, Sparkles, Wand2, X,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -153,6 +153,18 @@ function PathCards({ onPick }: { onPick: (k: PathKey) => void }) {
           </motion.button>
         )
       })}
+      <Link to="/spark" className="card-hover group flex flex-col rounded-xl border bg-surface p-4 text-left shadow-card sm:p-5">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary"><Dice className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[16px] font-semibold tracking-tight">抽卡立项</div>
+            <div className="mt-0.5 text-[12.5px] text-muted-foreground">5 步 · 赛道 → 世界观 → 主角 → 金手指 → 立项书</div>
+          </div>
+        </div>
+        <p className="mt-3 text-[13.5px] leading-relaxed text-foreground/80">从榜单真实赛道出发，三轮九卡挑世界观、主角、金手指，立项书自带种子设定</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">{['榜单赛道', '每轮 9 卡', '种子设定'].map((t) => <span key={t} className="rounded-full bg-muted/80 px-2.5 py-0.5 text-[12px] text-muted-foreground">{t}</span>)}</div>
+        <span className="mt-4 inline-flex items-center gap-1 text-[13.5px] font-medium text-primary">开始<ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" /></span>
+      </Link>
     </div>
   )
 }

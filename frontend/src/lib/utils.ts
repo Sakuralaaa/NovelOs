@@ -62,6 +62,8 @@ export const CARD_TYPES: { key: CardType; label: string; hint: string }[] = [
 export const cardTypeLabel = (t: CardType) => CARD_TYPES.find((x) => x.key === t)?.label ?? t
 
 export const JOB_KIND_LABEL: Record<string, string> = {
+  book_adopt: '接管旧书', generation_followup: '追问', book_batch: '批量处理', chapter_titles: '起章名', sparks: '脑洞抽卡',
+  reader_comments: '神评', spark_draw: '抽卡', spark_proposal: '立项书', fanfic_oc: '原创主角',
   wanben_plan: '完本规划',
   wanben_batch: '完本连写',
   wanben_iterate: '章节迭代',

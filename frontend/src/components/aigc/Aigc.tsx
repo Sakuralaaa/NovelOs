@@ -193,9 +193,9 @@ export function Disclaimer({ className }: { className?: string }) {
 }
 
 /** 章节页右侧「AI 率」面板 */
-export function AigcPanel({ aigc, text, job, onRun, stale, staleNote, showHl, onToggleHl, onLocate, disabled }: {
+export function AigcPanel({ aigc, text, job, onRun, stale, staleNote, showHl, onToggleHl, onLocate, disabled, reportUrl }: {
   aigc: AigcResult | null | undefined; text: string; job?: TrackedJob; onRun: () => void; stale: boolean; staleNote?: string
-  showHl: boolean; onToggleHl: (v: boolean) => void; onLocate: (s: AigcSegment) => void; disabled?: string | false
+  showHl: boolean; onToggleHl: (v: boolean) => void; onLocate: (s: AigcSegment) => void; disabled?: string | false; reportUrl?: string
 }) {
   const cfg = useZhuque()
   const configured = !!cfg.data?.zhuque_configured
@@ -209,6 +209,7 @@ export function AigcPanel({ aigc, text, job, onRun, stale, staleNote, showHl, on
             <>
               <AigcSummary r={aigc} stale={stale} staleNote={staleNote} onRerun={configured ? onRun : undefined} running={running} compact />
               <HighlightToggle checked={showHl} onChange={onToggleHl} note={stale && showHl ? '位置可能偏移' : undefined} />
+              {reportUrl && <a href={reportUrl} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-1 text-[13px] text-primary hover:underline">检测报告（可打印成 PDF）</a>}
               <div>
                 <h4 className="mb-2 text-[13px] font-semibold">AI / 疑似片段</h4>
                 <SegmentList text={text} segments={aigc.segments ?? []} onLocate={onLocate} />

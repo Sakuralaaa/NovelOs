@@ -38,6 +38,7 @@ DEFAULTS: dict[str, Any] = {
     "refine_ranges": [],         # [[start, end], ...]，单章写成 [n, n]
     "pause_on_unapproved_refine": True,  # 精修范围内有章写好未审批时，批量连写暂停
     "auto_continue": False,
+    "volume_chapters": 0,        # v0.13 每卷章数；0 按约 60 章一卷自动算
 }
 CHAPTERS_PER_VOLUME = 60  # 倒推卷数的经验值：约 60 章一卷
 MIN_VOLUMES, MAX_VOLUMES = 2, 12
@@ -257,7 +258,8 @@ def plan_job(book_id: int, ctx: JobContext) -> dict[str, Any]:
             warnings.append(f"按目标字数算出 {total} 章，但已经写/规划到第 {floor_total} 章；总章数按 {floor_total} 章算，"
                             "如要更短，请先删掉多出的章细纲或调整目标字数")
             total = floor_total
-        n_vol = min(MAX_VOLUMES, max(MIN_VOLUMES, math.ceil(total / CHAPTERS_PER_VOLUME)))
+        per_vol = int((book.wanben or {}).get("volume_chapters") or CHAPTERS_PER_VOLUME)  # v0.13 建书时可指定每卷章数
+        n_vol = min(MAX_VOLUMES, max(MIN_VOLUMES, math.ceil(total / max(5, per_vol))))
         # 已有卷比需要的多：后面没有任何章细纲的卷可以删，有章细纲的卷保留
         keep_n = n_vol
         for i, v in enumerate(vols):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 COPYRIGHT_NOTICE = (
@@ -58,7 +59,7 @@ DIRECTIONS: list[dict[str, Any]] = [
      "template": "重生的角色：；重生回到的时间点：；最想改变的事："},
     {"id": "system", "label": "系统", "suggested_fidelity": "moderate",
      "desc": "给原著角色或穿越者绑定系统，用任务与奖励推动在原著世界里的行动。",
-     "tips": ["系统规则要和原著能力体系兼容，奖励不要直接越过原著战力上限", "任务最好围绕原著名场面设计，制造“改写名场面”的爽点", "系统要有代价和限制"],
+     "tips": ["系统规则要和原著能力体系兼容，奖励不要直接越过原著战力上限", "任务最好围绕原著名场面设计，制造“改写名场面”的爽点", "系统要有上限和成长路线：每次升级解锁什么写清楚，不靠自残式代价制造紧张"],
      "risks": ["战力崩坏", "系统喧宾夺主，原著角色失去存在感"],
      "template": "绑定系统的角色：；系统类型与核心规则：；第一个任务想放在哪段剧情："},
     {"id": "au_modern", "label": "AU 现代", "suggested_fidelity": "loose",
@@ -96,14 +97,65 @@ DIRECTIONS: list[dict[str, Any]] = [
      "tips": ["先定主世界和来客世界，力量体系要统一换算", "每部作品的角色都按各自原著卡把关，不要互相同化", "联动的理由要在开篇讲清楚"],
      "risks": ["战力换算失衡", "一方角色沦为背景板"],
      "template": "联动的作品（主原著之外，用 extra_source_ids 关联）：；相遇方式：；想看的角色互动："},
+    {"id": "multi_transmigration", "label": "多本穿越", "suggested_fidelity": "moderate",
+     "desc": "主角在多部作品的世界之间穿梭，每个世界完成目标后进入下一个。",
+     "tips": ["每个世界一卷，开卷先交代这个世界的规则和主角的新身份", "主角在世界之间能带走什么、带不走什么要定死", "每个世界都要有一个只属于这个世界的名场面"],
+     "risks": ["世界切换太快，读者记不住人", "能力层层叠加后失控"],
+     "template": "要穿的作品（按顺序）：；每个世界的目标：；能带走的东西："},
+    {"id": "reverse_transmigration", "label": "反向穿越", "suggested_fidelity": "moderate",
+     "desc": "原著角色穿到现实世界或作者的世界，用原著里的本事在新世界生活。",
+     "tips": ["写清他刚落地时最不适应的三件事", "原著能力在新世界打几折要定下来", "让他的原著性格和现代生活产生反差笑点或冲突"],
+     "risks": ["变成单纯的现代生活流，原著味消失", "能力在现实里过强，冲突没了"],
+     "template": "穿过来的角色：；落地的地方和身份：；他想在这里做成的事："},
+    {"id": "revival", "label": "角色复活", "suggested_fidelity": "moderate",
+     "desc": "原著里死去的角色活了下来，或在之后被救回，故事从他的存活开始改写。",
+     "tips": ["复活的理由要在原著规则里站得住", "他活着会改变哪些原著事件，列出第一张多米诺骨牌", "其他角色见到他的反应按各自原著性格写"],
+     "risks": ["复活理由牵强", "原著主角的成长被削弱"],
+     "template": "复活的角色：；复活的方式和时间点：；他活下来后最先改变的事："},
+    {"id": "unfinished", "label": "烂尾续写", "suggested_fidelity": "strict",
+     "desc": "原著烂尾或断更，接着原著最后一章往下写，给读者一个像样的结局。",
+     "tips": ["先把原著留下的伏笔和未解之谜列全，续写按重要度回收", "文风和节奏贴近原著后期，不要突然换腔调", "结局要回应原著开篇的核心承诺"],
+     "risks": ["和原著已写内容矛盾", "急着收尾，伏笔回收草率"],
+     "template": "从原著哪里接：；最想回收的伏笔：；想要的结局："},
 ]
+def _slots(template: str) -> list[dict[str, Any]]:
+    """把模板「标签：；标签：」拆成可填的空位（全部可不填）。"""
+    out = []
+    for i, seg in enumerate(x for x in template.split("；") if x.strip()):
+        label = seg.split("：")[0].strip()
+        if not label:
+            continue
+        ph = ""
+        m = re.search(r"[（(]([^）)]+)[）)]", label)
+        if m:
+            ph = m.group(1)
+            label = re.sub(r"[（(][^）)]+[）)]", "", label).strip() or label
+        out.append({"key": f"s{i}", "label": label[:30], "placeholder": ph[:40], "optional": True})
+    return out
+
+
+for _d in DIRECTIONS:
+    _d["slots"] = _slots(_d["template"])
+
 DIRECTION_IDS = tuple(d["id"] for d in DIRECTIONS)
 DIRECTION_BY_ID = {d["id"]: d for d in DIRECTIONS}
+
+
+POVS: dict[str, dict[str, str]] = {
+    "first": {"label": "第一人称主角", "rule": "第一人称，只写主角看到、听到、想到的。"},
+    "third_limited": {"label": "第三人称主角限知", "rule": "第三人称，镜头跟着主角，只写主角知道的事。"},
+    "third_multi": {"label": "第三人称多视角", "rule": "第三人称，可在不同场景切换视角人物，一个场景只跟一个人。"},
+    "canon_pov": {"label": "原著角色视角", "rule": "从原著角色的眼睛看主角和事件，原著角色的认知以原著那个时间点为准。"},
+    "omniscient": {"label": "全知视角", "rule": "全知视角，可交代多方动机，但关键反转前不剧透。"},
+}
+OC_TYPES = {"transmigrator": "穿越者", "native": "原住民原创角色", "soul_swap": "魂穿原著角色"}
 
 
 def catalog() -> dict[str, Any]:
     return {
         "directions": DIRECTIONS,
+        "povs": [{"id": k, "label": v["label"]} for k, v in POVS.items()],
+        "oc_types": [{"id": k, "label": v} for k, v in OC_TYPES.items()],
         "fidelities": [{"id": k, "label": v["label"], "desc": v["desc"], "pass_score": v["pass"]} for k, v in FIDELITY.items()],
         "copyright_notice": COPYRIGHT_NOTICE,
     }

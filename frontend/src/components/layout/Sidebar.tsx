@@ -2,7 +2,7 @@ import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Bot, BookOpen, BookOpenCheck, Feather, FileText, History, House, Layers, LayoutDashboard, Lightbulb, ListTree, LogOut, Moon, Package,
-  FlagCheckered, PanelLeftClose, PanelLeftOpen, Radar, Scissors, Search, Settings, ShieldCheck, Stethoscope, Sun, Waypoints,
+  FlagCheckered, Notebook, StackSimple, PanelLeftClose, PanelLeftOpen, Radar, Scissors, Search, Settings, ShieldCheck, Stethoscope, Sun, Waypoints,
 } from '@/components/icons'
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
@@ -33,6 +33,8 @@ export const BOOK_NAV = [
   { to: 'chapters', label: '章节', icon: FileText },
   { to: 'foreshadows', label: '伏笔', icon: Waypoints },
   { to: 'wanben', label: '完本', icon: FlagCheckered },
+  { to: 'batch', label: '批量处理', icon: StackSimple },
+  { to: 'notes', label: '笔记', icon: Notebook },
   { to: 'check', label: '体检', icon: Stethoscope },
   { to: 'package', label: '包装发布', icon: Package },
   { to: 'agent', label: 'Agent', icon: Bot },

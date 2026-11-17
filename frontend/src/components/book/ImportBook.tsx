@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CloudUpload } from '@/components/icons'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, ArchiveBox, CloudUpload } from '@/components/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Sheet } from '@/components/ui/dialog'
@@ -9,7 +9,10 @@ import { Field, Input, Textarea } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
-import { useJobs } from '@/lib/jobs'
+import { useActiveJob, useJobs } from '@/lib/jobs'
+import { Card, CardBody, CardHeader } from '@/components/ui/card'
+import { Progress } from '@/components/ui/misc'
+import { JobInline } from '@/components/common/JobInline'
 import type { Gender, ImportPreview } from '@/lib/types'
 import { cn, fmtNum } from '@/lib/utils'
 
@@ -106,5 +109,40 @@ export function ImportBookDialog({ open, onOpenChange }: { open: boolean; onOpen
         </div>
       )}
     </Sheet>
+  )
+}
+
+/** 概览页：已写章节缺摘要、大纲没挂上章节时显示接管进度和「接管」按钮；全部补齐后不显示 */
+export function AdoptCard({ bookId }: { bookId: number }) {
+  const qc = useQueryClient()
+  const { start } = useJobs()
+  const key = `adopt:${bookId}`
+  const active = useActiveJob(key)
+  const q = useQuery({ queryKey: ['adopt', bookId], queryFn: () => api.adoptStatus(bookId), refetchInterval: active ? 4000 : false })
+  const d = q.data
+  if (!d || !d.chapters || (!active && d.summaries >= d.chapters && d.outline_linked >= d.chapters)) return null
+  const run = () => start(api.adoptBook(bookId), { key, label: '接管旧书', successMsg: '接管完成：设定、伏笔、大纲已补上',
+    onSuccess: () => { ['adopt', 'cards', 'outline', 'foreshadows'].forEach((k) => qc.invalidateQueries({ queryKey: [k, bookId] })) } })
+  return (
+    <Card className="mt-5">
+      <CardHeader divider icon={<ArchiveBox />} title="接管旧章" action={!active && <Button size="sm" variant="primary" onClick={() => void run()}>接管</Button>} />
+      <CardBody className="space-y-3 p-4 sm:p-5">
+        {active && <JobInline job={active} />}
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Meter label="章节摘要" n={d.summaries} total={d.chapters} />
+          <Meter label="大纲挂章" n={d.outline_linked} total={d.chapters} />
+          <div className="rounded-lg bg-subtle px-3 py-2.5 text-[13px]"><div className="text-[12px] text-muted-foreground">设定 / 伏笔</div><div className="num mt-0.5 font-semibold">{d.cards} / {d.foreshadows}</div></div>
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function Meter({ label, n, total }: { label: string; n: number; total: number }) {
+  return (
+    <div className="rounded-lg bg-subtle px-3 py-2.5 text-[13px]">
+      <div className="flex justify-between text-[12px] text-muted-foreground"><span>{label}</span><span className="num">{n}/{total}</span></div>
+      <Progress value={total ? (n / total) * 100 : 0} className="mt-1.5" />
+    </div>
   )
 }

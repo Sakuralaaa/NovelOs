@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # NovelOS 一键部署：bash deploy.sh
-# 1) 检查 docker / docker compose  2) 缺 .env 时自动生成  3) 构建并启动  4) 等待健康检查通过并打印访问地址
+# 1) 检查 docker / docker compose  2) 缺 .env 时自动生成  3) 拉取镜像并启动  4) 等待健康检查通过并打印访问地址
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -57,9 +57,9 @@ APP_PORT="$(grep -E '^APP_PORT=' .env | tail -1 | cut -d= -f2 | tr -d ' "\r')"
 APP_PORT="${APP_PORT:-8080}"
 mkdir -p data
 
-# ---------- 3. 构建并启动 ----------
-say "开始构建并启动（首次构建需要下载依赖，约 3–10 分钟）……"
-"${COMPOSE[@]}" up -d --build
+# ---------- 3. 拉取镜像并启动 ----------
+say "拉取镜像并启动（首次约 1–3 分钟）……"
+"${COMPOSE[@]}" pull && "${COMPOSE[@]}" up -d
 
 # ---------- 4. 等待就绪 ----------
 say "等待服务就绪（http://127.0.0.1:${APP_PORT}/api/health）……"

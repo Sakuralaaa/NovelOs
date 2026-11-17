@@ -478,3 +478,32 @@ class Generation(SQLModel, table=True):
     parent_id: Optional[int] = Field(default=None, index=True)
     note: str = ""  # 追问时作者写的要求
     created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+# ------------------------------------------------------------------ v0.13 写作笔记
+
+class Note(SQLModel, table=True):
+    """书内写作笔记：按目录归类，可置顶；@笔记:标题 可在写章、改写里引用。source 记来源（如脑洞抽卡、神评）。"""
+    __tablename__ = "note"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    folder: str = ""
+    title: str = ""
+    content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    tags: list[str] = _json_list()
+    pinned: bool = False
+    source: Optional[dict[str, Any]] = _json_dict_nullable()
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.13 抽卡立项
+
+class SparkSession(SQLModel, table=True):
+    """抽卡立项的一次会话：基本信息 → 世界观 / 主角 / 金手指三轮抽卡 → 立项书。state 整份存 JSON。"""
+    __tablename__ = "spark_session"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    state: Optional[dict[str, Any]] = _json_dict_nullable()
+    idea_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

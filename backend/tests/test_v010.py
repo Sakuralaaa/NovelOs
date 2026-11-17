@@ -65,10 +65,10 @@ def test_new_tables_and_columns() -> None:
 def test_directions_catalog(client: TestClient) -> None:
     r = client.get("/api/fanfic/directions").json()
     ds = r["directions"]
-    assert len(ds) == 12
+    assert len(ds) == 16  # v0.13 增加 4 个方向
     ids = {d["id"] for d in ds}
     assert {"canon_fill", "if_line", "transmigration", "rebirth", "system", "au_modern", "au_ancient", "side_pov", "cp",
-            "villain_redemption", "epilogue", "crossover"} == ids
+            "villain_redemption", "epilogue", "crossover", "multi_transmigration", "reverse_transmigration", "revival", "unfinished"} == ids
     for d in ds:
         assert d["label"] and d["desc"] and d["tips"] and d["risks"] and d["suggested_fidelity"] in ("strict", "moderate", "loose")
     assert [f["id"] for f in r["fidelities"]] == ["strict", "moderate", "loose"]
