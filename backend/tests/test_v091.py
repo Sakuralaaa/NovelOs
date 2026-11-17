@@ -574,7 +574,7 @@ def test_agent_polish_voice_tool(client: TestClient) -> None:
 # ================================================================== 7. 版本号
 
 def test_version_091(client: TestClient) -> None:
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15."))
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16."))
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.1" in (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## v0.9.1" in (root / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")

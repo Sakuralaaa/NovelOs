@@ -24,6 +24,7 @@ const Foreshadows = lazy(() => import('@/pages/book/Foreshadows'))
 const PackagePage = lazy(() => import('@/pages/book/Package'))
 const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const WanbenPage = lazy(() => import('@/pages/book/Wanben'))
+const AutoPage = lazy(() => import('@/pages/book/Auto'))
 const BookCheckPage = lazy(() => import('@/pages/book/BookCheck'))
 const BatchPage = lazy(() => import('@/pages/book/Batch'))
 const NotesPage = lazy(() => import('@/pages/book/Notes'))
@@ -79,6 +80,7 @@ export function App() {
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
                 <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
                 <Route path="books/:bookId/wanben" element={<S><WanbenPage /></S>} />
+                <Route path="books/:bookId/auto" element={<S><AutoPage /></S>} />
                 <Route path="books/:bookId/check" element={<S><BookCheckPage /></S>} />
                 <Route path="books/:bookId/batch" element={<S><BatchPage /></S>} />
                 <Route path="books/:bookId/notes" element={<S><NotesPage /></S>} />

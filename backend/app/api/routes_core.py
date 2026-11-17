@@ -19,7 +19,7 @@ from app.db import get_session, kv_set, session_scope
 from app.jobs.manager import NotResumable, resume as resume_job, resume_info, submit
 from app.llm.crypto import decrypt, encrypt
 from app.llm.gateway import (
-    IMAGE_MODE_KEY, ROLES, ROUTING_KEY, LLMError, LLMGateway, get_image_mode, get_routing, is_mock_mode,
+    BACKUP_ROLES, IMAGE_MODE_KEY, MAX_BACKUPS, ROLES, ROUTING_BACKUP_KEY, ROUTING_KEY, get_backups, LLMError, LLMGateway, get_image_mode, get_routing, is_mock_mode,
 )
 from app.models.tables import Book, Channel, Idea, Job, RadarSnapshot, TokenUsage
 from app.radar import service as radar
@@ -148,6 +148,7 @@ def delete_channel(cid: int, s: Session = Depends(get_session)) -> dict[str, boo
     changed = {k: (None if v and v.split(":", 1)[0] == str(cid) else v) for k, v in routing.items()}
     s.commit()
     kv_set(s, ROUTING_KEY, changed)
+    kv_set(s, ROUTING_BACKUP_KEY, {k: [x for x in v if x.split(":", 1)[0] != str(cid)] for k, v in get_backups(s).items()})
     return {"ok": True}
 
 
@@ -215,6 +216,32 @@ def routing_put(body: RoutingIn, s: Session = Depends(get_session)) -> dict[str,
     if image_mode:
         kv_set(s, IMAGE_MODE_KEY, image_mode)
     return {**get_routing(s), "image_mode": get_image_mode(s)}
+
+
+@router.get("/settings/routing/backup")
+def routing_backup_get(s: Session = Depends(get_session)) -> dict[str, list[str]]:
+    """v0.16 备用路由：主路由失败时按这里的顺序切换（作者自选，不自动猜）。"""
+    return get_backups(s)
+
+
+@router.put("/settings/routing/backup")
+def routing_backup_put(body: dict[str, list[str]], s: Session = Depends(get_session)) -> dict[str, list[str]]:
+    cur = get_backups(s)
+    for role, lst in body.items():
+        if role not in BACKUP_ROLES:
+            raise HTTPException(400, f"{role} 不支持备用路由")
+        clean: list[str] = []
+        for v in lst or []:
+            if not v or ":" not in v:
+                raise HTTPException(400, "备用路由格式应为 \"channel_id:model\"")
+            cid = v.split(":", 1)[0]
+            if not cid.isdigit() or s.get(Channel, int(cid)) is None:
+                raise HTTPException(400, f"备用路由引用的渠道 {cid} 不存在")
+            if v not in clean:
+                clean.append(v)
+        cur[role] = clean[:MAX_BACKUPS]
+    kv_set(s, ROUTING_BACKUP_KEY, cur)
+    return get_backups(s)
 
 
 @router.get("/settings/status")

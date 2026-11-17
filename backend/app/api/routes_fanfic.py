@@ -36,6 +36,33 @@ def _book(s: Session, book_id: int) -> Book:
     return b
 
 
+# ------------------------------------------------------------------ v0.16 创作想法 AI 重写
+
+class IdeaRewriteIn(BaseModel):
+    source_id: int
+    direction: str = ""
+    text: str = Field(default="", max_length=6000)
+    instruction: str = Field(default="", max_length=300)
+    notes: str = Field(default="", max_length=1000)
+    protagonist: dict[str, Any] | None = None
+
+
+@router.post("/fanfic/idea/rewrite")
+def fanfic_idea_rewrite(body: IdeaRewriteIn) -> dict[str, str]:
+    """建同人书页：把点选拼起来的想法、方向、原著拧成一段完整立意（同步返回，结果先填进想法框，作者确认）。"""
+    from app.llm.gateway import LLMError
+    from app.services import fanfic as ff
+
+    try:
+        return {"text": ff.rewrite_idea(body.source_id, body.direction, body.text, body.instruction, body.notes, body.protagonist)}
+    except ff.FanficError as e:
+        raise HTTPException(e.status, str(e)) from e
+    except ff.NotFound as e:
+        raise HTTPException(404, str(e)) from e
+    except LLMError as e:
+        raise HTTPException(502, str(e)) from e
+
+
 # ------------------------------------------------------------------ 方向模板 / 遵循度 / 版权声明
 
 @router.get("/fanfic/directions")

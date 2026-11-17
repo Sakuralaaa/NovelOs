@@ -84,7 +84,7 @@ export function registerWanbenMocks(c: MockCtx) {
   const settingsOut = (bookId: number) => {
     const s = S(bookId)
     const nums = refineNums(bookId)
-    return { book_id: bookId, ...s, refine_ranges: normRanges(s.refine_ranges), presets: [150_000, 200_000, 300_000], total_chapters: Math.max(1, Math.ceil(s.target_words / Math.max(1, s.chapter_words))),
+    return { book_id: bookId, ...s, refine_ranges: normRanges(s.refine_ranges), presets: [200_000, 300_000, 500_000, 1_200_000, 2_000_000], total_chapters: Math.max(1, Math.ceil(s.target_words / Math.max(1, s.chapter_words))),
       refine_numbers: nums, refine_count: nums.length, reader_threshold: READER_PASS, plan: planSummary(bookId) }
   }
   const mkVolumes = (bookId: number, total: number) => {

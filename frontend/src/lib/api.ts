@@ -1,4 +1,5 @@
 import type {
+  AutoOverview, AutoSettings, RoutingBackup,
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, CardVersion, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
@@ -105,6 +106,8 @@ export const api = {
   testChannel: (id: number) => post<{ ok: boolean; latency_ms: number; error?: string }>(`/settings/channels/${id}/test`),
   routing: () => get<Routing>('/settings/routing'),
   saveRouting: (b: Routing) => put<Routing>('/settings/routing', b),
+  routingBackup: () => get<RoutingBackup>('/settings/routing/backup'),
+  saveRoutingBackup: (b: RoutingBackup) => put<RoutingBackup>('/settings/routing/backup', b),
 
   /** 合约增补“默认设置可选自动采纳最高分”的落点（后端已实现 /settings/writing） */
   writingSettings: () => get<WritingSettings>('/settings/writing'),
@@ -417,7 +420,7 @@ export const qkV094 = {
 // ---------------------------------------------------------------- v0.10 同人创作
 import type {
   ChapterFanficMeta, FanficCatalog, FanficDepth, FanficImportPart, FanficInfo, FanficOverlap, FanficSource, FanficSourceBrief,
-  FanficSpecInput, FanficTemplateCatalog, SourceCards, LibCat, LibEntry, LibPage,
+  FanficSpecInput, FanficTemplateCatalog, SourceCards, LibCat, LibEntry, LibPage, FanficProtagonist,
 } from './types'
 
 type FanficSourceCommon = { title?: string; focus?: string[]; depth?: FanficDepth; template_id?: string }
@@ -456,6 +459,9 @@ export const fanficApi = {
   updateEntry: (id: number, eid: string, b: Partial<LibEntry>) => put<LibEntry>(`/fanfic/sources/${id}/entries/${eid}`, b),
   deleteEntry: (id: number, eid: string) => del<{ ok: boolean }>(`/fanfic/sources/${id}/entries/${eid}`),
   /** Job（kind=fanfic_expand），result = {source_id, added, cat} */
+  /** v0.16 创作想法 AI 重写（同步） */
+  rewriteIdea: (b: { source_id: number; direction?: string; text: string; instruction?: string; notes?: string; protagonist?: FanficProtagonist }) =>
+    post<{ text: string }>('/fanfic/idea/rewrite', b),
   expandLibrary: (id: number, b: { cat: LibCat; sub?: string; hint?: string; count?: number }) => viaJobId(post<{ job_id: number }>(`/fanfic/sources/${id}/expand`, b)),
   updateSource: (id: number, b: { title?: string; cards?: Partial<SourceCards>; intro?: string; tags?: string[] }) => put<{ source: FanficSource; warnings: string[] }>(`/fanfic/sources/${id}`, b),
   /** 有书在用时 409，force=true 强删 */
@@ -549,6 +555,21 @@ export const checkApi = {
   homogeneity: (target: 'book' | 'idea', id: number, llm = false) =>
     post<{ mode: 'sync'; report: HomoReport } | { mode: 'job'; job: Job }>(`/${target === 'book' ? 'books' : 'ideas'}/${id}/homogeneity`, { llm }),
 }
+
+/** v0.16 一键成书 */
+export const autoApi = {
+  get: (bookId: number) => get<AutoOverview>(`/books/${bookId}/autopilot`),
+  saveSettings: (bookId: number, b: Partial<AutoSettings>) => put<AutoSettings>(`/books/${bookId}/autopilot/settings`, b),
+  /** Job（autopilot） */
+  start: (bookId: number, b?: Partial<AutoSettings>) => post<{ run_id: number; job: Job }>(`/books/${bookId}/autopilot/start`, b ?? {}).then((r) => r.job),
+  pause: (bookId: number) => post<{ ok: boolean; running: boolean }>(`/books/${bookId}/autopilot/pause`),
+  /** 拍板后自动继续：Job（autopilot） */
+  answer: (bookId: number, decisionId: number, b: { choice: number | null; custom: string }) => viaJobId(post(`/books/${bookId}/autopilot/decisions/${decisionId}`, b)),
+  resolveFlag: (bookId: number, chapterId: number) => post<{ ok: boolean }>(`/books/${bookId}/autopilot/flags/${chapterId}/resolve`),
+  fromIdea: (ideaId: number, b?: Partial<AutoSettings>) => post<{ book: Book; run_id: number; job: Job }>(`/ideas/${ideaId}/autopilot`, b ?? {}),
+}
+
+export const aqk = { overview: (bookId: number) => ['autopilot', bookId] as const }
 
 export const wqk = {
   settings: (bookId: number) => ['wanben', bookId, 'settings'] as const,

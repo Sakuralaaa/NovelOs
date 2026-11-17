@@ -17,7 +17,7 @@ import { useChannels } from '@/hooks/queries'
 import { useAuth } from '@/components/auth/AuthGate'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { api, qk, type ApiKey } from '@/lib/api'
-import type { ApiFormat, Channel, ImageMode, ModelPrice, RouteKey, Routing, Trope } from '@/lib/types'
+import type { ApiFormat, Channel, ImageMode, ModelPrice, RouteKey, Routing, RoutingBackup, Trope } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { fmtCny, setCostHint, useCostHint } from '@/lib/cost'
 
@@ -365,6 +365,7 @@ function RoutingCard() {
                 <div className="text-[13.5px] font-medium">{x.label}</div>
                 <div className="space-y-2">
                   <Select value={r[x.key]} onChange={(v) => { setR({ ...r, [x.key]: v }); setDirty(true) }} options={opts} allowEmpty emptyLabel={noCh ? '演示模式（mock）' : STRICT.includes(x.key) ? '不使用' : '自动（使用默认）'} placeholder={noCh ? '演示模式（mock）' : '选择模型'} />
+                  {BACKUP_KEYS.includes(x.key) && r[x.key] && <BackupRow role={x.key} opts={opts} primary={r[x.key] as string} />}
                   {x.key === 'image' && r.image && (
                     <Segmented size="sm" block value={r.image_mode ?? 'images'} onChange={(v: ImageMode) => { setR({ ...r, image_mode: v }); setDirty(true) }}
                       options={[{ value: 'images', label: '生图接口' }, { value: 'chat', label: '对话接口' }]} />
@@ -376,6 +377,35 @@ function RoutingCard() {
         )}
       </CardBody>
     </Card>
+  )
+}
+
+const BACKUP_KEYS: RouteKey[] = ['planner', 'writer', 'reviewer', 'search', 'agent']
+
+/** v0.16 备用路由：主路由出错时按顺序切过去（自己选，最多 3 个） */
+function BackupRow({ role, opts, primary }: { role: RouteKey; opts: Opt[]; primary: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['routing-backup'], queryFn: api.routingBackup })
+  const list = (q.data?.[role as keyof RoutingBackup] ?? []) as string[]
+  const m = useMutation({
+    mutationFn: (v: string[]) => api.saveRoutingBackup({ [role]: v }),
+    meta: { errorTitle: '保存备用路由失败' },
+    onSuccess: (d) => { qc.setQueryData(['routing-backup'], d) },
+  })
+  const nameOf = (v: string) => v.split(':').slice(1).join(':')
+  const left = opts.filter((o) => o.value !== primary && !list.includes(o.value))
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {list.map((v, i) => (
+        <span key={v} className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-muted px-2 text-[12px]">
+          <span className="text-muted-foreground">备用{i + 1}</span><span className="truncate font-mono">{nameOf(v)}</span>
+          <button type="button" aria-label="移除" className="text-muted-foreground hover:text-danger" onClick={() => m.mutate(list.filter((x) => x !== v))}><X className="h-3 w-3" /></button>
+        </span>
+      ))}
+      {list.length < 3 && left.length > 0 && (
+        <div className="w-full"><Select value={null} onChange={(v) => v && m.mutate([...list, v])} options={left} placeholder="加备用模型" /></div>
+      )}
+    </div>
   )
 }
 

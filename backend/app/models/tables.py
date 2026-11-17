@@ -511,3 +511,46 @@ class SparkSession(SQLModel, table=True):
     idea_id: Optional[int] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.16 一键成书
+
+class AutoRun(SQLModel, table=True):
+    """一键成书的一次运行：选题/同人建好的书 → 设定 → 完本规划 → 连写到完结。每本书同一时间只有一个未结束的运行。"""
+    __tablename__ = "auto_run"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    job_id: Optional[int] = None  # 当前（或最近一次）后台任务
+    # running / waiting（等作者拍板）/ paused / stopped（出错、额度、渠道全挂）/ done
+    status: str = "running"
+    stage: str = "setup"  # setup / bible / plan / write / done
+    stop_reason: str = ""
+    message: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    settings: Optional[dict[str, Any]] = _json_dict_nullable()
+    state: Optional[dict[str, Any]] = _json_dict_nullable()  # 内部断点：批次状态、已复盘的卷等
+    stats: Optional[dict[str, Any]] = _json_dict_nullable()  # healed / forced / retries / llm_failures / chapters / volumes_reviewed
+    events: list[dict[str, Any]] = _json_list()  # 运行日志 [{at, kind, text}]，只留最近 200 条
+    flags: list[dict[str, Any]] = _json_list()  # 待看清单 [{chapter_id, number, reason, at, resolved}]
+    guidance: list[dict[str, Any]] = _json_list()  # 作者导向 [{text, from_chapter, to_chapter, source, at}]
+    started_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    finished_at: Optional[datetime] = None
+
+
+class AutoDecision(SQLModel, table=True):
+    """一键成书的决策点：开篇确认、卷末下一卷走向。全自动时按推荐项自动拍板，关键时刻模式停下等作者点选。"""
+    __tablename__ = "auto_decision"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    run_id: int = Field(index=True)
+    kind: str = "volume"  # opening / volume
+    volume: int = 0  # 卷末决策：刚写完的卷序号
+    title: str = ""
+    context: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    options: list[dict[str, Any]] = _json_list()  # [{title, summary, crisis, closure, turns:[], why}]
+    recommended: int = 0
+    status: str = "pending"  # pending / answered / auto
+    choice: Optional[int] = None
+    custom: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    created_at: datetime = Field(default_factory=utcnow)
+    answered_at: Optional[datetime] = None

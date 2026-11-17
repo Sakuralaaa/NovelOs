@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,7 +25,8 @@ from app.skills.loader import system_prompt
 
 RECENT_SUMMARIES = 3
 MAX_FORESHADOWS = 6
-MAX_RELATED_OLD = 3          # 回读推荐：与本章实体/伏笔相关的更早章节摘要条数
+MAX_RELATED_OLD = 4          # 回读推荐：与本章实体/伏笔/细纲相关的更早章节摘要条数（v0.16 加了按细纲文字的相似度检索）
+RECAP_BUDGET = 1400          # v0.16 前情卷回顾的总字数预算（最近一卷全文，更早的卷压缩）
 OLDER_INDEX_CHARS = 600      # 更早章节“一句话索引”的总字数预算（长篇记忆压缩）
 PREV_TAIL_CHARS = 300        # 上一章结尾原文，保证章与章之间动作、位置、情绪的衔接
 MAX_GLOBAL_FACTS = 8
@@ -174,11 +176,17 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
     recent = committed[-RECENT_SUMMARIES:]
     older = committed[:-RECENT_SUMMARIES] if len(committed) > RECENT_SUMMARIES else []
     planned_descs = [str(f.get("desc", "")) for f in beats.get("foreshadow") or []]
+    recap_text, state_lines, recap_end = volume_recaps(s, bid, node.order)
+    if recap_text:
+        parts.append("【前情卷回顾】\n" + recap_text)
+    if state_lines:
+        parts.append("【长期状态（上一卷末）】\n" + state_lines)
     if older:
-        related = related_old_chapters(older, rel_names, planned_descs)
+        query = "\n".join([_plan_text(beats), node.title or "", node.summary or ""])
+        related = related_old_chapters(older, rel_names, planned_descs, query)
         if related:
             parts.append("【相关旧章回读】\n" + "\n".join(f"第{c.number}章 {c.title}：{c.summary}" for c in related))
-        idx = older_index(older, exclude={c.id for c in related})
+        idx = older_index([c for c in older if c.number > recap_end], exclude={c.id for c in related})
         if idx:
             parts.append("【更早章节索引（压缩）】\n" + idx)
     if recent:
@@ -205,6 +213,11 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
     if ahead:
         parts.append(ahead)
 
+    from app.services.autopilot import guidance_lines
+
+    guide = guidance_lines(s, bid, node.order)
+    if guide:
+        parts.append("【作者导向】\n" + "\n".join(f"- {g}" for g in guide))
     if instruction.strip():
         parts.append("【作者对本章的额外要求】\n" + instruction.strip())
     rb = refs_block(s, bid, _plan_text(beats), node.title or "", node.summary or "", instruction, chapter_number=node.order)
@@ -349,17 +362,76 @@ def state_block(facts: list[Fact], rel: list[Card], all_cards: list[Card]) -> st
     return "【人物与世界当前状态（以此为准，正文不得与之矛盾；变化要在变更声明里登记）】\n" + "\n".join(lines)
 
 
-def related_old_chapters(older: list[Any], names: set[str], planned_descs: list[str]) -> list[Any]:
-    """回读推荐：更早章节中摘要提到本章相关实体或本章要推进/回收的伏笔的，取最相关的几章。"""
-    scored = []
+_GRAM_RX = re.compile(r"[\u4e00-\u9fffA-Za-z0-9]+")
+_STOP_GRAMS = {"主角", "一个", "自己", "没有", "什么", "他们", "我们", "这个", "那个", "已经", "开始", "知道", "本章", "第一", "起来"}
+
+
+def _bigrams(text: str) -> set[str]:
+    out: set[str] = set()
+    for run in _GRAM_RX.findall(text or ""):
+        for i in range(len(run) - 1):
+            g = run[i:i + 2]
+            if g not in _STOP_GRAMS and not g.isdigit():
+                out.add(g)
+    return out
+
+
+def related_old_chapters(older: list[Any], names: set[str], planned_descs: list[str], query: str = "") -> list[Any]:
+    """回读推荐：更早章节中摘要提到本章相关实体、本章要推进/回收的伏笔的，加上（v0.16）与本章细纲文字最像的，
+    取最相关的几章。相似度用二字词 + 逆文档频率（本地算，不调模型），长书里能捞回几百章前的相关情节。"""
     keys = [d[:6] for d in planned_descs if len(d) >= 4]
-    for c in older:
+    q = _bigrams(query)
+    docs = [(c, _bigrams(c.summary or "")) for c in older if c.summary]
+    df: dict[str, int] = {}
+    if q:
+        for _, bg in docs:
+            for g in bg & q:
+                df[g] = df.get(g, 0) + 1
+    n = max(1, len(docs))
+    sims = {}
+    for c, bg in docs:
+        sims[c.id] = sum(math.log(1 + n / df[g]) for g in (bg & q)) if q else 0.0
+    top = max(sims.values() or [0.0])
+    scored = []
+    for c, _ in docs:
         summ = c.summary or ""
-        score = sum(2 for k in keys if k and k in summ) + sum(1 for n in names if n and n in summ)
-        if score:
+        base = sum(2 for k in keys if k and k in summ) + sum(1 for nm in names if nm and nm in summ)
+        sim = sims.get(c.id, 0.0)
+        sim_score = (sim / top * 3) if top > 0 and sim >= 0.35 * top else 0.0
+        score = base + sim_score
+        if score > 0:
             scored.append((score, c.number, c))
     scored.sort(key=lambda t: (-t[0], -t[1]))
     return sorted([c for _, _, c in scored[:MAX_RELATED_OLD]], key=lambda c: c.number)
+
+
+def volume_recaps(s: Session, book_id: int, number: int, budget: int = RECAP_BUDGET) -> tuple[str, str, int]:
+    """v0.16 长篇记忆：已写完的卷的前情回顾（卷末复盘生成，存在卷节点 beats["recap"]）。
+    最近一卷给全文，更早的卷各取一段，从近到远填满预算；另给上一卷末的长期状态。返回（回顾，状态，最后一个已回顾卷的末章号）。"""
+    vols = [n for n in common.outline_nodes(s, book_id) if n.level == "volume"]
+    vols.sort(key=lambda v: v.order)
+    done = []
+    for v in vols:
+        b = v.beats or {}
+        rc = b.get("recap") if isinstance(b.get("recap"), dict) else None
+        end = int(((b.get("wanben") or {}).get("end")) or 0)
+        if rc and rc.get("text") and end and end < number:
+            done.append((v, rc, end))
+    if not done:
+        return "", "", 0
+    lines: list[str] = []
+    used = 0
+    for i, (v, rc, end) in enumerate(reversed(done)):
+        start = int(((v.beats or {}).get("wanben") or {}).get("start") or 0)
+        text = str(rc["text"]) if i == 0 else str(rc["text"])[:140]
+        line = f"第{v.order}卷 {v.title}（第{start}–{end}章）：{text}"
+        if used + len(line) > budget and lines:
+            break
+        lines.append(line)
+        used += len(line)
+    _, last_rc, last_end = done[-1]
+    state = "\n".join(f"- {x}" for x in (last_rc.get("state") or [])[:10])
+    return "\n".join(reversed(lines)), state, last_end
 
 
 def older_index(older: list[Any], exclude: set[Any] | None = None, budget: int = OLDER_INDEX_CHARS) -> str:

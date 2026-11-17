@@ -402,6 +402,8 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
 
         rb = refs_block(s, book.id or 0, node.title or "", node.summary or "", json.dumps(node.beats or {}, ensure_ascii=False))
         user += ("\n\n" + rb) if rb else ""
+        if node.level == "arc":  # v0.16：展开弧时带上所属卷的走向、前情卷回顾和作者导向（卷末复盘滚动调整的结果从这里落到章细纲）
+            user += _arc_extra(s, node, next_no)
         level = node.level
     ctx.progress(15, f"展开{level}")
     data = gw.chat_json("expand", system_prompt("expand"), user, meta=meta)
@@ -439,6 +441,29 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
         pacing = pacing_audit(chapter_beats_list(s, node.book_id)[-15:]) if level in ("arc", "chapter") else []
         s.commit()
         return {"node_id": node_id, "created": [c.id for c in created], "pacing_warnings": pacing}
+
+
+def _arc_extra(s: Session, arc: OutlineNode, next_no: int) -> str:
+    from app.services.autopilot import guidance_lines
+    from app.services.context import volume_recaps
+
+    out: list[str] = []
+    vol = s.get(OutlineNode, arc.parent_id) if arc.parent_id else None
+    if vol is not None and vol.level == "volume":
+        p = (vol.beats or {}).get("wanben") or {}
+        bits = [f"第{vol.order}卷 {vol.title}：{vol.summary}"]
+        if p.get("crisis"):
+            bits.append(f"本卷危机：{p['crisis']}")
+        if p.get("closure"):
+            bits.append(f"本卷收束：{p['closure']}")
+        out.append("【所属卷】\n" + "\n".join(bits))
+    recap, state, _ = volume_recaps(s, arc.book_id, next_no, budget=900)
+    if recap:
+        out.append("【前情卷回顾】\n" + recap + (("\n长期状态：\n" + state) if state else ""))
+    guide = guidance_lines(s, arc.book_id, next_no)
+    if guide:
+        out.append("【作者导向】\n" + "\n".join(f"- {g}" for g in guide))
+    return ("\n\n" + "\n\n".join(out)) if out else ""
 
 
 def next_chapter_node(s: Session, book_id: int) -> OutlineNode | None:

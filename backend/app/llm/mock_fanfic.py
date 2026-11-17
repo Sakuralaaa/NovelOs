@@ -48,6 +48,17 @@ def mock_fanfic_ooc(meta: dict[str, Any]) -> str:
     return _j({"characters": out, "summary": "整体人设贴合，个别对白偏离（演示）"})
 
 
+def mock_fanfic_idea(meta: dict[str, Any]) -> str:
+    """v0.16 创作想法 AI 重写 mock：把几段想法拧成一段立意（演示）。"""
+    work = meta.get("work") or "原著"
+    first = next((x.strip() for x in str(meta.get("text") or "").split("\n") if x.strip()), "")
+    ins = str(meta.get("instruction") or "").strip()
+    return (f"主角以原创身份切入《{work}》开篇，带着一个只有他知道的秘密混进主角团。" + (f"（起点：{first[:40]}）" if first else "") + "\n\n"
+            "他不抢原著主角的风头，而是在几场关键战斗里换了打法，把原本输掉的局一点点扳回来，人物关系也跟着重新洗牌。\n\n"
+            "长线目标是查清原著里没说透的一桩旧案，对手是藏在幕后的那位大人物；每一卷都有一次明面上的胜利，暗线一步步逼近真相。"
+            + (f"\n\n（按要求：{ins[:60]}）" if ins else "") + "（演示）")
+
+
 def mock_fanfic_entries(meta: dict[str, Any]) -> str:
     cat, sub, work = str(meta.get("cat") or "world"), str(meta.get("sub") or ""), str(meta.get("work") or "原著")
     have = set(meta.get("have") or [])
@@ -66,6 +77,7 @@ def mock_fanfic_entries(meta: dict[str, Any]) -> str:
 
 FANFIC_HANDLERS = {
     "fanfic_entries": mock_fanfic_entries,
+    "fanfic_idea": mock_fanfic_idea,
     "fanfic_source": mock_fanfic_source,
     "fanfic_ooc": mock_fanfic_ooc,
 }

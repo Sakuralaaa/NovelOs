@@ -11,6 +11,7 @@ import type {
 import { analyzeText } from '@/lib/textAnalysis'
 import { countWords } from '@/lib/utils'
 import { WANBEN_RESUMABLE, registerWanbenMocks } from './wanben'
+import { registerAutoMocks } from './autopilot'
 import { FF_TEMPLATES, FF_TEMPLATE_CATEGORIES } from './fanficTemplates'
 import { FEMALE_CATS, MALE_CATS, STYLE_SAMPLE, THICKEN_MAP, buildChapterText, coverDataUrl, makeRankItems } from './data'
 
@@ -2012,6 +2013,7 @@ on('POST', '/jobs/:id/resume', (m) => {
 
 // ---------------- v0.11 完本模式 / 质检（mock，见 ./wanben.ts） ----------------
 registerWanbenMocks({ on, db: db as any, createJob, HttpErr, must, bookOf, nid, now, ago, writeOne, mkReview, mkLint, countWords, chHist, recalc })
+registerAutoMocks({ on, createJob, bookOf: bookOf as any, now, ago, HttpErr })
 
 
 // ---------------- v0.12 生成档案 / 预算（mock） ----------------

@@ -1400,3 +1400,41 @@ def generate_oc(book_id: int, ctx: JobContext) -> dict[str, Any]:
             s.commit()
         return {"card_id": c.id, "name": c.name, "summary": c.summary, "data": c.data,
                 "ai_filled": [str(x) for x in out.get("ai_filled") or []][:12]}
+
+
+# ------------------------------------------------------------------ v0.16 创作想法 AI 重写
+
+def rewrite_idea(source_id: int, direction: str, text: str, instruction: str = "", notes: str = "",
+                 protagonist: dict[str, Any] | None = None) -> str:
+    """建同人书页「创作想法」一键重写：把点选拼起来的几段想法、方向、原著拧成一段完整立意。只返回文字，不落库。"""
+    with session_scope() as s:
+        src = _get(s, source_id)
+        cards = normalize_cards(src.cards)
+        work = src.title
+        intro = (getattr(src, "intro", "") or "").strip()
+    d = DIRECTION_BY_ID.get(direction, {}) if direction else {}
+    chars = "、".join(f"{c['name']}（{c['role']}）" if c["role"] else c["name"] for c in cards["characters"][:12])
+    w = cards["world"]
+    src_text = "\n".join(x for x in (
+        f"简介：{intro[:300]}" if intro else "",
+        f"世界观：{(w.get('summary') or '')[:300]}" if w.get("summary") else "",
+        f"主要人物：{chars}" if chars else "",
+        "时间线：" + "；".join(str(t.get("event") or t.get("title") or "")[:40] for t in (cards.get("timeline") or [])[:10] if isinstance(t, dict)),
+    ) if x) or "（无）"
+    p = protagonist or {}
+    if p.get("source") == "canon" and p.get("canon_name"):
+        prot = f"原著角色 {p['canon_name']}"
+    elif p.get("source") == "oc":
+        prot = "原创主角" + (f" {p['name']}" if p.get("name") else "") + (f"：{p['brief']}" if p.get("brief") else "")
+    else:
+        prot = "未定"
+    user = render("fanfic_idea", work=work, source=src_text, direction=d.get("label") or "未选", direction_desc=d.get("desc") or "",
+                  protagonist=prot, notes=notes.strip()[:500] or "（无）", text=text.strip()[:4000] or "（还没写，按方向和原著构思一个）",
+                  instruction=instruction.strip()[:300] or "（无，按要求整理）")
+    out = get_gateway().chat("fanfic_idea", [{"role": "system", "content": system_prompt("fanfic_idea")}, {"role": "user", "content": user}],
+                             meta={"work": work, "direction": d.get("label") or "", "text": text, "instruction": instruction},
+                             temperature=0.8)
+    out = re.sub(r"^```\w*\n?|```$", "", out.strip()).strip()
+    if not out:
+        raise FanficError("模型没有返回内容，换个模型再试", 502)
+    return out[:3000]

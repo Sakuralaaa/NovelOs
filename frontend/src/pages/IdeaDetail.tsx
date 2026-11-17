@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowUpRight, BookPlus, ChevronRight, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, Wand2, X } from '@/components/icons'
+import { AlertCircle, ArrowUpRight, BookPlus, ChevronRight, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, Wand2, X, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
@@ -74,6 +74,10 @@ export default function IdeaDetail() {
     mutationFn: () => api.adoptIdea(id), meta: { errorTitle: '建书失败' },
     onSuccess: (book) => { qc.invalidateQueries({ queryKey: ['books'] }); refresh(); toast.success(`《${book.title}》已建书`); nav(`/books/${book.id}`) },
   })
+  const auto = useMutation({  // v0.16 一键成书：建书后直接去一键成书页
+    mutationFn: () => api.adoptIdea(id), meta: { errorTitle: '建书失败' },
+    onSuccess: (book) => { qc.invalidateQueries({ queryKey: ['books'] }); refresh(); nav(`/books/${book.id}/auto`) },
+  })
   const rm = useMutation({
     mutationFn: () => api.deleteIdea(id), meta: { errorTitle: '删除失败' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: qk.ideas }); toast.success('选题已删除'); nav('/ideas') },
@@ -142,7 +146,10 @@ export default function IdeaDetail() {
           {locked && idea.book_id ? (
             <Link to={`/books/${idea.book_id}`} className="flex h-9 items-center gap-1.5 rounded-md bg-success-soft px-3.5 text-[13px] font-medium text-success">已建书，去看看 <ArrowUpRight className="h-3.5 w-3.5" /></Link>
           ) : (
-            <Button variant="primary" icon={<BookPlus className="h-4 w-4" />} loading={adopt.isPending} disabled={dirty || !!reviseJob} onClick={() => adopt.mutate()}>采纳建书</Button>
+            <>
+              <Button icon={<BookPlus className="h-4 w-4" />} loading={adopt.isPending} disabled={dirty || !!reviseJob || auto.isPending} onClick={() => adopt.mutate()}>采纳建书</Button>
+              <Button variant="primary" icon={<Zap className="h-4 w-4" />} loading={auto.isPending} disabled={dirty || !!reviseJob || adopt.isPending} onClick={() => auto.mutate()}>一键成书</Button>
+            </>
           )}
         </div>
       </div>

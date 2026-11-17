@@ -1058,3 +1058,64 @@ export interface SparkSessionData {
   cards: Record<SparkAxis, SparkCard[]>; keep: Record<SparkAxis, string[]>; picks: Partial<Record<SparkAxis, SparkCard | null>>
   rounds: Record<SparkAxis, number>; proposal: SparkProposal | null
 }
+
+// ------------------------------------------------------------------ v0.16 一键成书
+export type AutoLevel = 'full' | 'guided'
+export type AutoStopKind = 'opening' | 'volume'
+export interface AutoSettings {
+  level: AutoLevel
+  stop_on: AutoStopKind[]
+  target_words: number
+  chapter_words: number
+  batch_size: number
+  golden_chapters: number
+  max_cost_cny: number
+}
+export interface AutoEvent { at: string; kind: string; text: string }
+export interface AutoFlag { chapter_id: number; number: number; title: string; reason: string; at: string; resolved: boolean }
+export interface AutoGuidance { text: string; from_chapter: number; to_chapter: number | null; source: string; at: string }
+export type AutoRunStatus = 'running' | 'waiting' | 'paused' | 'stopped' | 'done'
+export interface AutoRun {
+  id: number
+  status: AutoRunStatus
+  stage: 'setup' | 'bible' | 'plan' | 'write' | 'done'
+  stop_reason: string
+  message: string
+  job_id: number | null
+  settings: AutoSettings
+  stats: Partial<Record<'healed' | 'forced' | 'retries' | 'llm_failures' | 'volumes_reviewed', number>>
+  events: AutoEvent[]
+  flags: AutoFlag[]
+  flags_total: number
+  guidance: AutoGuidance[]
+  started_at: string | null
+  finished_at: string | null
+}
+export interface AutoOption { title: string; summary: string; crisis?: string; closure?: string; turns: string[]; why?: string }
+export interface AutoDecision {
+  id: number
+  kind: AutoStopKind
+  volume: number
+  title: string
+  context: string
+  options: AutoOption[]
+  recommended: number
+  status: 'pending' | 'answered' | 'auto'
+  choice: number | null
+  custom: string
+  created_at: string | null
+  answered_at: string | null
+}
+export interface AutoRecap { order: number; title: string; text: string; state?: string[]; problems?: string[]; at?: string }
+export interface AutoOverview {
+  book_id: number
+  settings: AutoSettings
+  run: AutoRun | null
+  decisions: AutoDecision[]
+  progress: WanbenProgress | null
+  cost: number
+  running: boolean
+  fanfic: boolean
+  recaps: AutoRecap[]
+}
+export type RoutingBackup = Partial<Record<'planner' | 'writer' | 'reviewer' | 'search' | 'agent', string[]>>

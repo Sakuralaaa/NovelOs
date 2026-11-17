@@ -35,10 +35,14 @@ ROLES = ("planner", "writer", "reviewer", "search", "embedding", "image", "agent
 STRICT_ROLES = ("search", "embedding", "image")
 SEARCH_SYSTEM_MAX = 1500  # search(system=...) 自定义系统提示的字数上限
 ROUTING_KEY = "routing"
+ROUTING_BACKUP_KEY = "routing_backup"  # v0.16 每个角色作者自选的备用路由（按顺序切换）
+BACKUP_ROLES = ("planner", "writer", "reviewer", "search", "agent")
+MAX_BACKUPS = 3
 IMAGE_MODE_KEY = "image_mode"  # images：/images/generations；chat：对话接口出图
 
 # 任务默认走哪个角色
 TASK_ROLE: dict[str, str] = {
+    "volume_review": "planner",  # v0.16 一键成书卷末复盘
     "ideation": "planner",
     "idea_score": "reviewer",
     "idea_revise": "planner",
@@ -60,6 +64,7 @@ TASK_ROLE: dict[str, str] = {
     "sparks": "planner",
     "fanfic_oc": "planner",
     "fanfic_entries": "reviewer",
+    "fanfic_idea": "planner",  # v0.16 建同人书「创作想法」AI 重写
     "spark_round": "planner",
     "spark_proposal": "planner",
     "reader_comments": "reviewer",
@@ -109,6 +114,11 @@ def get_routing(s: Session) -> dict[str, str | None]:
     return {r: raw.get(r) for r in ROLES}
 
 
+def get_backups(s: Session) -> dict[str, list[str]]:
+    raw = kv_get(s, ROUTING_BACKUP_KEY, {}) or {}
+    return {r: [str(x) for x in (raw.get(r) or []) if x][:MAX_BACKUPS] for r in BACKUP_ROLES}
+
+
 def enabled_channels(s: Session) -> list[Channel]:
     return list(s.exec(select(Channel).where(Channel.enabled == True).order_by(Channel.id)))  # noqa: E712
 
@@ -147,6 +157,19 @@ def resolve_targets(s: Session, role: str) -> list[Target]:
         c = by_id[route[0]]
         primary_model = route[1]
         out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), route[1], c.api_format or "openai"))
+    # v0.16：作者设了备用路由的，按顺序接在主路由后面，且只在这些里切换（不再自动换到别的渠道）
+    backups = get_backups(s).get(role) or [] if role in BACKUP_ROLES else []
+    if backups:
+        for b in backups:
+            rb = _parse_route(b)
+            if rb is None or rb[0] not in by_id:
+                continue
+            if any(t.channel_id == rb[0] and t.model == rb[1] for t in out):
+                continue
+            c = by_id[rb[0]]
+            out.append(Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), rb[1], c.api_format or "openai"))
+        if out:
+            return out
     if role == "search":
         return out
     for c in chans:

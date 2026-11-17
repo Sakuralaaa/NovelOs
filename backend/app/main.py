@@ -129,6 +129,9 @@ def create_app() -> FastAPI:
 
     app.include_router(routes_wanben.router)
     app.include_router(routes_generations.router)  # v0.12 生成档案与成本
+    from app.api import routes_autopilot  # v0.16 一键成书
+
+    app.include_router(routes_autopilot.router)
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 

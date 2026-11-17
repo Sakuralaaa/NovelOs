@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, BookOpenCheck, BookPlus, Check, CloudUpload, Download, Globe2, Layers, Search, ShieldCheck, Sparkles, UserCircle } from '@/components/icons'
+import { AlertTriangle, ArrowRight, BookOpenCheck, BookPlus, Check, CloudUpload, Download, Globe2, Layers, Search, ShieldCheck, Sparkles, UserCircle, Wand2, Zap, RotateCcw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -79,6 +79,16 @@ export default function FanficNewPage() {
   }
   const ideaText = (t: string) => t.replace(/原著/g, workName)
   const dirText = (d: FanficDirection) => (d.template || d.desc).replace(/[（(][^）)]*[）)]/g, '').replace(/：；/g, '：……；').replace(/：$/, '：……')
+
+  // v0.16 创作想法 AI 重写：把点选拼起来的几段想法、方向、原著拧成一段立意；结果先填进框里，可撤回
+  const [rwIns, setRwIns] = useState('')
+  const [rwPrev, setRwPrev] = useState<string | null>(null)
+  const canRewrite = !!src && (!!f.premise.trim() || !!direction)
+  const rewrite = useMutation({
+    mutationFn: () => fanficApi.rewriteIdea({ source_id: sourceId, direction: direction ?? '', text: f.premise, instruction: rwIns, notes, protagonist: f.prot }),
+    meta: { errorTitle: 'AI 重写失败' },
+    onSuccess: (r) => { setRwPrev(f.premise); up({ premise: r.text }); toast.success('已改写，不满意可以撤回') },
+  })
 
   const volumes = Math.max(1, Math.ceil(f.chapters / Math.max(5, f.perVolume)))
   const totalWords = f.chapters * f.chapterWords
@@ -182,6 +192,12 @@ export default function FanficNewPage() {
           </div>
           <Textarea rows={8} value={f.premise} onChange={(e) => up({ premise: e.target.value })} className="text-[14px] leading-relaxed"
             placeholder="写下你想写的故事：主角是谁、从哪里切入、想改变什么、想要什么爽点。也可以点上面的想法先填一段再改。" />
+          <div className="flex flex-wrap items-center gap-2">
+            <Input className="min-w-[200px] flex-1" value={rwIns} onChange={(e) => setRwIns(e.target.value.slice(0, 300))}
+              placeholder="改写要求（可不填），如：主角更狠一点、节奏快一点" onKeyDown={(e) => { if (e.key === 'Enter' && canRewrite) rewrite.mutate() }} />
+            {rwPrev !== null && <Button icon={<RotateCcw className="h-4 w-4" />} onClick={() => { up({ premise: rwPrev }); setRwPrev(null) }}>撤回</Button>}
+            <Button variant="soft" icon={<Wand2 className="h-4 w-4" />} loading={rewrite.isPending} disabled={!canRewrite} onClick={() => rewrite.mutate()}>AI 重写</Button>
+          </div>
           {dir && (dir.tips.length > 0 || dir.risks.length > 0) && (
             <details className="rounded-xl border bg-surface px-3 py-1.5">
               <summary className="flex min-h-[36px] cursor-pointer items-center text-[13px] text-foreground/80">「{dir.label}」写作要点</summary>
@@ -415,7 +431,10 @@ function Created({ book, oc, onOpen }: { book: Book; oc: boolean; onOpen: () => 
           )}
         </div>
 
-        <Button variant="primary" className="mt-5 h-11 w-full" icon={<ArrowRight className="h-4 w-4" />} onClick={onOpen}>去书概览</Button>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <Button className="h-11" icon={<ArrowRight className="h-4 w-4" />} onClick={onOpen}>去书概览</Button>
+          <Link to={`/books/${book.id}/auto`} className="focus-ring inline-flex h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-[14px] font-medium text-primary-foreground hover:bg-primary/90"><Zap className="h-4 w-4" />一键成书</Link>
+        </div>
       </div>
     </div>
   )

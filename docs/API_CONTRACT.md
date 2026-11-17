@@ -776,3 +776,19 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - `POST /api/fanfic/sources/{id}/entries` 新增（重名 409）；`PUT /api/fanfic/sources/{id}/entries/{eid}` 改；`DELETE …/{eid}` 删。
 - `POST /api/fanfic/sources/{id}/expand` body `{cat, sub?, hint?, count: 5–40 = 20}` → Job（`kind=fanfic_expand`，任务 `fanfic_entries` 走 reviewer）；`result = {source_id, added, cat}`。
 - 提炼（`fanfic_source`）与联网补充（`fanfic_supplement`）完成后，设定卡的新内容按名字并入世界库；同人书上下文追加「原著世界库相关条目」。
+
+
+## v0.16.0 一键成书
+
+- `GET /api/books/{id}/autopilot` → `{book_id, settings, run, decisions[≤12], progress(完本进度|null), cost(本次花费元), running, fanfic, recaps:[{order,title,text,state,problems}]}`。
+- `AutoSettings = {level: full|guided, stop_on: [opening|volume], target_words(10000–5000000), chapter_words(1000–6000), batch_size(1–30), golden_chapters(0–30), max_cost_cny(0 不限)}`；`PUT /api/books/{id}/autopilot/settings` 改设置。
+- `POST /api/books/{id}/autopilot/start`（可带设置）→ `{run_id, job}`，Job `kind=autopilot`，按书加锁，可续跑；有待拍板的决策点时 409。
+- `POST /api/books/{id}/autopilot/pause`：写完手上这一章停。
+- `POST /api/books/{id}/autopilot/decisions/{did}` body `{choice: int|null, custom}` → 拍板并自动继续 `{run_id, job_id}`。
+- `POST /api/books/{id}/autopilot/flags/{chapter_id}/resolve`：待看清单标记看过。
+- `POST /api/ideas/{id}/autopilot`（可带设置）→ `{book, run_id, job}`：采纳建书 + 开始。
+- `AutoRun = {id, status: running|waiting|paused|stopped|done, stage: setup|plan|write|done, stop_reason: decision|paused|budget|llm_down|error, message, job_id, settings, stats:{healed,forced,retries,llm_failures,volumes_reviewed}, events[{at,kind,text}], flags[{chapter_id,number,title,reason}], guidance[{text,from_chapter,to_chapter,source}]}`。
+- `AutoDecision = {id, kind: opening|volume, volume, title, context, options:[{title,summary,crisis,closure,turns[],why}], recommended, status: pending|answered|auto, choice, custom}`。
+- 卷节点 `beats.recap = {text, state[], problems[], at}`（卷末复盘写入）；写章上下文新增块「前情卷回顾」「长期状态（上一卷末）」「作者导向」。
+- 备用路由：`GET/PUT /api/settings/routing/backup` `{planner|writer|reviewer|search|agent: ["channel_id:model", …≤3]}`；设了备用的角色只在主路由 + 备用里切换。
+- `POST /api/fanfic/idea/rewrite` body `{source_id, direction, text, instruction, notes, protagonist}` → `{text}`（同步，任务 `fanfic_idea` 走 planner）。

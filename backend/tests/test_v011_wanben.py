@@ -92,7 +92,7 @@ def test_settings_defaults_and_update(client: TestClient) -> None:
     assert w["mode"] == "serial" and w["target_words"] == 200_000 and w["chapter_words"] == 2000
     assert w["batch_size"] == 10 and w["golden_chapters"] == 10 and w["auto_continue"] is False
     assert w["refine_scope"] == "first_n" and w["refine_numbers"] == list(range(1, 11))
-    assert w["pause_on_unapproved_refine"] is True and w["presets"] == [150000, 200000, 300000]
+    assert w["pause_on_unapproved_refine"] is True and w["presets"] == [200000, 300000, 500000, 1200000, 2000000]
     assert w["total_chapters"] == 100 and w["plan"]["planned"] is False
     # 连载书不能用完本的写作接口；书本身的字段不被改动
     assert client.post(f"/api/books/{bid}/wanben/batch").status_code == 409

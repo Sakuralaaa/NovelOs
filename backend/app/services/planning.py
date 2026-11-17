@@ -394,12 +394,20 @@ def adopt_idea(idea_id: int) -> Book:
         return book
 
 
-def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
+def generate_bible(book_id: int, ctx: JobContext, keep_existing: bool = False) -> dict[str, Any]:
+    """keep_existing=True（v0.16 一键成书）：已有的卡不覆盖，只补新卡；同人书把原著资料一起给模型。"""
     with session_scope() as s:
         book = common.get_book(s, book_id)
         meta = common.kit_meta(s, book)
         user = render("bible", title=book.title, genre=book.genre,
                       gender_label=common.GENDER_LABEL.get(book.gender, book.gender), premise=book.premise or book.tagline)
+        if getattr(book, "fanfic", None) or keep_existing:
+            have = common.cards(s, book_id, include_deprecated=True)
+            if getattr(book, "fanfic", None):
+                user += "\n\n【同人原著与本书设定（新设定要与原著一致，原著人物沿用原名原设）】\n" + common.book_context(s, book, with_cards=False)
+            if have:
+                user += "\n\n【已有设定卡（保留不改，只补缺的：主角金手指、主要对手、关键势力地点、力量体系等）】\n" + "\n".join(
+                    f"[{c.type}] {c.name}：{(c.summary or '')[:60]}" for c in have[:60])
         tl = tropes.tropes_for(s, book)
         meta["banned_keywords"] = tropes.keywords(tl)
     user += tropes.prompt_block(tl)
@@ -423,6 +431,8 @@ def generate_bible(book_id: int, ctx: JobContext) -> dict[str, Any]:
             t = it.get("type") if it.get("type") in CARD_TYPES else "character"
             name = str(it["name"])[:40]
             card = existing.get(name) or Card(book_id=book_id, type=t, name=name)
+            if keep_existing and card.id is not None:
+                continue
             if card.locked:  # v0.12：锁定卡不被重新生成覆盖
                 continue
             if card.id is not None:

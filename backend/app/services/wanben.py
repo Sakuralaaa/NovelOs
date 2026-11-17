@@ -27,7 +27,7 @@ from app.services.review import READER_PASS, apply_patches, ending_issue
 from app.skills.loader import render, system_prompt
 
 MODES = ("serial", "wanben")
-TARGET_PRESETS = (150_000, 200_000, 300_000)
+TARGET_PRESETS = (200_000, 300_000, 500_000, 1_200_000, 2_000_000)
 REFINE_SCOPES = ("first_n", "all", "custom", "none")
 DEFAULTS: dict[str, Any] = {
     "target_words": 200_000,
@@ -41,7 +41,7 @@ DEFAULTS: dict[str, Any] = {
     "volume_chapters": 0,        # v0.13 每卷章数；0 按约 60 章一卷自动算
 }
 CHAPTERS_PER_VOLUME = 60  # 倒推卷数的经验值：约 60 章一卷
-MIN_VOLUMES, MAX_VOLUMES = 2, 12
+MIN_VOLUMES, MAX_VOLUMES = 2, 40  # v0.16 长篇：200 万字约 1000 章、十几卷；卷纲先粗后细，卷末复盘再滚动细化下一卷
 MAX_ITER_ROUNDS = 5
 
 BATCH_KIND = "wanben_batch"
@@ -876,6 +876,7 @@ def progress(s: Session, book_id: int) -> dict[str, Any]:
     vol = volume_for(vols, cur_no)
     last = s.exec(select(WanbenBatch).where(WanbenBatch.book_id == book_id).order_by(WanbenBatch.id.desc())).first()  # type: ignore[union-attr]
     target = int(st["target_words"])
+    rb = running_batch(s, book_id)
     return {"book_id": book_id, "mode": book_mode(book), "words": stats["words"], "pending_words": pending_words,
             "target_words": target, "ratio": round(min(1.0, stats["words"] / target), 4) if target else 0.0,
             "chapters_committed": stats["chapters"], "chapters_written": written_max, "chapters_total": total,
@@ -883,7 +884,7 @@ def progress(s: Session, book_id: int) -> dict[str, Any]:
             "current_volume": ({"order": vol.order, "title": vol.title, "start": _vol_plan(vol).get("start"),
                                 "end": _vol_plan(vol).get("end"), "node_id": vol.id} if vol else None),
             "planned": bool(plan.get("planned")), "paused": bool(kv_get(s, _pause_key(book_id), False)),
-            "running_batch_id": (running_batch(s, book_id).id if running_batch(s, book_id) else None),  # type: ignore[union-attr]
+            "running_batch_id": rb.id if rb else None,
             "last_batch": batch_out(last, with_report=False) if last else None}
 
 

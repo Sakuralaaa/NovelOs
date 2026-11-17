@@ -31,7 +31,7 @@ export function SettingsCard({ bookId, settings, className }: { bookId: number; 
   const qc = useQueryClient()
   const [d, setD] = useState<Draft>(() => toDraft(settings))
   const [dirty, setDirty] = useState(false)
-  const presets = settings.presets?.length ? settings.presets : [150_000, 200_000, 300_000]
+  const presets = settings.presets?.length ? settings.presets : [200_000, 300_000, 500_000, 1_200_000, 2_000_000]
   const [custom, setCustom] = useState(() => !presets.includes(settings.target_words))
   useEffect(() => { if (!dirty) { setD(toDraft(settings)); setCustom(!presets.includes(settings.target_words)) } }, [settings]) // eslint-disable-line react-hooks/exhaustive-deps
   const set = (p: Partial<Draft>) => { setD((x) => ({ ...x, ...p })); setDirty(true) }
@@ -67,7 +67,7 @@ export function SettingsCard({ bookId, settings, className }: { bookId: number; 
         action={dirty ? <Button size="sm" variant="ghost" onClick={() => { setD(toDraft(settings)); setDirty(false) }}>还原</Button> : undefined} />
       <CardBody className="space-y-5 p-4 sm:p-5">
         <Field label="字数目标" hint="只是字数参考档位">
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {presets.map((p) => (
               <button key={p} type="button" onClick={() => { setCustom(false); set({ target_words: p }) }}
                 className={cn('focus-ring h-10 rounded-lg border text-[13.5px] font-medium transition num', !custom && d.target_words === p ? 'border-primary bg-primary-soft text-primary' : 'bg-surface hover:border-foreground/25')}>
