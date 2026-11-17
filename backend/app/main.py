@@ -121,6 +121,9 @@ def create_app() -> FastAPI:
     from app.api import routes_wanben  # v0.11 完本模式
 
     app.include_router(routes_wanben.router)
+    from app.api import routes_import  # v0.12 E1 导入已有作品 + 接管旧书
+
+    app.include_router(routes_import.router)
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 
