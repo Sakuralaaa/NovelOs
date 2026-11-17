@@ -818,8 +818,13 @@ export interface FanficSourceBrief {
   warnings_count: number; used_by: number[]; model: string; created_at: string; updated_at: string
   /** v0.11.1 联网取材：所用热门模板 id、联网检索轮数、来源链接数 */
   template_id?: string; web_rounds?: number; refs_count?: number
+  /** v0.15 原著世界库 */
+  intro?: string; tags?: string[]; entry_counts?: Record<LibCat, number>
 }
-export interface FanficSource extends FanficSourceBrief { cards: SourceCards; warnings: string[]; refs?: string[] }
+export interface FanficSource extends FanficSourceBrief { cards: SourceCards; warnings: string[]; refs?: string[]; books?: { id: number; title: string; direction: string; words: number }[] }
+export type LibCat = 'world' | 'character' | 'timeline' | 'relation'
+export interface LibEntry { id: string; cat: LibCat; sub: string; name: string; summary: string; detail: string; tags: string[]; order: number }
+export interface LibPage { items: LibEntry[]; total: number; page: number; pages: number; cats: Record<LibCat, number>; subs: { sub: string; count: number }[]; all: number }
 // v0.11.1 热门同人题材模板
 export type FanficTemplateCategory = '国漫' | '网文' | '欧美' | '日漫' | '游戏'
 export interface FanficTemplateStyle { label: string; desc: string; direction: FanficDirectionId }

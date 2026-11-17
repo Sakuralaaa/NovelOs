@@ -388,6 +388,10 @@ class FanficSource(SQLModel, table=True):
     refs: list[str] = _json_list()
     template_id: str = ""
     web_rounds: int = 0
+    # v0.15 原著世界库：永久设定条目（[{id, cat, sub, name, summary, detail, tags, order}]）+ 简介 + 标签；同一原著的所有同人书共用
+    entries: list[dict[str, Any]] = _json_list()
+    intro: str = ""
+    tags: list[str] = _json_list()
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

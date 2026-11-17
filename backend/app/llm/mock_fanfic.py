@@ -48,7 +48,24 @@ def mock_fanfic_ooc(meta: dict[str, Any]) -> str:
     return _j({"characters": out, "summary": "整体人设贴合，个别对白偏离（演示）"})
 
 
+def mock_fanfic_entries(meta: dict[str, Any]) -> str:
+    cat, sub, work = str(meta.get("cat") or "world"), str(meta.get("sub") or ""), str(meta.get("work") or "原著")
+    have = set(meta.get("have") or [])
+    subs = {"world": ["力量体系", "关键物品", "组织势力", "地理地点"], "character": ["主要配角"], "timeline": ["剧情时间线"], "relation": ["同伴"]}[cat] if cat in ("world", "character", "timeline", "relation") else ["其他设定"]
+    out = []
+    for i in range(int(meta.get("count") or 8)):
+        name = f"{work}{(sub or subs[i % len(subs)])}条目{i + 1}（演示）"
+        if cat == "relation":
+            name = f"角色{i + 1} — 角色{i + 2}（演示）"
+        if name in have:
+            continue
+        out.append({"sub": sub or subs[i % len(subs)], "name": name, "summary": "演示条目：一句话要点", "detail": "演示条目的展开说明：来历、规则与限制。",
+                    "tags": [], "order": i + 1})
+    return _j({"entries": out})
+
+
 FANFIC_HANDLERS = {
+    "fanfic_entries": mock_fanfic_entries,
     "fanfic_source": mock_fanfic_source,
     "fanfic_ooc": mock_fanfic_ooc,
 }

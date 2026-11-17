@@ -417,7 +417,7 @@ export const qkV094 = {
 // ---------------------------------------------------------------- v0.10 同人创作
 import type {
   ChapterFanficMeta, FanficCatalog, FanficDepth, FanficImportPart, FanficInfo, FanficOverlap, FanficSource, FanficSourceBrief,
-  FanficSpecInput, FanficTemplateCatalog, SourceCards,
+  FanficSpecInput, FanficTemplateCatalog, SourceCards, LibCat, LibEntry, LibPage,
 } from './types'
 
 type FanficSourceCommon = { title?: string; focus?: string[]; depth?: FanficDepth; template_id?: string }
@@ -450,7 +450,14 @@ export const fanficApi = {
     }
     return viaJobId(post('/fanfic/sources', b))
   },
-  updateSource: (id: number, b: { title?: string; cards?: Partial<SourceCards> }) => put<{ source: FanficSource; warnings: string[] }>(`/fanfic/sources/${id}`, b),
+  /** v0.15 原著世界库 */
+  entries: (id: number, p: { cat?: LibCat; sub?: string; q?: string; page?: number; size?: number }) => get<LibPage>(`/fanfic/sources/${id}/entries${qs(p)}`),
+  addEntry: (id: number, b: Partial<LibEntry>) => post<LibEntry>(`/fanfic/sources/${id}/entries`, b),
+  updateEntry: (id: number, eid: string, b: Partial<LibEntry>) => put<LibEntry>(`/fanfic/sources/${id}/entries/${eid}`, b),
+  deleteEntry: (id: number, eid: string) => del<{ ok: boolean }>(`/fanfic/sources/${id}/entries/${eid}`),
+  /** Job（kind=fanfic_expand），result = {source_id, added, cat} */
+  expandLibrary: (id: number, b: { cat: LibCat; sub?: string; hint?: string; count?: number }) => viaJobId(post<{ job_id: number }>(`/fanfic/sources/${id}/expand`, b)),
+  updateSource: (id: number, b: { title?: string; cards?: Partial<SourceCards>; intro?: string; tags?: string[] }) => put<{ source: FanficSource; warnings: string[] }>(`/fanfic/sources/${id}`, b),
   /** 有书在用时 409，force=true 强删 */
   deleteSource: (id: number, force = false) => del<{ ok: boolean }>(`/fanfic/sources/${id}${qs({ force: force || undefined })}`),
   /** 建同人书：copyright_ack 必须 true */

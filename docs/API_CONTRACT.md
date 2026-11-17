@@ -766,3 +766,13 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - `POST /api/books` 新增 `target_words`、`chapter_words`、`mode`、`volume_chapters`；同人 `fanfic` 新增 `protagonist`、`pov`、`slots`，`direction` 取值见 `/fanfic/directions`（16 个）。
 - `GET /api/fanfic/directions` 方向带 `slots`，并返回 `povs`、`oc_types`。
 - OOC 问题类型新增 `world_rule`。章节 `aigc.history` 保留最近 20 次检测。
+
+
+## v0.15.0 原著世界库
+
+- `FanficSource` 新增 `intro`、`tags`、`entry_counts: {world, character, timeline, relation}`；详情另有 `books: [{id, title, direction, words}]`（用这份原著的书）。`PUT /api/fanfic/sources/{id}` 可带 `intro`（≤600）、`tags`（≤12）。
+- 条目 `LibEntry = {id, cat: world|character|timeline|relation, sub, name, summary(≤200), detail(≤2000), tags[≤8], order}`；同一原著按（cat, name）唯一，最多 3000 条。
+- `GET /api/fanfic/sources/{id}/entries?cat&sub&q&page=1&size=36` → `{items, total, page, pages, cats, subs: [{sub, count}], all}`；库为空且有设定卡时自动派生一次。
+- `POST /api/fanfic/sources/{id}/entries` 新增（重名 409）；`PUT /api/fanfic/sources/{id}/entries/{eid}` 改；`DELETE …/{eid}` 删。
+- `POST /api/fanfic/sources/{id}/expand` body `{cat, sub?, hint?, count: 5–40 = 20}` → Job（`kind=fanfic_expand`，任务 `fanfic_entries` 走 reviewer）；`result = {source_id, added, cat}`。
+- 提炼（`fanfic_source`）与联网补充（`fanfic_supplement`）完成后，设定卡的新内容按名字并入世界库；同人书上下文追加「原著世界库相关条目」。

@@ -298,7 +298,7 @@ function SourcePicker({ sources, loading, templates, canSearch, selected, onSele
         <div className="flex min-w-0 items-center gap-2 rounded-xl border border-primary bg-primary-soft/40 px-3 py-2.5">
           <Check className="h-4 w-4 shrink-0 text-primary" />
           <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{sel.title}</span>
-          <span className="num hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{sourceLabel(sel)} · {sel.counts.characters} 角色 · 时间线 {sel.counts.timeline}</span>
+          <span className="num hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{sourceLabel(sel)} · {Object.values(sel.entry_counts ?? {}).reduce((a, b) => a + b, 0)} 条设定{sel.used_by.length ? ` · ${sel.used_by.length} 本书在用` : ''}</span>
           <Link to={`/fanfic/sources/${sel.id}`} className="shrink-0 text-[12.5px] text-primary hover:underline">看资料</Link>
         </div>
       )}

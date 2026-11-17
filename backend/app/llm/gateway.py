@@ -59,6 +59,7 @@ TASK_ROLE: dict[str, str] = {
     "chapter_titles": "planner",
     "sparks": "planner",
     "fanfic_oc": "planner",
+    "fanfic_entries": "reviewer",
     "spark_round": "planner",
     "spark_proposal": "planner",
     "reader_comments": "reviewer",

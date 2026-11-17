@@ -74,6 +74,25 @@ class SupplementIn(BaseModel):
 class SourceUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=60)
     cards: dict[str, Any] | None = None
+    intro: str | None = Field(default=None, max_length=600)
+    tags: list[str] | None = None
+
+
+class EntryIn(BaseModel):
+    cat: str | None = None
+    sub: str | None = Field(default=None, max_length=20)
+    name: str | None = Field(default=None, max_length=60)
+    summary: str | None = Field(default=None, max_length=200)
+    detail: str | None = Field(default=None, max_length=2000)
+    tags: list[str] | None = None
+    order: int | None = None
+
+
+class ExpandIn(BaseModel):
+    cat: str
+    sub: str = Field(default="", max_length=20)
+    hint: str = Field(default="", max_length=200)
+    count: int = Field(default=20, ge=5, le=40)
 
 
 @router.post("/fanfic/sources")
@@ -149,10 +168,68 @@ def source_get(source_id: int) -> dict[str, Any]:
 def source_update(source_id: int, body: SourceUpdate) -> dict[str, Any]:
     from app.services import fanfic as ff
 
+    from app.services import fanfic_library as lib
+
     try:
+        if body.intro is not None or body.tags is not None:
+            lib.update_meta(source_id, body.intro, body.tags)
         return ff.update_source(source_id, body.title, body.cards)
     except ff.FanficError as e:
         raise _http(e) from e
+
+
+# ------------------------------------------------------------------ v0.15 原著世界库
+
+@router.get("/fanfic/sources/{source_id}/entries")
+def entry_list(source_id: int, cat: str | None = Query(None), sub: str | None = Query(None), q: str | None = Query(None),
+               page: int = Query(1, ge=1), size: int = Query(36, ge=6, le=120)) -> dict[str, Any]:
+    from app.services import fanfic_library as lib
+
+    return lib.list_entries(source_id, cat, sub, q, page, size)
+
+
+@router.post("/fanfic/sources/{source_id}/entries")
+def entry_add(source_id: int, body: EntryIn) -> dict[str, Any]:
+    from app.services import fanfic as ff
+    from app.services import fanfic_library as lib
+
+    try:
+        return lib.add_entry(source_id, body.model_dump(exclude_none=True))
+    except ff.FanficError as e:
+        raise _http(e) from e
+
+
+@router.put("/fanfic/sources/{source_id}/entries/{eid}")
+def entry_update(source_id: int, eid: str, body: EntryIn) -> dict[str, Any]:
+    from app.services import fanfic as ff
+    from app.services import fanfic_library as lib
+
+    try:
+        return lib.update_entry(source_id, eid, body.model_dump(exclude_none=True))
+    except ff.FanficError as e:
+        raise _http(e) from e
+
+
+@router.delete("/fanfic/sources/{source_id}/entries/{eid}")
+def entry_delete(source_id: int, eid: str) -> dict[str, bool]:
+    from app.services import fanfic_library as lib
+
+    lib.delete_entry(source_id, eid)
+    return {"ok": True}
+
+
+@router.post("/fanfic/sources/{source_id}/expand")
+def entry_expand(source_id: int, body: ExpandIn) -> dict[str, Any]:
+    """v0.15 AI 扩充世界库某一类（后台 Job，kind=fanfic_expand）。"""
+    from app.services import fanfic as ff
+    from app.services import fanfic_library as lib
+
+    if body.cat not in lib.CATS:
+        raise HTTPException(422, "类别不对")
+    with ff.session_scope() as s:
+        ff._get(s, source_id)
+    cat, sub, hint, n = body.cat, body.sub.strip(), body.hint.strip(), body.count
+    return _job(submit("fanfic_expand", lambda ctx: lib.expand(source_id, cat, sub, hint, n, ctx), ref=f"fanfic_source:{source_id}"))
 
 
 @router.delete("/fanfic/sources/{source_id}")

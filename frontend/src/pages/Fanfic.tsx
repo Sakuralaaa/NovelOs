@@ -12,15 +12,16 @@ import { Segmented } from '@/components/ui/tabs'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { EmptyState, ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
-import { Chips, DEPTHS, Lbl, Pager, RemoveBtn, StrList, depthLabel, sourceLabel } from '@/components/fanfic/bits'
+import { Chips, DEPTHS, Lbl, Pager, RemoveBtn, StrList, sourceLabel } from '@/components/fanfic/bits'
 import { Select } from '@/components/ui/select'
 import { TemplatePicker } from '@/components/fanfic/TemplatePicker'
+import { Library, SourceHero } from '@/components/fanfic/Library'
 import { ApiError, fanficApi, fqk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type {
   FanficDepth, FanficSearchStatus, FanficSource, FanficTemplate, SourceCardPart, SourceCards, SourceCharacter, SourceFaction, SourceScene, SourceTimelineItem,
 } from '@/lib/types'
-import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 const CREATE_KEY = 'fanfic-source-create'
 const MAX_BYTES = 30 * 1024 * 1024
@@ -31,7 +32,7 @@ type FanficView = 'search' | 'import' | 'sources'
 const VIEW_META: Record<FanficView, { title: string; desc: string }> = {
   search: { title: '联网取材', desc: '只填作品名，用联网搜索整理人物、世界观、时间线和势力；资料可能有误，生成后请核对。' },
   import: { title: '导入原著', desc: '粘贴或上传 TXT（≤30MB），提炼角色、世界观、势力、时间线和名场面，原文只在本次提炼中使用，不保存。' },
-  sources: { title: '原著资料', desc: '提炼好的设定卡可以逐条修改，再用它建同人书。' },
+  sources: { title: '原著资料', desc: '每部原著一个永久世界库，同一原著的同人书都能复用。' },
 }
 
 export default function FanficPage() {
@@ -252,14 +253,15 @@ function SourceList() {
         <ul className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]">
           {list.map((s) => (
             <li key={s.id}>
-              <Link to={`/fanfic/sources/${s.id}`} className="card-hover focus-ring flex min-h-[60px] min-w-0 items-center gap-3 rounded-xl border bg-surface px-3 py-2.5">
+              <Link to={`/fanfic/sources/${s.id}`} className="card-hover focus-ring flex min-h-[96px] min-w-0 gap-3 rounded-xl border bg-surface p-3">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[hsl(18_80%_52%)] text-[22px] font-semibold text-primary-foreground">{(s.title || '原').slice(0, 1)}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[14px] font-semibold">{s.title || '未命名'}</span>
-                  <span className="num mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
+                  <span className="block truncate text-[14.5px] font-semibold">{s.title || '未命名'}</span>
+                  {s.intro && <span className="mt-0.5 line-clamp-1 text-[12px] text-muted-foreground">{s.intro}</span>}
+                  <span className="num mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
                     <span className={cn('whitespace-nowrap rounded px-1.5 leading-[18px]', s.source === 'search' || s.web_rounds ? 'bg-primary-soft text-primary' : 'bg-muted')}>{sourceLabel(s)}</span>
-                    <span>{s.counts.characters} 角色</span><span className="opacity-40">·</span>
-                    <span>{depthLabel(s.depth)}</span><span className="opacity-40">·</span>
-                    <span>完整度 {s.completeness}</span>
+                    <span>{Object.values(s.entry_counts ?? {}).reduce((a, b) => a + b, 0)} 条设定</span><span className="opacity-40">·</span>
+                    <span>{s.entry_counts?.character ?? s.counts.characters} 角色</span>
                     {s.used_by.length > 0 && <span className="rounded bg-primary-soft px-1.5 leading-[18px] text-primary">{s.used_by.length} 本书在用</span>}
                     {s.warnings_count > 0 && <span className="inline-flex items-center gap-0.5 text-warning"><AlertTriangle className="h-3 w-3" />{s.warnings_count}</span>}
                   </span>
@@ -316,6 +318,7 @@ function SourceDetail({ id }: { id: number }) {
   const q = useQuery({ queryKey: fqk.source(id), queryFn: () => fanficApi.source(id), retry: false })
   const [tab, setTab] = useState<ViewTab>('world')
   const [kw, setKw] = useState('')
+  const [coreOpen, setCoreOpen] = useState(false)
   const [draft, setDraft] = useState<SourceCards | null>(null)
   const [title, setTitle] = useState('')
   const [saveWarn, setSaveWarn] = useState<string[]>([])
@@ -382,32 +385,8 @@ function SourceDetail({ id }: { id: number }) {
 
   return (
     <div className="min-w-0 pb-20">
-      <div className="flex min-w-0 flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1 basis-[240px]">
-          <Input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} aria-label="原著名"
-            className="h-11 border-transparent bg-transparent px-1 text-[19px] font-semibold tracking-tight shadow-none hover:border-input" />
-          <div className="num mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[12.5px] text-muted-foreground">
-            <span className={cn('whitespace-nowrap rounded px-1.5 leading-[20px]', s.source === 'search' || s.web_rounds ? 'bg-primary-soft text-primary' : 'bg-muted')}>{sourceLabel(s)}</span>
-            {s.source !== 'search' && <span>取用 {fmtNum(s.chars)} / {fmtNum(s.total_chars)} 字</span>}
-            {!!s.web_rounds && <span>联网检索 {s.web_rounds} 轮</span>}
-            <span>{depthLabel(s.depth)}{s.source === 'search' ? '检索' : '提炼'}</span>
-            <span>完整度 {s.completeness}</span>
-            <span>{fmtDateTime(s.updated_at)}</span>
-            {s.focus?.length > 0 && <span className="truncate">重点：{s.focus.join('、')}</span>}
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-1.5">
-          <Link to={`/fanfic/new?source=${s.id}`}><Button variant="soft" className="h-10" icon={<BookPlus className="h-4 w-4" />}>用它建书</Button></Link>
-          {supRunning ? null : (
-            <Button variant="ghost" className="h-10" icon={<Globe2 className="h-4 w-4" />} disabled={!canSearch || dirty}
-              title={!canSearch ? (tq.data?.search.hint || '未配置联网搜索模型') : dirty ? '先保存或还原修改' : '用联网搜索补齐缺的人物、设定和后续剧情（以现有设定卡为准）'}
-              onClick={() => void supplement()}>联网补充</Button>
-          )}
-          <Button variant="ghost" className="h-10 text-danger hover:bg-danger-soft" loading={remove.isPending && !forceAsk} icon={<Trash className="h-4 w-4" />}
-            onClick={() => { if (window.confirm(`删除原著资料「${s.title}」？设定卡将一并删除。`)) remove.mutate(false) }}>删除</Button>
-        </div>
-      </div>
-
+      <SourceHero s={s} title={title} setTitle={setTitle} canSearch={canSearch} dirty={dirty} supRunning={!!supRunning}
+        onSupplement={() => void supplement()} onDelete={() => { if (window.confirm(`删除原著资料「${s.title}」？世界库与设定卡将一并删除。`)) remove.mutate(false) }} deleting={remove.isPending && !forceAsk} />
       {supRunning && <div className="mt-3"><JobInline job={supRunning} /></div>}
       {!canSearch && tq.data && <p className="mt-2 text-[12px] text-muted-foreground">联网补充需要先在 <Link to="/settings#routing" className="text-primary hover:underline">设置 → 任务路由 → 联网搜索</Link> 配置模型。</p>}
       {(s.refs?.length ?? 0) > 0 && (
@@ -416,11 +395,6 @@ function SourceDetail({ id }: { id: number }) {
           <ul className="mt-1 space-y-1">{s.refs!.map((u) => <li key={u} className="min-w-0 break-all"><a href={u} target="_blank" rel="noreferrer noopener" className="text-primary hover:underline">{u}</a></li>)}</ul>
         </details>
       )}
-      {s.used_by.length > 0 && (
-        <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">在用的书：
-          {s.used_by.map((b) => <Link key={b} to={`/books/${b}`} className="inline-flex h-8 items-center rounded-md bg-primary-soft px-2 text-primary hover:underline">书 #{b}</Link>)}
-        </p>
-      )}
       {(s.warnings?.length > 0 || saveWarn.length > 0) && (
         <ul className="mt-3 space-y-1 rounded-lg bg-warning-soft px-3 py-2 text-[12.5px] text-warning">
           {saveWarn.map((w, i) => <li key={`s${i}`} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words"><b>重合提醒：</b>{w}</span></li>)}
@@ -428,6 +402,11 @@ function SourceDetail({ id }: { id: number }) {
         </ul>
       )}
 
+      <Library id={s.id} />
+
+      <details className="group mt-8 rounded-xl border bg-surface px-3.5 py-2" onToggle={(e) => setCoreOpen((e.target as HTMLDetailsElement).open)}>
+        <summary className="flex min-h-[40px] cursor-pointer items-center gap-2 text-[14px] font-semibold">写章核心卡<span className="text-[12px] font-normal text-muted-foreground">精简版，写每章时都会带上</span></summary>
+        {coreOpen && <>
       <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2">
         <div className="-mx-3 min-w-0 overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:px-0">
           <Segmented value={tab} onChange={(v) => { setTab(v); setKw('') }} className="h-10" options={TABS.map((t) => {
@@ -458,6 +437,9 @@ function SourceDetail({ id }: { id: number }) {
         </>}
         {tab === 'relations' && <RelationsEdit value={draft.characters} kw={kw.trim().toLowerCase()} onChange={(v) => set('characters', v)} />}
       </div>
+
+        </>}
+      </details>
 
       {dirty && (
         <div className="sticky bottom-0 z-10 -mx-3 mt-4 flex items-center gap-2 border-t bg-background/95 px-3 py-2 backdrop-blur sm:mx-0 sm:rounded-xl sm:border">

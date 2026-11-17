@@ -341,11 +341,32 @@ def source_brief(s: Session, r: FanficSource) -> dict[str, Any]:
             "counts": {k: len(c.get(k) or []) for k in ("characters", "factions", "timeline", "scenes")},
             "warnings_count": len(r.warnings or []), "used_by": _used_by(s, int(r.id or 0)), "model": r.model,
             "template_id": r.template_id or "", "web_rounds": int(r.web_rounds or 0), "refs_count": len(r.refs or []),
+            "intro": r.intro or "", "tags": list(r.tags or []), "entry_counts": _lib().counts(r),
             "created_at": _iso(r.created_at), "updated_at": _iso(r.updated_at)}
 
 
+def _lib():  # noqa: ANN202
+    from app.services import fanfic_library
+
+    return fanfic_library
+
+
+def _books_of(s: Session, ids: list[int]) -> list[dict[str, Any]]:
+    out = []
+    for i in ids:
+        b = s.get(Book, i)
+        if b is not None:
+            out.append({"id": b.id, "title": b.title, "direction": str((b.fanfic or {}).get("direction") or ""), "words": int(getattr(b, "total_words", 0) or 0)})
+    return out
+
+
 def source_out(s: Session, r: FanficSource) -> dict[str, Any]:
-    return {**source_brief(s, r), "cards": normalize_cards(r.cards), "warnings": list(r.warnings or []), "refs": list(r.refs or [])}
+    if _lib().ensure(r):
+        s.add(r)
+        s.commit()
+        s.refresh(r)
+    brief = source_brief(s, r)
+    return {**brief, "books": _books_of(s, brief["used_by"]), "cards": normalize_cards(r.cards), "warnings": list(r.warnings or []), "refs": list(r.refs or [])}
 
 
 def _get(s: Session, source_id: int) -> FanficSource:
@@ -433,6 +454,7 @@ def create_source(text: str, source: str, title: str | None, focus: list[str], d
                            total_chars=len(_norm(body)), depth=depth, focus=focus, cards=cards, warnings=warns,
                            fingerprint=fp_list, model=_model_name(), refs=refs, template_id=(tpl or {}).get("id", ""),
                            web_rounds=rounds)
+        _lib().sync_from_cards(row)
         s.add(row)
         s.commit()
         s.refresh(row)
@@ -718,6 +740,7 @@ def supplement_source(source_id: int, focus: list[str] | None, depth: str, ctx: 
         r.refs = list(dict.fromkeys(list(r.refs or []) + refs))[:50]
         r.web_rounds = int(r.web_rounds or 0) + rounds
         r.template_id = r.template_id or (tpl or {}).get("id", "")
+        _lib().sync_from_cards(r)
         r.updated_at = datetime.now(timezone.utc)
         s.add(r)
         s.commit()
@@ -984,6 +1007,7 @@ def context_block(s: Session, book: Book, budget: int = CONTEXT_BUDGET) -> str:
         lines.append("原著时间线（已发生，不得改写）：" + " → ".join(t["event"] for t in cards["timeline"][:12]))
     elif fidelity == "moderate" and cards["timeline"]:
         lines.append("原著主线节点（支线与结局可改）：" + " → ".join(t["event"] for t in cards["timeline"][:8]))
+    lines += _lib().context_lines(src, " ".join([str(getattr(book, "premise", "") or ""), str(ff.get("notes") or ""), entry]), fidelity)
     for xid in ff.get("extra_source_ids") or []:
         x = s.get(FanficSource, int(xid))
         if x is not None:

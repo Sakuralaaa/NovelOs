@@ -1601,7 +1601,7 @@ const FF_CATALOG = {
   fidelities: Object.entries(FF_FIDELITY).map(([id, f]) => ({ id, label: f.label, desc: f.desc, pass_score: f.pass })),
   copyright_notice: '同人创作仅供个人创作与学习交流使用。原著资料只能来自你有权使用的文本；本工具不保存原文，只保存提炼出的设定卡与无法还原原文的指纹。对外发布前，请遵守发布平台的同人创作规则，并自行确认原著的授权范围；未经原著版权方授权，不得用于任何商业用途。',
 }
-type MFfSource = { id: number; title: string; source: 'paste' | 'txt' | 'search'; chars: number; total_chars: number; depth: string; focus: string[]; cards: any; warnings: string[]; model: string; created_at: string; updated_at: string; refs?: string[]; template_id?: string; web_rounds?: number }
+type MFfSource = { id: number; title: string; source: 'paste' | 'txt' | 'search'; chars: number; total_chars: number; depth: string; focus: string[]; cards: any; warnings: string[]; model: string; created_at: string; updated_at: string; refs?: string[]; template_id?: string; web_rounds?: number; entries?: any[]; intro?: string; tags?: string[] }
 const ffSources: MFfSource[] = []
 const ffChapterMeta = new Map<number, { ooc?: any; overlap?: any }>()
 function ffCards(focus: string[]) {
@@ -1629,9 +1629,27 @@ function ffBrief(s: MFfSource) {
   const completeness = Math.min(100, counts.characters * 8 + counts.factions * 5 + counts.timeline * 4 + counts.scenes * 4 + (c.world.summary ? 15 : 0) + c.world.rules.length * 3)
   return { id: s.id, title: s.title, source: s.source, chars: s.chars, total_chars: s.total_chars, depth: s.depth, focus: s.focus, completeness, counts, warnings_count: s.warnings.length,
     used_by: db.books.filter((b) => b.fanfic && (b.fanfic.source_id === s.id || b.fanfic.extra_source_ids?.includes(s.id))).map((b) => b.id), model: s.model, created_at: s.created_at, updated_at: s.updated_at,
-    template_id: s.template_id ?? '', web_rounds: s.web_rounds ?? 0, refs_count: s.refs?.length ?? 0 }
+    template_id: s.template_id ?? '', web_rounds: s.web_rounds ?? 0, refs_count: s.refs?.length ?? 0,
+    intro: s.intro ?? s.cards.world.summary ?? '', tags: s.tags ?? [], entry_counts: ffCounts(s) }
 }
-const ffOut = (s: MFfSource) => ({ ...ffBrief(s), cards: s.cards, warnings: s.warnings, refs: s.refs ?? [] })
+const ffOut = (s: MFfSource) => { const b = ffBrief(s); return { ...b, cards: s.cards, warnings: s.warnings, refs: s.refs ?? [], books: b.used_by.map((id) => { const bk = db.books.find((x) => x.id === id)!; return { id, title: bk.title, direction: bk.fanfic?.direction ?? '', words: bk.stats?.words ?? 0 } }) } }
+// v0.15 原著世界库（演示）：从设定卡派生条目
+let ffEid = 1
+function ffDerive(c: any): any[] {
+  const out: any[] = []
+  c.world.rules.forEach((r: string) => out.push({ cat: 'world', sub: /境界|等级|魂|修炼|品|阶/.test(r) ? '力量体系' : '世界规则', name: r.split(/[：:，,。；]/)[0].slice(0, 16), summary: r, detail: '', tags: [] }))
+  c.world.locations.forEach((l: any) => out.push({ cat: 'world', sub: '地理地点', name: l.name, summary: l.desc, detail: '', tags: [] }))
+  c.factions.forEach((f: any) => out.push({ cat: 'world', sub: '组织势力', name: f.name, summary: [f.stance, f.notes].filter(Boolean).join('；'), detail: f.members.length ? `成员：${f.members.join('、')}` : '', tags: f.members }))
+  c.characters.forEach((ch: any) => {
+    out.push({ cat: 'character', sub: ch.role?.includes('反派') ? '反派' : ch.role === '主角' ? '主角' : '主要配角', name: ch.name, summary: ch.personality, detail: [['说话方式', ch.speech_style], ['能力', ch.abilities.join('、')], ['上限', ch.limits.join('、')]].filter((x) => x[1]).map((x) => x.join('：')).join('\n'), tags: ch.aliases })
+    ch.relations.forEach((r: any) => out.push({ cat: 'relation', sub: /宿敌|敌|仇/.test(r.relation) ? '宿敌' : /青梅|恋|爱/.test(r.relation) ? '伴侣' : '同伴', name: `${ch.name} — ${r.target}`, summary: r.relation, detail: '', tags: [ch.name, r.target] }))
+  })
+  c.timeline.forEach((t: any, i: number) => out.push({ cat: 'timeline', sub: '剧情时间线', name: t.event.slice(0, 40), summary: t.impact, detail: '', tags: t.characters, order: t.order ?? i + 1 }))
+  c.scenes.forEach((sc: any) => out.push({ cat: 'timeline', sub: '名场面', name: sc.title, summary: sc.summary, detail: '', tags: sc.characters }))
+  return out.map((e) => ({ order: 0, ...e, id: `e${ffEid++}` }))
+}
+const ffEnts = (s: MFfSource) => (s.entries ??= ffDerive(s.cards))
+function ffCounts(s: MFfSource) { const o: Record<string, number> = { world: 0, character: 0, timeline: 0, relation: 0 }; ffEnts(s).forEach((e) => { o[e.cat]++ }); return o }
 // v0.11.1 联网取材（演示）：按模板人物生成设定卡，来源链接为演示地址
 const ffNorm = (x: string) => x.replace(/[\s·・:：]/g, '').toLowerCase()
 const ffFindTpl = (id?: string | null, title?: string) => FF_TEMPLATES.find((t) => t.id === id)
@@ -1720,6 +1738,8 @@ on('POST', '/fanfic/sources', (_m, b) => {
 on('PUT', '/fanfic/sources/:id', (m, b) => {
   const s = ffOf(m[1]); const warnings: string[] = []
   if (b?.title !== undefined) s.title = String(b.title).slice(0, 60) || s.title
+  if (b?.intro !== undefined) s.intro = String(b.intro).slice(0, 600)
+  if (Array.isArray(b?.tags)) s.tags = b.tags.slice(0, 12)
   if (b?.cards) {
     const bad = Object.keys(b.cards).filter((k) => !['characters', 'world', 'factions', 'timeline', 'scenes'].includes(k))
     if (bad.length) throw new HttpErr(422, `cards 里有不认识的键：${bad.join('、')}`)
@@ -1734,6 +1754,40 @@ on('DELETE', '/fanfic/sources/:id', (m, _b, u) => {
   const s = ffOf(m[1]); const used = ffBrief(s).used_by
   if (used.length && u.searchParams.get('force') !== 'true') throw new HttpErr(409, `有 ${used.length} 本同人书在用这份原著资料，加 force=true 才能删除`)
   ffSources.splice(ffSources.indexOf(s), 1); return { ok: true }
+})
+on('GET', '/fanfic/sources/:id/entries', (m, _b, u) => {
+  const s = ffOf(m[1]); const sp = u.searchParams; const cat = sp.get('cat'); const sub = sp.get('sub'); const q = (sp.get('q') ?? '').toLowerCase()
+  const size = Number(sp.get('size') || 36); const all = ffEnts(s); const inCat = all.filter((e) => !cat || e.cat === cat)
+  const subs: Record<string, number> = {}; inCat.forEach((e) => { subs[e.sub] = (subs[e.sub] ?? 0) + 1 })
+  const items = inCat.filter((e) => (!sub || e.sub === sub) && (!q || `${e.name}${e.summary}${e.detail}${e.tags.join(' ')}`.toLowerCase().includes(q)))
+  if (cat === 'timeline') items.sort((a, b) => Number(a.sub === '名场面') - Number(b.sub === '名场面') || (a.order || 1e6) - (b.order || 1e6))
+  const pages = Math.max(1, Math.ceil(items.length / size)); const page = Math.min(pages, Math.max(1, Number(sp.get('page') || 1)))
+  return { items: items.slice((page - 1) * size, page * size), total: items.length, page, pages, cats: ffCounts(s), subs: Object.entries(subs).map(([k, v]) => ({ sub: k, count: v })), all: all.length }
+})
+on('POST', '/fanfic/sources/:id/entries', (m, b) => {
+  const s = ffOf(m[1]); if (!b?.cat || !b?.name?.trim()) throw new HttpErr(422, '类别和名字必填')
+  if (ffEnts(s).some((e) => e.cat === b.cat && e.name === b.name.trim())) throw new HttpErr(409, `已经有「${b.name}」这一条了`)
+  const e = { id: `e${ffEid++}`, cat: b.cat, sub: b.sub || '其他设定', name: b.name.trim(), summary: b.summary ?? '', detail: b.detail ?? '', tags: b.tags ?? [], order: b.order ?? 0 }
+  ffEnts(s).push(e); return e
+})
+routes.unshift(['PUT', /^\/fanfic\/sources\/(\d+)\/entries\/(\w+)$/, (m, b) => {
+  const s = ffOf(m[1]); const e = must(ffEnts(s).find((x) => x.id === m[2]), '条目'); Object.assign(e, b); return e
+}])
+routes.unshift(['DELETE', /^\/fanfic\/sources\/(\d+)\/entries\/(\w+)$/, (m) => {
+  const s = ffOf(m[1]); s.entries = ffEnts(s).filter((x) => x.id !== m[2]); return { ok: true }
+}])
+on('POST', '/fanfic/sources/:id/expand', (m, b) => {
+  const s = ffOf(m[1]); const cat = b?.cat; const sub = b?.sub || ''; const n = Math.min(40, Math.max(5, b?.count ?? 20))
+  return createJob('fanfic_expand', null, 2600, [`联网检索《${s.title}》（演示）…`, '整理条目…', '并入世界库…'], () => {
+    const subs = cat === 'world' ? ['力量体系', '关键物品', '组织势力', '地理地点'] : cat === 'character' ? ['主要配角'] : cat === 'timeline' ? ['剧情时间线'] : ['同伴']
+    const have = new Set(ffEnts(s).map((e) => e.name)); let added = 0
+    for (let i = 0; i < n; i++) {
+      const sb = sub || subs[i % subs.length]; const name = cat === 'relation' ? `角色${i + 1} — 角色${i + 2}（演示）` : `${sb}条目${ffEid}（演示）`
+      if (have.has(name)) continue
+      ffEnts(s).push({ id: `e${ffEid++}`, cat, sub: sb, name, summary: '演示条目：一句话要点', detail: '演示条目的展开说明：来历、规则与限制。', tags: [], order: 100 + i }); added++
+    }
+    return { source_id: s.id, added, cat }
+  }, `fanfic_source:${s.id}`)
 })
 const ffValidate = (f: any, ack: any) => {
   if (ack !== true) throw new HttpErr(400, '建同人书前请先阅读并勾选版权声明')
