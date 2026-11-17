@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -7,7 +8,6 @@ import {
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
-import * as T from '@radix-ui/react-tooltip'
 import { useBook, useStatus } from '@/hooks/queries'
 import { toggleTheme, useTheme } from '@/hooks/useTheme'
 import { modKey } from '@/hooks/useHotkey'
@@ -60,6 +60,7 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
   const { data: auth } = useAuth()
   const theme = useTheme()
   const loc = useLocation()
+  const [openGroups, setOpenGroups] = useState<string[]>([])
   const qc = useQueryClient()
 
   const logout = async () => {
@@ -120,34 +121,28 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
               const subActive = (c: SubItem) => (c.match ? c.match.test(loc.pathname) : c.end ? loc.pathname === c.to : loc.pathname === c.to || loc.pathname.startsWith(c.to + '/'))
               if (collapsed) {
                 return (
-                  <T.Root key={n.to} delayDuration={80}>
-                    <T.Trigger asChild>
+                  <Tip key={n.to} content={n.label} side="right">
+                    <div>
                       <NavLink to={n.children[0].to} onClick={onNavigate} className={item(under)} aria-label={n.label}>
                         <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
                       </NavLink>
-                    </T.Trigger>
-                    <T.Portal>
-                      <T.Content side="right" align="start" sideOffset={8} className="z-[70] min-w-[148px] rounded-xl border bg-popover p-1.5 text-foreground shadow-pop animate-fade-in">
-                        <div className="px-2.5 pb-1 pt-0.5 text-[11.5px] font-medium text-muted-foreground">{n.label}</div>
-                        {n.children.map((c) => (
-                          <NavLink key={c.to} to={c.to} onClick={onNavigate}
-                            className={cn('focus-ring flex h-9 items-center rounded-lg px-2.5 text-[13.5px] transition-colors', subActive(c) ? 'bg-foreground/[0.06] font-medium text-primary' : 'text-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground')}>
-                            {c.label}
-                          </NavLink>
-                        ))}
-                      </T.Content>
-                    </T.Portal>
-                  </T.Root>
+                    </div>
+                  </Tip>
                 )
               }
+              const isOpen = under || openGroups.includes(n.to)
               return (
                 <div key={n.to}>
                   <NavLink to={n.children[0].to} onClick={onNavigate} className={item(false)}>
                     <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
                     <span className={cn('flex-1', under && 'font-medium text-foreground')}>{n.label}</span>
-                    <ChevronDown className={cn('h-3.5 w-3.5 text-foreground/40 transition-transform', !under && '-rotate-90')} />
+                    <button type="button" aria-label={isOpen ? '收起' : '展开'}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!under) setOpenGroups((g) => g.includes(n.to) ? g.filter((x) => x !== n.to) : [...g, n.to]) }}
+                      className="-mr-1 flex h-6 w-6 items-center justify-center rounded-md hover:bg-foreground/[0.06]">
+                      <ChevronDown className={cn('h-3.5 w-3.5 text-foreground/40 transition-transform', !isOpen && '-rotate-90')} />
+                    </button>
                   </NavLink>
-                  {under && (
+                  {isOpen && (
                     <div className="my-0.5 ml-[21px] space-y-0.5 border-l pl-2.5">
                       {n.children.map((c) => {
                         const a = subActive(c)
