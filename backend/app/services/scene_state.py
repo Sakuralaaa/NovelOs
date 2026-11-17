@@ -1,4 +1,4 @@
-"""场景状态账本（v0.6）。
+"""场景状态账本（v0.6；v0.17 起按章：写手整章一次写完，另起一次调用从正文抽本章结束时的状态，交给下一章开头）。
 
 问题：正文按场景逐个生成，旧版每个场景只看到上一场景末尾 200 字，看不到“谁站在哪、面朝哪、手里拿着什么、穿什么、
 身上什么伤/义体什么状态”。于是道具会瞬移（反派一直拿着的合同突然出现在柜台上）、服装会变（皮鞋 → 金属脚掌）、
@@ -18,13 +18,9 @@ import json
 import re
 from typing import Any
 
-from app.lint.craft_zh import CATCHPHRASE_MAX, CROWD_SHOTS_MAX
-from app.lint.humanlint import count_words, crowd_shot_paragraphs, intensifier_report
-
 STATE_MARKER = "---STATE---"
 CHANGES_MARKER = "---CHANGES---"
 MAX_CAST, MAX_PROPS = 8, 10
-SO_FAR_BUDGET = 6000  # 本章已写正文注入上限（字）；网文单章 2000–3000 字，通常整章都能放下
 
 STATE_SCHEMA_HINT = (
     '{"cast":[{"name":"人物","position":"具体位置（门槛内/柜台后/台阶下第二级）","facing":"面朝哪边",'
@@ -162,56 +158,6 @@ def prop_move_warnings(prev: dict[str, Any] | None, new: dict[str, Any] | None, 
         if not o or not o.get("where") or not p.get("where") or o["where"] == p["where"]:
             continue
         if p["name"] not in body:
-            warns.append(f"第 {scene_index} 场：道具「{p['name']}」从「{o['where']}」变到「{p['where']}」，正文里没写怎么过去的（疑似凭空移动）")
+            where = f"第 {scene_index} 场：" if scene_index else ""
+            warns.append(f"{where}道具「{p['name']}」从「{o['where']}」变到「{p['where']}」，正文里没写怎么过去的（疑似凭空移动）")
     return warns
-
-
-# ------------------------------------------------------------------ 本章已写正文与剩余额度
-
-def chapter_so_far(texts: list[str], budget: int = SO_FAR_BUDGET) -> str:
-    if not texts:
-        return "（本章开头）"
-    joined = "\n\n".join(texts)
-    return joined if len(joined) <= budget else "…" + joined[-budget:]
-
-
-def scene_budget_lines(texts: list[str], scene_chars: list[str], voices: dict[str, dict[str, Any]]) -> list[str]:
-    """按本章已写内容计算剩余额度：口头禅（每人每章 ≤2）、群众反应镜头（≤3）、已用够的强化词。"""
-    so_far = "\n\n".join(texts)
-    lines: list[str] = []
-    for name, v in voices.items():
-        if scene_chars and name not in scene_chars:
-            continue
-        for ph in v.get("catchphrases") or []:
-            key = re.sub(r"[，,。！？!?、…\s“”\"]+", "", str(ph))
-            if not key:
-                continue
-            used = so_far.count(key)
-            left = max(0, CATCHPHRASE_MAX - used)
-            lines.append(f"{name}的口头禅「{key}」本章已用 {used} 次，" + ("本场景不要再用" if left == 0 else f"本场景最多再用 {min(left, 1)} 次，不用也行"))
-    crowd = len(crowd_shot_paragraphs(so_far)) if so_far else 0
-    lines.append(f"群众/配角反应镜头本章已用 {crowd}/{CROWD_SHOTS_MAX}" + ("，本场景不要再切围观者反应" if crowd >= CROWD_SHOTS_MAX else ""))
-    if so_far and count_words(so_far) > 200:
-        used_up = [d["word"].split("（")[0] for d in intensifier_report(so_far) if d["count"] >= 2]
-        if used_up:
-            lines.append("这些词本章已经用够，本场景不要再出现：" + "、".join(used_up))
-    return lines
-
-
-# ------------------------------------------------------------------ 场景级硬规则（程序按章号与节拍拼出来）
-
-def scene_rules(number: int, idx: int, total: int, scene: dict[str, Any], beats: dict[str, Any], pov: str | None) -> list[str]:
-    rules: list[str] = []
-    if idx == 1 and number <= 3:
-        hook = scene.get("opening") or beats.get("opening_hook") or beats.get("conflict") or ""
-        rules.append(f"开篇硬指标：正文前三行（前三段）必须已经出现冲突或异常（{hook}）。环境描写只能附着在人物动作上，不能单独占一段。")
-    if scene.get("cheat"):
-        rules.append(f"卖点露出：本场景必须让金手指露一次读者能感知的苗头：{scene['cheat']}。写成具体反馈（数字、提示、身体感受或一次小收益），一两句，不解释原理。")
-    who = pov or "视点主角"
-    rules.append(f"代入感：{who}在本场景至少有一处 1–2 句的简短内心（判断、算计或情绪），夹在动作之间；不写超过 3 句的独白。")
-    if idx == total:
-        main = scene.get("main_hook") or beats.get("hook_end") or ""
-        rules.append(f"章末只留 1 个主钩（{main}）+ 至多 1 个副钩，断在主钩那一刻；不要再追加第三个悬念或预告。")
-    else:
-        rules.append("本场景结尾留一个推动下一场的小悬念即可，不要提前写章末钩子。")
-    return rules

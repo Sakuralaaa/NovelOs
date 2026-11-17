@@ -97,6 +97,21 @@ def resolve_flag(book_id: int, chapter_id: int, s: Session = Depends(get_session
     return {"ok": True}
 
 
+@router.post("/books/{book_id}/autopilot/flags/{chapter_id}/accept")
+async def accept_flag(book_id: int, chapter_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.17「待你看」的章作者放行：照现在的正文提交（后台任务，含摘要），划掉清单；之后点继续接着写。"""
+    from app.jobs.manager import submit
+    from app.models.tables import Chapter
+
+    _book(s, book_id)
+    ch = s.get(Chapter, chapter_id)
+    if ch is None or ch.book_id != book_id:
+        raise HTTPException(404, "章节不存在")
+    if not (ch.content or "").strip():
+        raise HTTPException(409, "这一章正文为空，先采纳一个版本")
+    return job_out(submit("autopilot_accept", lambda ctx: ap.accept_flag(book_id, chapter_id), book_id=book_id))
+
+
 @router.post("/ideas/{idea_id}/autopilot")
 async def idea_autopilot(idea_id: int, body: Optional[AutoSettingsIn] = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
     """选题一键成书：采纳建书 + 开始一键成书。"""

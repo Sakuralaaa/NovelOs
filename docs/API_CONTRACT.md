@@ -113,7 +113,7 @@ Package { book_id, titles: [{title, score}], blurb, tags[], cover_prompt, covers
 
 ## v0.1 增补（2026-11-12 02:35，解决“AI 文像说明书、对话呆板、全是短句”）
 - `Lint` 新增字段：`avg_sentence_len: number`、`short_sentence_ratio: number`（≤8 字句占比）、`bare_dialogue_ratio: number`（对白段前后无动作/神态/环境描写的比例）、`summary_ratio: number`（概述式叙述占比，估计值）。
-- 风格卡：`GET/PUT /api/books/{id}/style` → `Style { sample_text: string /*用户粘贴的范文，≤5000 字*/, voice_notes: string, pov: "first"|"third", tone: string, extracted: object|null }`；`POST /api/books/{id}/style/extract` → Job（从范文提炼句长分布、描写密度、对话写法，存入 extracted）。
+- 风格卡：`GET/PUT /api/books/{id}/style` → `Style { sample_text: string /*用户粘贴的范文，≤5000 字*/, baseline: string /*v0.17 文风基准，≤2000 字；PUT 不传保持原样*/, voice_notes: string, pov: "first"|"third", tone: string, extracted: object|null }`；`POST /api/books/{id}/style/extract` → Job（从范文提炼句长分布、描写密度、对话写法，存入 extracted）。
 - 人物卡 `Card.data` 对 character 约定键：`voice`（说话方式）、`catchphrases[]`（口头禅）、`habits[]`（小动作）、`demeanor`（神态习惯）。
 - 多版本：`write-next` body 可选 `{variants: 1|2|3}`（默认 1）。`Chapter` 新增 `variants: [{id, content, words, lint, review_overall}]`，status 为 `"draft"` 时作者挑选；`POST /api/chapters/{id}/adopt-variant` (variant_id) → Chapter。默认设置可选“自动采纳最高分”。
 - 精修：`POST /api/chapters/{id}/thicken` → Job（“描写增厚”：只改写干对白/概述段落，补动作、神态、环境、心理，保持情节不变）。
@@ -792,3 +792,22 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - 卷节点 `beats.recap = {text, state[], problems[], at}`（卷末复盘写入）；写章上下文新增块「前情卷回顾」「长期状态（上一卷末）」「作者导向」。
 - 备用路由：`GET/PUT /api/settings/routing/backup` `{planner|writer|reviewer|search|agent: ["channel_id:model", …≤3]}`；设了备用的角色只在主路由 + 备用里切换。
 - `POST /api/fanfic/idea/rewrite` body `{source_id, direction, text, instruction, notes, protagonist}` → `{text}`（同步，任务 `fanfic_idea` 走 planner）。
+
+
+## v0.17.0 读者驱动写作
+
+- `Style.baseline`：文风基准段落（建议 600–1000 字，上限 2000，超出 400）。`PUT /api/books/{id}/style` 可带 `baseline`，不传保持原样。为空时第 1 章提交后自动从第 1 章摘一段回填。写作时放在 system 末尾。
+- 写章（`POST /api/books/{id}/chapters/write-next` 等）流程变化，接口不变：
+  - 新任务 `writing_chapter`（writer，温度 0.85，`max_tokens = min(16000, max(4000, 字数×2+1500))`）一次写完整章、只出正文；`chapter_state`（planner）写完后从正文抽 `{state, changes}`；`pairwise`（reviewer）两版候选成对比较。旧任务 `writing_scene` 不再调用。
+  - 第 1 章与章纲 `payoff_level=milestone` 的章在没指定 `variants` 时写 2 版并自动成对比较选优：`result.pairwise = {winner, rounds:[{a,b,winner,votes,reason}], reason}`；章节 `review.pairwise` 同此；`variants[].picked: true|false|null`（入选/落选/没比较）。
+  - 断点阶段名：`scenes` → `draft:{n}`（第 n 版正文写完）→ `variant:{n}` → `chapter` → … → `presummary`（精修范围不提交时先算摘要）。
+- 章细纲 `beats` 新增可选字段：`want`（主角本章主动想要）、`turn`（转折）、`result`（结果）、`payoff_mechanism`（爽点机制一句话）；`cheat_beat` 改为每章都有（可为「本章不用」）。段落安排 `beats.scenes[]` 不再有 `sensory`、`exit_hook`。
+- 审稿 `review.reader` 新增 `want`、`waiting`、`next`、`drop`（读者三问与最想弃读的一句）；`review.heal = {rounds, exhausted, content_hash, at}`（一键成书自愈记录）。
+- lint 新增 `habits: [{who, word, count, over, allow}]`（人物习惯动作计数，同一个每章上限 2）；口头禅每章上限由 2 改为 1；`fix_targets` 新增 kind「习惯动作重复」。
+- 一键成书：
+  - `AutoRun.stop_reason` 新增 `needs_review`（`status=waiting`，看板显示「待你看」）；`stats.needs_review`；`flags[].blocking: bool`（挡住连写的章）。
+  - 新增 `POST /api/books/{id}/autopilot/flags/{chapter_id}/accept` → Job（`kind=autopilot_accept`）：照现在的正文提交并划掉清单，之后再调 `/autopilot/start` 继续。
+  - 继续运行时，待你看的章正文没改就不再自动重写，继续停着；改过就重审，过审即提交。
+  - 完本批次 `WanbenBatch.stop_reason` 新增 `needs_review`。
+- 上下文预览（`GET /api/books/{id}/context-preview`）`blocks` 末尾新增固定块「上一章结尾原文」（写作时放在提示最后，不能关）。
+

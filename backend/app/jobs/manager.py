@@ -108,7 +108,9 @@ def resume_info(job: Job | None) -> dict[str, Any]:
         st = cp.state or {}
         info = {"stage": cp.stage, "resumes": cp.resumes, "updated_at": cp.updated_at.isoformat() if cp.updated_at else None,
                 "chapter_id": st.get("chapter_id"), "number": st.get("number"), "scenes_total": len(st.get("scenes") or []) or None,
-                "scenes_done": len(((st.get("partial") or {}).get("texts")) or []) if st.get("partial") else None,
+                # v0.17 整章一次写：断点里有本版正文就算这一版的段落都写完了
+                "scenes_done": (len(st.get("scenes") or []) if (st.get("partial") or {}).get("content")
+                                else len(((st.get("partial") or {}).get("texts")) or [])) if st.get("partial") else None,
                 "variants_done": len(st.get("variants_done") or [])}
     return {"resumable": ok, "checkpoint": info}
 

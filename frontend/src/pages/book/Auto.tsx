@@ -27,7 +27,8 @@ const STATUS: Record<AutoRun['status'], { label: string; tone: 'primary' | 'warn
   stopped: { label: '已停下', tone: 'danger' }, done: { label: '已完本', tone: 'success' },
 }
 const STOPS: { value: AutoStopKind; label: string }[] = [{ value: 'opening', label: '开篇写完确认' }, { value: 'volume', label: '每卷写完选下一卷走向' }]
-const EVENT_TONE: Record<string, string> = { error: 'text-danger', llm_down: 'text-danger', budget: 'text-danger', forced: 'text-warning', retry: 'text-warning', done: 'text-success' }
+const EVENT_TONE: Record<string, string> = { error: 'text-danger', llm_down: 'text-danger', budget: 'text-danger', forced: 'text-warning', needs_review: 'text-warning', retry: 'text-warning', done: 'text-success' }
+const statusOf = (r: AutoRun) => (r.status === 'waiting' && r.stop_reason === 'needs_review' ? { label: '待你看', tone: 'warning' as const } : STATUS[r.status])
 
 export default function AutoPage() {
   const id = useBookId()
@@ -51,7 +52,7 @@ export default function AutoPage() {
   const r = o.run
   const pending = o.decisions.find((d) => d.status === 'pending') ?? null
   const fresh = !r || r.status === 'done'
-  const canResume = !!r && !o.running && (r.status === 'paused' || r.status === 'stopped')
+  const canResume = !!r && !o.running && (r.status === 'paused' || r.status === 'stopped' || (r.status === 'waiting' && r.stop_reason === 'needs_review'))
 
   return (
     <div className="page">
@@ -93,7 +94,7 @@ export default function AutoPage() {
 
 function StatusCard({ o, r }: { o: AutoOverview; r: AutoRun }) {
   const p = o.progress
-  const st = STATUS[r.status]
+  const st = statusOf(r)
   const idx = Math.max(0, STAGES.findIndex((s) => s.key === (r.stage === 'bible' ? 'setup' : r.stage)))
   const pct = p ? Math.round((p.ratio || 0) * 1000) / 10 : 0
   const s = r.stats
@@ -131,7 +132,7 @@ function StatusCard({ o, r }: { o: AutoOverview; r: AutoRun }) {
         </div>
         <div className="grid min-w-0 grid-cols-2 gap-2.5">
           <Tile label="自动修好" value={`${(s.healed ?? 0)} 章`} sub="重写后过审" />
-          <Tile label="放行待看" value={`${s.forced ?? 0} 章`} sub={`待看清单 ${r.flags.length} 章`} tone={r.flags.length ? 'warning' : undefined} />
+          <Tile label="待你看" value={`${r.flags.filter((f) => f.blocking).length} 章`} sub={`清单共 ${r.flags.length} 章`} tone={r.flags.length ? 'warning' : undefined} />
           <Tile label="卷末复盘" value={`${s.volumes_reviewed ?? 0} 卷`} sub={`渠道重试 ${s.retries ?? 0} 次`} />
           <Tile label="本次花费" value={`¥${o.cost.toFixed(2)}`} sub={r.settings.max_cost_cny ? `上限 ¥${r.settings.max_cost_cny}` : '不设上限'} />
         </div>
@@ -252,19 +253,35 @@ function DecisionCard({ bookId, d, onDone }: { bookId: number; d: AutoDecision; 
 }
 
 function FlagsCard({ bookId, r, onDone }: { bookId: number; r: AutoRun; onDone: () => void }) {
+  const { start } = useJobs()
   const done = useMutation({ mutationFn: (cid: number) => autoApi.resolveFlag(bookId, cid), meta: { errorTitle: '操作失败' }, onSuccess: onDone })
+  const [accepting, setAccepting] = useState<number | null>(null)
+  const accept = async (cid: number) => {
+    setAccepting(cid)
+    const finish = () => { setAccepting(null); onDone() }
+    const job = await start(autoApi.acceptFlag(bookId, cid), { key: `autopilot-accept:${cid}`, label: '放行这一章', successMsg: '已放行，点继续接着写', onSuccess: finish, onError: finish })
+    if (!job) setAccepting(null)
+  }
+  const blocking = r.flags.filter((f) => f.blocking).length
   return (
     <Card>
-      <CardHeader icon={<AlertTriangle />} title="待看清单" desc={r.flags.length ? `${r.flags.length} 章重写后仍没过审，先放行了` : '没有需要你看的章'} />
+      <CardHeader icon={<AlertTriangle />} title="待你看" desc={blocking ? `${blocking} 章自动修了 2 轮还没过审，等你看完再接着写` : r.flags.length ? `${r.flags.length} 章` : '没有需要你看的章'} />
       {r.flags.length > 0 && (
         <CardBody className="divide-y divide-border/70 p-0">
           {r.flags.map((f) => (
-            <div key={f.chapter_id} className="flex min-h-[56px] items-center gap-3 px-4 py-2.5 sm:px-5">
+            <div key={f.chapter_id} className="flex min-h-[56px] flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
               <div className="min-w-0 flex-1">
                 <Link to={`/books/${bookId}/chapters/${f.chapter_id}`} className="block truncate text-[13.5px] font-medium hover:text-primary">第{f.number}章 {f.title}</Link>
                 <p className="truncate text-[12.5px] text-muted-foreground" title={f.reason}>{f.reason}</p>
               </div>
-              <Button size="sm" variant="ghost" loading={done.isPending && done.variables === f.chapter_id} onClick={() => done.mutate(f.chapter_id)}>看过了</Button>
+              {f.blocking ? (
+                <div className="flex shrink-0 gap-1.5">
+                  <Link to={`/books/${bookId}/chapters/${f.chapter_id}`}><Button size="sm" variant="ghost" icon={<FileText className="h-3.5 w-3.5" />}>去改</Button></Link>
+                  <Button size="sm" variant="secondary" loading={accepting === f.chapter_id} icon={<Check className="h-3.5 w-3.5" />} onClick={() => void accept(f.chapter_id)}>放行</Button>
+                </div>
+              ) : (
+                <Button size="sm" variant="ghost" loading={done.isPending && done.variables === f.chapter_id} onClick={() => done.mutate(f.chapter_id)}>看过了</Button>
+              )}
             </div>
           ))}
         </CardBody>

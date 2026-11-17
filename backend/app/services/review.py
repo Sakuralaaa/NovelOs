@@ -190,9 +190,10 @@ def deterministic_issues(
         out.append({"severity": "mid", "dimension": "payoff", "quote": first_sentence(content),
                     "comment": "第 1 章没检出金手指/核心卖点的苗头（关键词：" + "、".join(terms[:4])
                                + "）。让它在本章露一次读者能感知的反应：数字、提示、身体感受或一次小收益"})
-    if protagonist and protagonist not in content[:300]:
+    # v0.17：只查第 1 章（之后的章常从配角或上一章的场面接起），主角取同人设定里的原创主角
+    if number == 1 and protagonist and protagonist not in content[:300]:
         out.append({
-            "severity": "mid" if number > 3 else "high",
+            "severity": "mid",
             "dimension": "hook",
             "quote": first_sentence(content),
             "comment": f"主角「{protagonist}」没有在前 300 字内出场",
@@ -222,13 +223,33 @@ def build_review(issues: list[dict[str, str]], reader: dict[str, Any] | None = N
     return out
 
 
+DEFAULT_PERSONA = "一个每天在番茄刷 3 小时网文的老读者：通勤时单手刷，没耐心，看过几百本，最烦主角憋屈、注水、套路重复"
+
+
+def reader_persona(book: Any) -> str:
+    """v0.17 读者人设按书来：同人书是看过原著的同人读者，原创书按频道和题材。"""
+    if book is None:
+        return DEFAULT_PERSONA
+    gender = "女频" if getattr(book, "gender", "") == "female" else "男频"
+    ff = getattr(book, "fanfic", None)
+    if isinstance(ff, dict) and (ff.get("source_title") or ff.get("source_id")):
+        src = str(ff.get("source_title") or "原著").strip("《》")
+        return (f"一个把《{src}》原著翻过好几遍、也常在番茄刷{gender}同人的老读者：熟悉原著人物和名场面，"
+                "最烦人物 OOC、照抄原著剧情和主角被原著人物抢戏，想看主角怎么把原著的走向改掉")
+    genre = str(getattr(book, "genre", "") or "").strip()
+    genre = genre if genre and genre != "同人" else "网文"
+    return (f"一个每天在番茄刷 3 小时{gender}{genre}的老读者：通勤时单手刷，没耐心，这类书看过几百本，"
+            "最烦主角憋屈、注水、套路重复")
+
+
 def run_reader(gw: LLMGateway, content: str, number: int, chapter_plan: str, context: str,
-               meta: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
-    """番茄老读者视角：给追读意愿打分，标出想划走的句子。失败时返回 (None, [])，不影响主审稿。"""
+               meta: dict[str, Any] | None = None, persona: str = "") -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    """番茄老读者视角：给追读意愿打分，标出想划走的句子，并回答三问（主角想要什么 / 在等什么 / 最后一句后想知道什么）。
+    失败时返回 (None, [])，不影响主审稿。"""
     try:
         raw = gw.chat_json(
             "reader", system_prompt("reader"),
-            render("reader", number=number, chapter_plan=chapter_plan, content=content,
+            render("reader", number=number, chapter_plan=chapter_plan, content=content, persona=persona or DEFAULT_PERSONA,
                    context=context or "（无：这是开篇）"),
             meta={**(meta or {}), "content": content, "number": number}, temperature=0.3,
         )
@@ -245,7 +266,14 @@ def run_reader(gw: LLMGateway, content: str, number: int, chapter_plan: str, con
         score = None
     if score is None and not issues:
         return None, []
-    return {"score": score, "verdict": str(raw.get("verdict") or "")[:200]}, issues
+    out: dict[str, Any] = {"score": score, "verdict": str(raw.get("verdict") or "")[:200]}
+    for k in ("want", "waiting", "next"):
+        if str(raw.get(k) or "").strip():
+            out[k] = str(raw[k]).strip()[:160]
+    drop = str(raw.get("drop") or "").strip()
+    if drop and quote_in_text(drop, content):
+        out["drop"] = drop[:160]
+    return out, issues
 
 
 def run_review(
@@ -259,6 +287,7 @@ def run_review(
     context: str = "",
     cheat_terms: list[str] | None = None,
     extra_issues: list[dict[str, Any]] | None = None,
+    persona: str = "",
 ) -> tuple[dict[str, Any], int]:
     """返回（Review dict, 被丢弃的无证据 issue 数）。context：人物当前状态 + 上一章结尾，供连贯性核对。
     extra_issues：v0.9.4 程序规则产出的问题（数值一致性 lint 等），quote 取自正文，与确定性检查一起计分。"""
@@ -271,7 +300,7 @@ def run_review(
         temperature=0.2,
     )
     llm_issues, dropped = validate_issues(raw, content, keep_src=True)
-    reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta)
+    reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta, persona)
     det = deterministic_issues(content, protagonist, required_chars, number, cheat_terms)
     for it in extra_issues or []:
         if isinstance(it, dict) and it.get("quote") and quote_in_text(str(it["quote"]), content):
@@ -304,3 +333,37 @@ def pre_commit_targets(review: dict[str, Any] | None, content: str) -> tuple[lis
     pats = [int(p["index"]) for p in rv.get("patches") or [] if not p.get("applied") and p.get("issue_ref") is not None
             and int(p["issue_ref"]) in want and str(p.get("original") or "") in content]
     return idx, pats
+
+
+# ------------------------------------------------------------------ v0.17 多候选：成对比较
+
+def _pair_once(gw: LLMGateway, first: str, second: str, number: int, chapter_plan: str, persona: str,
+               meta: dict[str, Any] | None) -> tuple[str | None, str]:
+    raw = gw.chat_json(
+        "pairwise", system_prompt("pairwise"),
+        render("pairwise", persona=f"你是{persona or DEFAULT_PERSONA}。", number=number, chapter_plan=chapter_plan, a=first, b=second),
+        meta={**(meta or {}), "a": first, "b": second, "number": number}, temperature=0.2,
+    )
+    if not isinstance(raw, dict):
+        return None, ""
+    w = str(raw.get("winner") or "").strip().upper()[:1]
+    return (w if w in ("A", "B") else None), str(raw.get("reason") or "")[:200]
+
+
+def pairwise_compare(gw: LLMGateway, a: str, b: str, number: int, chapter_plan: str, persona: str = "",
+                     meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """两版候选成对比较「哪版更让人想点下一章」，不打绝对分。为抵消先后顺序的偏好，正反各比一次：
+    两次都选同一版才算赢（winner=0/1），意见不一致 winner=None，由调用方按审稿分兜底。"""
+    votes: list[dict[str, Any]] = []
+    picks: list[int | None] = []
+    for order, (x, y) in enumerate(((a, b), (b, a))):
+        try:
+            w, why = _pair_once(gw, x, y, number, chapter_plan, persona, meta)
+        except Exception:  # noqa: BLE001
+            w, why = None, ""
+        idx = None if w is None else ((0 if w == "A" else 1) if order == 0 else (1 if w == "A" else 0))
+        picks.append(idx)
+        votes.append({"order": "AB" if order == 0 else "BA", "winner": idx, "reason": why})
+    winner = picks[0] if picks[0] is not None and picks[0] == picks[1] else None
+    reason = next((v["reason"] for v in votes if v["winner"] == winner and v["reason"]), "") if winner is not None else ""
+    return {"winner": winner, "votes": votes, "reason": reason}

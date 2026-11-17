@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -512,6 +512,7 @@ class CoverDelete(BaseModel):
 
 class StyleIn(BaseModel):
     sample_text: str = ""
+    baseline: Optional[str] = None  # v0.17 文风基准；不传保持原样
     voice_notes: str = ""
     pov: Literal["first", "third"] = "third"
     tone: str = ""
@@ -661,6 +662,8 @@ def review_out(r: dict[str, Any] | None) -> dict[str, Any] | None:
     out["flagged"] = bool(r.get("flagged"))
     out["flag_reason"] = r.get("flag_reason") or ""
     out["pre_commit_fix"] = r.get("pre_commit_fix")
+    out["pairwise"] = r.get("pairwise")  # v0.17 多候选成对比较记录
+    out["heal"] = r.get("heal")          # v0.17 一键成书自愈记录
     return out
 
 
@@ -671,7 +674,8 @@ def chapter_out(c: Chapter, with_content: bool = True) -> dict[str, Any]:
         "changes": c.changes if isinstance(c.changes, dict) else None,
         "variants": [
             {"id": v.get("id"), "content": v.get("content", "") if with_content else "", "words": v.get("words", 0),
-             "lint": lint_out(v.get("lint")), "review_overall": v.get("review_overall", 0)}
+             "lint": lint_out(v.get("lint")), "review_overall": v.get("review_overall", 0),
+             "picked": v.get("picked")}  # v0.17 多候选：成对比较选中的那版为 true，落选为 false，没比较过为 null
             for v in (c.variants or [])
         ],
     }
@@ -709,5 +713,5 @@ def package_out(book_id: int, p: Package | None) -> dict[str, Any]:
 
 
 def style_out(st: Style) -> dict[str, Any]:
-    return {"sample_text": st.sample_text, "voice_notes": st.voice_notes, "pov": st.pov, "tone": st.tone,
+    return {"sample_text": st.sample_text, "baseline": st.baseline or "", "voice_notes": st.voice_notes, "pov": st.pov, "tone": st.tone,
             "extracted": st.extracted}

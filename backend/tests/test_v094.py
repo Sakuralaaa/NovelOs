@@ -402,10 +402,10 @@ def test_write_next_resume_from_last_scene(client: TestClient, monkeypatch: pyte
     from app.services import writing
 
     real = writing.get_gateway()
-    calls = {"scene": 0, "fail_at": 3}
+    calls = {"scene": 0, "fail_at": 2}
 
     def chat(task: str, *a: Any, **k: Any) -> Any:
-        if task == "writing_scene":
+        if task == "writing_chapter":  # v0.17 整章一次写；第 1 章写 2 版，第 2 版写到一半中断
             calls["scene"] += 1
             if calls["scene"] == calls["fail_at"]:
                 raise RuntimeError("模拟进程中断")
@@ -417,7 +417,7 @@ def test_write_next_resume_from_last_scene(client: TestClient, monkeypatch: pyte
     j = _wait_any(client, job["id"])
     assert j["status"] == "failed" and j["resumable"] is True
     cp = j["checkpoint"]
-    assert cp["stage"].startswith("scene:1:2/") and cp["scenes_done"] == 2
+    assert cp["stage"] == "variant:1" and cp["variants_done"] == 1
     total = cp["scenes_total"]
     assert total >= 3
 
@@ -437,7 +437,7 @@ def test_write_next_resume_from_last_scene(client: TestClient, monkeypatch: pyte
     assert r.status_code == 200 and r.json()["id"] == job["id"]
     done = _wait_any(client, job["id"])
     assert done["status"] == "succeeded", done
-    assert calls["scene"] == total - 2  # 只写剩下的场景
+    assert calls["scene"] == 1  # 只写剩下的那一版
     assert done["resumable"] is False and done["checkpoint"] is None
     res = done["result"]
     ch = client.get(f"/api/chapters/{res['chapter_id']}").json()

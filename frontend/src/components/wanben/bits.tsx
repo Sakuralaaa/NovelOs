@@ -19,6 +19,7 @@ export const STOP_REASON: Record<string, string> = {
   paused: '作者暂停',
   target_reached: '已写满目标',
   error: '运行出错',
+  needs_review: '待你看',
 }
 export const stopReasonLabel = (r?: BatchStopReason | string | null) => (r ? STOP_REASON[r] ?? r : '')
 

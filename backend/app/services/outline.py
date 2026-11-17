@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from sqlmodel import Session, func, select
@@ -65,13 +66,15 @@ def _strands(v: Any) -> list[str]:
 
 
 CHAPTER_SCHEMA = (
-    '{"chapters":[{"title":"","goal":"本章戏剧问题","conflict":"","outcome":"yes|no|yes-but|no-and","payoff":"",'
+    '{"chapters":[{"title":"","goal":"本章戏剧问题","want":"主角本章主动想要什么（去争、去拿、去查、去赢）",'
+    '"conflict":"阻力：谁或什么在拦","turn":"转折：局面在哪一刻掉头","result":"结果：主角得到/失去什么、局面变成什么样",'
+    '"outcome":"yes|no|yes-but|no-and","payoff":"","payoff_mechanism":"爽点机制一句话：谁输、怎么输、谁看见、主角得到什么",'
     '"payoff_type":"打脸|扮猪吃虎|越级反杀|打脸权威|反派翻车|甜蜜超预期|真相揭示|收获升级|危机化解|关系突破",'
     '"payoff_level":"small|combo|milestone","strand":["quest|fire|constellation"],"emotion":"up|down|flat",'
     '"expectation":"本章挂起或兑现的读者期待","info_gap":"读者知道而角色不知道的事（可空）","time":"本章故事内时间",'
-    '"opening_hook":"第1–3章必填：正文前三行就出现的冲突或异常（写成画面）","cheat_beat":"第1章必填：金手指/核心卖点在本章露出的具体苗头（谁、做了什么、出现什么可感知的反馈）",'
+    '"opening_hook":"第1–3章必填：正文前三行就出现的冲突或异常（写成画面）","cheat_beat":"每章必填：金手指本章怎么用、兑现了什么（可写“本章不用”，但每 3 章至少一次可见兑现且有收获）",'
     '"characters":[],"location":"","foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":"","tier":"short|mid|long"}],'
-    '"hook_end":"","hook_type":"危机突降|悬念反转|挑衅叫板|倒计时|信息缺口|选择悬置|后果预示|决定|发现|误判|代价","must_avoid":[]}]}'
+    '"hook_end":"章末最后一拍：停在哪个事件进行中或谁的哪句话上（写要发生什么，不写台词原句）","hook_type":"危机突降|悬念反转|挑衅叫板|倒计时|信息缺口|选择悬置|后果预示|决定|发现|误判|代价","must_avoid":[]}]}'
 )
 
 
@@ -124,7 +127,7 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
     st = _strands(raw.get("strand") or raw.get("strands"))
     if st:
         out["strand"] = st
-    for k in ("expectation", "info_gap", "time", "opening_hook", "cheat_beat"):
+    for k in ("expectation", "info_gap", "time", "opening_hook", "cheat_beat", "want", "turn", "result", "payoff_mechanism"):
         if raw.get(k):
             out[k] = str(raw[k])[:200]
     avoid = raw.get("must_avoid")
@@ -135,25 +138,94 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
     return out
 
 
-def ensure_opening_beats(beats: dict[str, Any], number: int, cheat: Any | None = None, tagline: str = "") -> dict[str, Any]:
-    """开篇硬约束（v0.6，程序兜底）：第 1–3 章必须有 opening_hook；第 1 章必须有 cheat_beat（金手指/卖点苗头）。
+CHEAT_IDLE = "本章不用"
+CHEAT_GAP = 3           # 金手指：每 3 章至少一次可见兑现
+MECHANISM_WINDOW = 5    # 爽点机制查重：和最近 5 章比
+MECHANISM_SIM = 0.5     # 二字词重合度达到这个就算同一种机制
+DEFENSIVE_RX = re.compile(r"(躲|逃|藏|撑过|熬过|保住|守住|不被|避开|避免|活下来|活过|自保|苟)")
+MAX_DEFENSIVE_RUN = 2   # 主角目标连续是防守题的章数上限
 
-    模型漏写时从本章冲突与设定库的金手指卡补上，保证场景拆分和正文提示词里一定有这两项。
-    cheat：设定库 type=cheat 的卡（有 name/summary/data）；没有时退回书的一句话卖点。
-    """
+
+def cheat_idle(text: Any) -> bool:
+    t = str(text or "").strip()
+    return not t or t.startswith(("本章不用", "不用", "无")) or t in ("本章不出手", "-")
+
+
+def ensure_opening_beats(beats: dict[str, Any], number: int, cheat: Any | None = None, tagline: str = "",
+                         recent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """读者账本兜底（v0.6 开篇硬约束，v0.17 扩成每章）：
+    - 第 1–3 章必须有 opening_hook；
+    - 每章都有 want（主角主动想要什么）与 cheat_beat（金手指本章怎么用；可以“本章不用”，
+      但最近 CHEAT_GAP-1 章都没用时本章必须可见兑现）；
+    - 爽点机制和最近 MECHANISM_WINDOW 章重复时，写进 must_avoid 让写手换一种落法。
+    recent：本章之前的章细纲（chapter_beats_list 的元素），可省略。"""
     b = dict(beats or {})
+    recent = [x for x in (recent or []) if int(x.get("number") or 0) < number]
     if number <= 3 and not str(b.get("opening_hook") or "").strip():
         core = b.get("conflict") or b.get("goal") or ""
         b["opening_hook"] = f"开篇三行内让冲突落到主角身上：{core}"[:200]
-    if number == 1 and not str(b.get("cheat_beat") or "").strip():
+    if not str(b.get("want") or "").strip() and str(b.get("goal") or "").strip():
+        b["want"] = f"主角主动去争取：{b['goal']}"[:200]
+    how = ""
+    if cheat is not None:
+        d = getattr(cheat, "data", None) or {}
+        how = str(d.get("input") or getattr(cheat, "summary", "") or "")
+    label = f"「{cheat.name}」" if cheat is not None else "核心卖点"
+    if number == 1 and cheat_idle(b.get("cheat_beat")):
         if cheat is not None:
-            d = getattr(cheat, "data", None) or {}
-            how = d.get("input") or getattr(cheat, "summary", "") or ""
-            b["cheat_beat"] = (f"让「{cheat.name}」露一次可感知的苗头：{how}。写成主角能感到的具体反馈（数字、提示、身体感受或一次小收益），"
-                               "不解释原理")[:200]
+            b["cheat_beat"] = (f"让{label}露一次可感知的苗头：{how}。写成主角能感到的具体反馈（数字、提示、身体感受或一次小收益），"
+                               "一两句交代清楚")[:200]
         elif tagline:
             b["cheat_beat"] = f"让核心卖点露一次可感知的苗头：{tagline}"[:200]
+    elif number > 1 and (cheat is not None or tagline):
+        last = sorted(recent, key=lambda x: int(x.get("number") or 0))[-(CHEAT_GAP - 1):]
+        idle_run = len(last) >= CHEAT_GAP - 1 and all(cheat_idle(x.get("cheat_beat")) for x in last)
+        if idle_run and cheat_idle(b.get("cheat_beat")):
+            b["cheat_beat"] = (f"{label}本章可见地兑现一次：{how or tagline}。写清怎么触发、给了什么、主角拿它干成了什么，"
+                               "收获写成能比较的结果")[:200]
+        elif not str(b.get("cheat_beat") or "").strip():
+            b["cheat_beat"] = CHEAT_IDLE
+    if b.get("payoff_mechanism"):
+        dup = mechanism_dupes([*recent[-MECHANISM_WINDOW:], {**b, "number": number}], MECHANISM_WINDOW)
+        hit = next((d for d in dup if d[0] == number), None)
+        if hit is not None:
+            line = f"别再用和第{hit[1]}章一样的爽点机制（{hit[2][:40]}），同一个结果换一种输法、换一个见证人"
+            avoid = [str(x) for x in (b.get("must_avoid") or []) if x]
+            if line not in avoid:
+                b["must_avoid"] = [*avoid, line][-5:]
     return b
+
+
+def _grams(text: str) -> set[str]:
+    out: set[str] = set()
+    for run in re.findall(r"[\u4e00-\u9fff]+", str(text or "")):
+        out.update(run[i:i + 2] for i in range(len(run) - 1))
+    return out
+
+
+def mechanism_similarity(a: str, b: str) -> float:
+    ga, gb = _grams(a), _grams(b)
+    if not ga or not gb:
+        return 0.0
+    return len(ga & gb) / min(len(ga), len(gb))
+
+
+def mechanism_dupes(chapters: list[dict[str, Any]], window: int = MECHANISM_WINDOW,
+                    threshold: float = MECHANISM_SIM) -> list[tuple[int, int, str]]:
+    """爽点机制查重：每章和它之前 window 章比，二字词重合度 ≥ threshold 视为同一种机制。
+    返回 [(章号, 撞车的更早章号, 本章机制)]。"""
+    chs = sorted([c for c in chapters if isinstance(c, dict) and c.get("number") and c.get("payoff_mechanism")],
+                 key=lambda c: int(c["number"]))
+    out: list[tuple[int, int, str]] = []
+    for i, c in enumerate(chs):
+        n = int(c["number"])
+        for p in reversed(chs[max(0, i - window):i]):
+            if n - int(p["number"]) > window:
+                continue
+            if mechanism_similarity(str(c["payoff_mechanism"]), str(p["payoff_mechanism"])) >= threshold:
+                out.append((n, int(p["number"]), str(c["payoff_mechanism"])))
+                break
+    return out
 
 
 # ------------------------------------------------------------------ 节奏审计（纯代码）
@@ -206,6 +278,17 @@ def pacing_audit(chapters: list[dict[str, Any]], open_foreshadows: list[Any] | N
             prev = hits[-1] if hits else first - 1
             if last - prev > gap:
                 issues.append(f"{label}已经 {last - prev} 章没有推进（上限 {gap} 章），下一弧安排一次")
+    for n, m, mech in mechanism_dupes(chs):
+        issues.append(f"第{n}章的爽点机制和第{m}章重复（{mech[:30]}），换一种：换输家、换输法、换见证人或换收获")
+    wants = [(int(c["number"]), "d" if c.get("want") and DEFENSIVE_RX.search(str(c["want"])) else "") for c in chs]
+    for _, a, b in _runs(wants):
+        if b - a + 1 > MAX_DEFENSIVE_RUN:
+            issues.append(f"第{a}–{b}章主角的目标都是躲、守、撑，读者会憋屈：至少一章改成主角主动去争、去拿、去赢")
+    tagged_cheat = [c for c in chs if "cheat_beat" in c]
+    if len(tagged_cheat) >= CHEAT_GAP:
+        for _, a, b in _runs([(int(c["number"]), "i" if cheat_idle(c.get("cheat_beat")) else "") for c in tagged_cheat]):
+            if b - a + 1 >= CHEAT_GAP:
+                issues.append(f"第{a}–{b}章金手指都没出手：每 {CHEAT_GAP} 章至少安排一次可见兑现，并带来具体收获")
     levels = [(int(c["number"]), str(c.get("payoff_level") or "")) for c in chs if c.get("payoff_level")]
     if len(levels) >= COMBO_WINDOW:
         nums = [n for n, _ in levels]
@@ -252,6 +335,7 @@ def rhythm_ledger(beats_list: list[dict[str, Any]], before: int, n: int = 8) -> 
             b.get("outcome") and f"结果 {b['outcome']}",
             b.get("strand") and f"线 {'+'.join(b['strand'])}",
             b.get("emotion") and f"情绪 {b['emotion']}",
+            b.get("payoff_mechanism") and f"机制 {str(b['payoff_mechanism'])[:40]}",
         ) if x]
         if bits:
             lines.append(f"第{b['number']}章：" + "，".join(bits))
@@ -285,10 +369,12 @@ def _add_chapters(s: Session, book: Book, arc: OutlineNode, chapters: list[dict[
     n = max_chapter_number(s, book.id or 0)
     out = []
     cheat = next(iter(common.cards(s, book.id or 0, "cheat")), None)
+    recent = [b for b in chapter_beats_list(s, book.id or 0) if int(b.get("number") or 0) <= n][-MECHANISM_WINDOW:]
     for raw in chapters:
         n += 1
         beats = normalize_beats(raw if isinstance(raw, dict) else {}, n, book.chapter_words)
-        beats = ensure_opening_beats(beats, n, cheat, book.tagline or "")
+        beats = ensure_opening_beats(beats, n, cheat, book.tagline or "", recent)
+        recent = [*recent, {**beats, "number": n}][-MECHANISM_WINDOW:]
         node = OutlineNode(
             book_id=book.id or 0, parent_id=arc.id, level="chapter", order=n, title=beats["title"],
             summary=f"{beats['goal']}；{beats['conflict']}".strip("；"), beats=beats, status="planned",
@@ -409,6 +495,18 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
     data = gw.chat_json("expand", system_prompt("expand"), user, meta=meta)
     if not isinstance(data, dict):
         raise ValueError("展开结果不是 JSON 对象")
+    if level == "arc":  # v0.17 爽点机制查重：和最近 5 章撞车就让模型换一次（只重试一次，仍撞车由 ensure_opening_beats 写进 must_avoid）
+        dup = _new_mechanism_dupes(all_beats, data.get("chapters"), next_no)
+        if dup:
+            ctx.progress(30, "爽点机制和最近几章重复，换一版")
+            fix = user + "\n\n程序查重：下面这些章的爽点机制和最近几章重复，换一种（换输家、换输法、换见证人或换收获），其余照旧：\n" + "\n".join(
+                f"- 第{n}章「{mech[:40]}」和第{m}章重复" for n, m, mech in dup)
+            try:
+                data2 = gw.chat_json("expand", system_prompt("expand"), fix, meta={**meta, "dedupe": True})
+                if isinstance(data2, dict) and data2.get("chapters"):
+                    data = data2
+            except ValueError:
+                pass
     with common_session() as s:
         node = s.get(OutlineNode, node_id)
         assert node is not None
@@ -441,6 +539,12 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
         pacing = pacing_audit(chapter_beats_list(s, node.book_id)[-15:]) if level in ("arc", "chapter") else []
         s.commit()
         return {"node_id": node_id, "created": [c.id for c in created], "pacing_warnings": pacing}
+
+
+def _new_mechanism_dupes(old: list[dict[str, Any]], new: Any, next_no: int) -> list[tuple[int, int, str]]:
+    items = [{**(c if isinstance(c, dict) else {}), "number": next_no + i} for i, c in enumerate(new if isinstance(new, list) else [])]
+    lo = next_no
+    return [d for d in mechanism_dupes([*old[-MECHANISM_WINDOW:], *items]) if d[0] >= lo]
 
 
 def _arc_extra(s: Session, arc: OutlineNode, next_no: int) -> str:

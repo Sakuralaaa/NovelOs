@@ -54,7 +54,8 @@ class PlatformLintProfile(BaseModel):
     intensifier_min_allow: int = 2        # 强化词每词允许次数下限
     intensifier_per_k: float = 0.6        # 强化词每千字允许次数
     dialogue_tic_max: int = 2             # 对白句末口癖（嘛/对吧…）每章上限
-    catchphrase_max: int = 2              # 人物卡口头禅每章上限
+    catchphrase_max: int = 1              # 人物卡口头禅每章上限（v0.17：2 → 1）
+    habit_max: int = 2                    # v0.17 人物卡习惯动作：同一个每章上限
     weak_adverb_per_k_max: float = 3.0    # 弱化副词每千字上限
     subject_start_max: float = 0.60       # 叙述句以他/她/人名开头的占比上限
     sent_cv_min: float = 0.40             # 句长变异系数下限

@@ -230,12 +230,12 @@ def test_book_platform_style_create_patch(client: TestClient) -> None:
 def test_platform_sections_injected_by_profile() -> None:
     from app.skills.loader import system_prompt
 
-    fq = system_prompt("writing_scene", platform="fanqie")
-    qd = system_prompt("writing_scene", platform="qidian")
-    gen = system_prompt("writing_scene")
-    assert "单段 1–3 行" in fq and "金手指弹出异常提示" in fq and "配角有智商" not in fq
-    assert "配角有智商" in qd and "单段 1–3 行" not in qd
-    assert "单段 1–3 行" not in gen and "配角有智商" not in gen and "platform:" not in gen
+    fq = system_prompt("writing_chapter", platform="fanqie")
+    qd = system_prompt("writing_chapter", platform="qidian")
+    gen = system_prompt("writing_chapter")
+    assert "一段一到三行" in fq and "收益亮出来" in fq and "智商在线" not in fq
+    assert "智商在线" in qd and "一段一到三行" not in qd
+    assert "一段一到三行" not in gen and "智商在线" not in gen and "platform:" not in gen
     assert "去 AI 腔" in system_prompt("humanize") and "动词先行" in system_prompt("humanize")
     assert "过朱雀" not in fq + system_prompt("humanize") and "检测" not in system_prompt("humanize").split("v0.9 去 AI 腔")[1]
 
@@ -448,7 +448,7 @@ def test_context_includes_next_two_outlines(client: TestClient) -> None:
         block = next_outlines_block(s, bid, 1)
         assert f"第{nodes[1].order}章" in block and f"第{nodes[2].order}章" in block
         assert f"第{nodes[3].order}章" not in block if len(nodes) > 3 else True
-        assert "不得提前写出" in block and len(block) < NEXT_OUTLINES_BUDGET + 200
+        assert "留到那一章再写" in block and len(block) < NEXT_OUTLINES_BUDGET + 200
         book = common.get_book(s, bid)
         pack = build_context_pack(s, book, nodes[0])
         assert "后两章章纲" in pack.suffix
@@ -460,6 +460,6 @@ def test_context_includes_next_two_outlines(client: TestClient) -> None:
 def test_version_090(client: TestClient) -> None:
     from pathlib import Path
 
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16."))  # v0.9.1 起版本号由 test_v091 精确校验
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17."))  # v0.9.1 起版本号由 test_v091 精确校验
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.0" in (root / "CHANGELOG.md").read_text(encoding="utf-8")

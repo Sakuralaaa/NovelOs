@@ -16,7 +16,7 @@ from app.llm.gateway import LLMGateway
 from app.services.outline import ensure_opening_beats, normalize_beats
 from app.services.review import DIMENSIONS, WEIGHTS, compute_scores, deterministic_issues, quote_in_text, run_review
 from app.services.scene_state import (
-    merge_state, parse_scene_state, prop_move_warnings, render_state, scene_budget_lines, scene_rules, split_scene_output,
+    merge_state, parse_scene_state, prop_move_warnings, render_state, split_scene_output,
 )
 from app.services.writing import enforce_scene_rules, normalize_scenes, scene_plan_rules
 from app.skills.loader import render, system_prompt
@@ -163,29 +163,12 @@ def test_prop_teleport_warning() -> None:
     assert not prop_move_warnings(STATE_A, nxt, "韩铎把合同拍在柜台上。", 3)
 
 
-def test_scene_budget_lines() -> None:
-    voices = {"韩铎": {"catchphrases": ["嘛"]}, "叶承": {"catchphrases": []}}
-    lines = scene_budget_lines([SAMPLE[:1500]], ["韩铎", "叶承"], voices)
-    joined = "\n".join(lines)
-    assert "韩铎的口头禅「嘛」本章已用" in joined and "本场景不要再用" in joined
-    assert "群众/配角反应镜头本章已用" in joined
-    assert "这些词本章已经用够" not in scene_budget_lines([], [], voices)[-1]
-
-
-def test_scene_rules_opening_cheat_inner_hook() -> None:
-    sc = {"opening": "韩铎把合同拍在门框上", "cheat": "让「传功系统」露一次苗头"}
-    r1 = "\n".join(scene_rules(1, 1, 4, sc, {}, "叶承"))
-    assert "前三行" in r1 and "传功系统" in r1 and "叶承在本场景至少有一处" in r1 and "不要提前写章末钩子" in r1
-    r4 = "\n".join(scene_rules(5, 4, 4, {"main_hook": "门外来了人"}, {}, "叶承"))
-    assert "前三行" not in r4 and "1 个主钩" in r4 and "门外来了人" in r4
-
-
 def test_enforce_scene_rules_and_opening_beats() -> None:
     class Cheat:
         name, summary, data = "传功系统", "教徒即涨修为", {"input": "收下弟子并传授一式"}
     beats = ensure_opening_beats(normalize_beats({"conflict": "集团逼签合同", "hook_end": "电表箱上的断电单"}, 1, 2000), 1, Cheat())
     assert "传功系统" in beats["cheat_beat"] and "集团逼签合同" in beats["opening_hook"]
-    assert "cheat_beat" not in ensure_opening_beats({"conflict": "x"}, 2, Cheat())
+    assert ensure_opening_beats({"conflict": "x"}, 2, Cheat())["cheat_beat"] == "本章不用"  # v0.17 每章都有金手指安排
     assert "opening_hook" not in ensure_opening_beats({"conflict": "x"}, 4, Cheat())
     assert ensure_opening_beats({}, 1, None, "教徒即涨修为")["cheat_beat"].endswith("教徒即涨修为")
     raw = {"scenes": [{"goal": "a", "outcome": "no", "payoff_phase": "setup", "exit_hook": "h1"},
@@ -199,24 +182,27 @@ def test_enforce_scene_rules_and_opening_beats() -> None:
     s2 = enforce_scene_rules([{"goal": "x", "cheat": "自定"}, {"goal": "y"}], beats, 1)
     assert s2[0]["cheat"] == "自定" and "cheat" not in s2[1]
     rules = scene_plan_rules(beats, 1)
-    assert "第一个场景的第一拍就是冲突" in rules and "cheat" in rules and "不超过 3 个" in rules
+    assert "第一段的第一拍就是冲突" in rules and "cheat" in rules and "电表箱上的断电单" in rules
 
 
 def test_prompts_mention_new_rules() -> None:
-    sp = system_prompt("writing_scene")
-    assert "状态账本说了算" in sp and "---STATE---" in sp and "开篇三行见冲突" in sp
+    # v0.17：写手只读正面写法，禁令移到审稿/去味用的手艺检查清单；输出纯正文，不要求 JSON
+    sp = system_prompt("writing_chapter")
+    assert "章末停在事件进行中" in sp and "只输出 JSON" not in sp and "---STATE---" not in sp
+    assert "翻案腔" not in sp and "翻案腔" in system_prompt("review") and "翻案腔" in system_prompt("humanize")
     assert "cheat_beat" in system_prompt("scene_plan")
-    up = render("writing_scene", number=1, chapter_title="t", scene_index=1, scene_total=3, scene_words=500, chapter_plan="{}",
-                scene="{}", chapter_so_far="（本章开头）", state_block="【账本】", budget="- 无", scene_rules="- r", output_instruction="o")
-    assert "<chapter_so_far>" in up and "【账本】" in up and "没有上限" in up and "$" not in up
+    up = render("writing_chapter", number=1, chapter_title="t", words=2000, scenes="1. 想要：x", research="", cast_notes="视点主角：叶承",
+                prev_tail="【上一章结尾原文】\n他推开门。", start_line="从上一章最后一句之后紧接着写。")
+    assert up.rstrip().endswith("不写标题、说明、小结或任何标记。") and up.index("他推开门") > up.index("视点主角") and "$" not in up
 
 
 # ------------------------------------------------------------------ 集成：mock 全流程里账本逐场传递、第 1 章金手指进节拍
 
-def test_mock_pipeline_passes_state_between_scenes(client: TestClient, monkeypatch: Any) -> None:
+def test_mock_pipeline_passes_state_between_chapters(client: TestClient, monkeypatch: Any) -> None:
+    """v0.17：整章一次写；状态账本由另一次调用从正文抽，交给下一章开头；上一章结尾原文放在写作提示最后。"""
     import app.services.writing as writing
 
-    seen: list[tuple[int, str]] = []
+    seen: list[tuple[str, str, str]] = []
     real = writing.get_gateway()
 
     class Spy:
@@ -224,8 +210,9 @@ def test_mock_pipeline_passes_state_between_scenes(client: TestClient, monkeypat
             return getattr(real, k)
 
         def chat(self, task: str, messages: list[dict[str, str]], **kw: Any) -> str:
-            if task == "writing_scene":
-                seen.append((int((kw.get("meta") or {}).get("scene_index") or 0), messages[-1]["content"]))
+            if task == "writing_chapter":
+                seen.append((task, messages[0]["content"], messages[-1]["content"]))
+                assert kw.get("max_tokens") and abs(float(kw.get("temperature")) - 0.85) < 1e-6
             return real.chat(task, messages, **kw)
 
     monkeypatch.setattr(writing, "get_gateway", lambda: Spy())
@@ -240,35 +227,25 @@ def test_mock_pipeline_passes_state_between_scenes(client: TestClient, monkeypat
 
     r = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next").json(), timeout=120)["result"]
     ch = client.get(f"/api/chapters/{r['chapter_id']}").json()
-    assert "---STATE---" not in ch["content"]
+    assert "---STATE---" not in ch["content"] and "---CHANGES---" not in ch["content"]
     assert ch["changes"]["end_state"]["cast"]  # 本章结束账本留给下一章
-    scene1 = next(c for i, c in seen if i == 1)
-    scene2 = next(c for i, c in seen if i == 2)
-    assert "上一章结束时的状态账本" in scene1 and "前三行" in scene1
-    assert "上一场景结束时的状态账本" in scene2 and "道具·" in scene2 and "<chapter_so_far>" in scene2
+    assert len(seen) == 2  # 第 1 章写 2 版，每版一次调用
+    _, sys1, user1 = seen[0]
+    assert "上一章结尾原文" not in user1 and "前三行" in user1 and "整章" in user1
     lint = ch["lint"]
     assert "fix_targets" in lint and "crowd_shots" in lint
     assert {"continuity", "semantics"} <= set(ch["review"]["scores"])
 
-    # 第 2 章第一个场景从第 1 章的结束账本接（提交后账本仍保留）
     if not r.get("committed"):
         wait_job(client, client.post(f"/api/chapters/{r['chapter_id']}/commit").json())
     assert client.get(f"/api/chapters/{r['chapter_id']}").json()["changes"]["end_state"]["cast"]
+    # 第 1 章定稿后文风基准自动回填，第 2 章写作的 system 末尾带着它
+    assert len(client.get(f"/api/books/{bid}/style").json()["baseline"]) >= 200
     seen.clear()
     wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next").json(), timeout=120)
-    first = next(c for i, c in seen if i == 1)
-    assert "上一章结束时的状态账本" in first and "还没有账本" not in first
-
-
-def test_humanize_patches_craft_targets_on_sample() -> None:
-    from app.services.writing import patch_rewrite
-
-    lint = lint_chapter(SAMPLE, TH, chapter_number=1)
-    new, applied = patch_rewrite(SAMPLE, None, lint, {"protagonist": "叶承"})
-    assert applied >= 3
-    assert "一柄生了锈的万斤铁砣" not in new and "一块生了锈的万斤铁砣" in new
-    assert "空气像灌了铅" not in new
-    after = lint_chapter(new, TH, chapter_number=1)
-    before_n = next(d["count"] for d in lint.intensifiers if d["word"] == "死死")
-    after_n = next((d["count"] for d in after.intensifiers if d["word"] == "死死"), 0)
-    assert after_n < before_n and len(after.fix_targets) < len(lint.fix_targets)
+    _, sys2, user2 = seen[0]
+    assert "上一章结束时的场面" in user2 and "还没有账本" not in user2
+    assert sys2.rstrip().endswith(">>>") and "文风基准" in sys2
+    tail = user2[user2.index("【上一章结尾原文】"):]
+    assert 400 <= len(tail) and tail.rstrip().endswith("不写标题、说明、小结或任何标记。")
+    assert user2.index("【上一章结尾原文】") > user2.index("【本章写作任务】")

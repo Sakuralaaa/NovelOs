@@ -63,11 +63,40 @@ def chapter_review_mode(b: Book) -> bool:
 
 
 def protagonist(s: Session, book_id: int) -> Card | None:
+    """视点主角。v0.17：同人书优先取同人设定里的主角（fanfic.protagonist.card_id → 同名卡），
+    其次原创主角卡（origin=oc 且 role=protagonist），最后才是第一张 role=protagonist 的卡。
+    同人书里原著主角的卡也标着 protagonist，但它只是重要配角（见 is_canon_lead）。"""
     chars = cards(s, book_id, "character")
+    if not chars:
+        return None
+    book = s.get(Book, book_id)
+    ff = getattr(book, "fanfic", None) if book is not None else None
+    if isinstance(ff, dict):
+        p = ff.get("protagonist") if isinstance(ff.get("protagonist"), dict) else {}
+        cid = p.get("card_id")
+        if cid:
+            hit = next((c for c in chars if c.id == cid), None)
+            if hit is not None:
+                return hit
+        for key in ("name", "canon_name"):
+            nm = str(p.get(key) or "").strip()
+            if nm and (key == "name" or p.get("source") == "canon"):
+                hit = next((c for c in chars if c.name == nm), None)
+                if hit is not None:
+                    return hit
+    for c in chars:
+        d = c.data or {}
+        if d.get("origin") == "oc" and d.get("role") == "protagonist":
+            return c
     for c in chars:
         if (c.data or {}).get("role") == "protagonist":
             return c
-    return chars[0] if chars else None
+    return chars[0]
+
+
+def is_canon_lead(card: Card, prot: Card | None) -> bool:
+    """同人书里原著主角的卡（role=protagonist 但不是本书视点主角）：当重要配角写。"""
+    return card.type == "character" and (card.data or {}).get("role") == "protagonist" and prot is not None and card.id != prot.id
 
 
 def pronoun(book: Book) -> str:
@@ -89,6 +118,22 @@ def committed_chapters(s: Session, book_id: int, before: int | None = None) -> l
     if before is not None:
         q = q.where(Chapter.number < before)
     return list(s.exec(q.order_by(Chapter.number)))
+
+
+def written_chapters(s: Session, book_id: int, before: int | None = None) -> list[Chapter]:
+    """v0.17：已经写出正文的章（已提交 + 写好待审批/待提交的草稿），每个章号一份。
+    精修范围里的章不提交也要让后面的章看得到前文。"""
+    q = select(Chapter).where(Chapter.book_id == book_id)
+    if before is not None:
+        q = q.where(Chapter.number < before)
+    out: dict[int, Chapter] = {}
+    for c in s.exec(q.order_by(Chapter.number, Chapter.id)):
+        if c.status != "committed" and not (c.content or "").strip():
+            continue
+        cur = out.get(c.number)
+        if cur is None or (cur.status != "committed" and c.status == "committed"):
+            out[c.number] = c
+    return [out[k] for k in sorted(out)]
 
 
 def open_foreshadows(s: Session, book_id: int) -> list[Foreshadow]:

@@ -161,7 +161,7 @@ def resolve(s: Session, book_id: int, text: str, chapter_number: int | None = No
 
 # ------------------------------------------------------------------ 上下文构成
 
-PINNED = ("本章写作任务", "作者对本章的额外要求", "@引用设定", "@变量资料")
+PINNED = ("本章写作任务", "作者对本章的额外要求", "@引用设定", "@变量资料", "上一章结尾原文")
 
 
 def _label(part: str) -> str:
@@ -202,7 +202,7 @@ def context_preview(s: Session, book_id: int, chapter_id: int | None = None) -> 
         if node is None:
             node = OutlineNode(book_id=book_id, level="chapter", order=ch.number, title=ch.title, beats={"characters": []})
     else:
-        written = {c.number for c in common.committed_chapters(s, book_id)}
+        written = {c.number for c in common.written_chapters(s, book_id)}
         nxt = max(written) + 1 if written else 1
         node = next((n for n in common.outline_nodes(s, book_id) if n.level == "chapter" and n.order == nxt), None) or \
             OutlineNode(book_id=book_id, level="chapter", order=nxt, title=f"第{nxt}章", beats={"characters": []})
@@ -216,5 +216,7 @@ def context_preview(s: Session, book_id: int, chapter_id: int | None = None) -> 
                 blocks[-1]["chars"] += len(part) + 2
             continue
         blocks.append({"label": lab, "chars": len(part), "excluded": lab in ex, "pinned": lab in PINNED})
+    if pack.prev_tail:  # v0.17：上一章结尾单独放在写作提示最后
+        blocks.append({"label": "上一章结尾原文", "chars": len(pack.prev_tail), "excluded": False, "pinned": True})
     return {"chapter": node.order, "fixed_chars": len(pack.prefix), "blocks": blocks,
             "total_chars": len(pack.prefix) + sum(b["chars"] for b in blocks if not b["excluded"]), "exclude": sorted(ex)}

@@ -4,7 +4,8 @@
   setup  同人书先导入原著设定、生成原创主角；补全设定库（已有的卡不覆盖）；切到完本模式
   plan   按字数目标倒推卷纲（已规划过就跳过）
   write  逐批连写（复用 wanben._run_one_batch），批次在卷末与开篇边界截断；每批后：
-         - 自愈：没提交的章（审稿没过、等选版本、精修章）先按审稿问题整章重写一次，再提交；仍没过的放行并记入待看清单
+         - 自愈（v0.17 按章逐章）：每章写完没提交（审稿没过、精修章），马上带完整上下文和读者意见整章重写，最多 2 轮；
+           新稿不到目标字数 85% 不用、分数不更高不换；过审就提交接着写，2 轮还没过就停下标「待你看」，不往下写
          - 开篇确认（关键时刻模式）：开篇 N 章写完停下等作者看
          - 卷末复盘：本卷前情回顾 + 长期状态 + 问题 + 下一卷 3 个走向；全自动按推荐项走，关键时刻模式停下等作者点选
          - 渠道全挂：等 1 / 5 / 15 分钟各重试一次，还不行就停下，可续跑
@@ -42,7 +43,9 @@ DEFAULTS: dict[str, Any] = {
 }
 RETRY_WAITS = (60, 300, 900)
 MAX_EVENTS = 200
-GOLDEN_READER_MIN = 8  # 开篇章读者分低于这个再打磨一轮
+GOLDEN_READER_MIN = 8  # 开篇章读者分低于这个再打磨（最多 HEAL_ROUNDS 轮；过审了就放行，不为它停下）
+HEAL_ROUNDS = 2        # v0.17 自愈重写最多轮数
+HEAL_MIN_RATIO = 0.85  # v0.17 自愈新稿字数不到目标字数的这个比例不采用
 OPEN_STATUSES = ("running", "waiting", "paused", "stopped")
 LEVEL_LABEL = {"full": "全自动", "guided": "关键时刻问我"}
 
@@ -152,14 +155,14 @@ def _set(run_id: int, **kw: Any) -> None:
         s.commit()
 
 
-def _flag(run_id: int, ch: Chapter, reason: str) -> None:
+def _flag(run_id: int, ch: Chapter, reason: str, blocking: bool = False) -> None:
     with session_scope() as s:
         r = s.get(AutoRun, run_id)
         if r is None:
             return
         flags = [f for f in (r.flags or []) if f.get("chapter_id") != ch.id]
         flags.append({"chapter_id": ch.id, "number": ch.number, "title": ch.title, "reason": reason[:200],
-                      "at": utcnow().isoformat(), "resolved": False})
+                      "at": utcnow().isoformat(), "resolved": False, "blocking": blocking})
         r.flags = flags[-300:]
         s.add(r)
         s.commit()
@@ -263,7 +266,7 @@ def run_job(book_id: int, ctx: JobContext) -> dict[str, Any]:
     if cp is not None and isinstance(cp.state, dict) and "batch_ids" in cp.state:
         batch_state = dict(cp.state)
     state["last_job_id"] = ctx.job_id
-    batch_state["force"] = True  # 精修章写完不卡住连写，由这里统一审批
+    batch_state.pop("force", None)  # v0.17：不再无条件放行，精修章写完由按章自愈审批
     batch_state.setdefault("batch_ids", [])
     try:
         out = _drive(book_id, run_id, ctx, state, batch_state)
@@ -365,7 +368,14 @@ def _drive(book_id: int, run_id: int, ctx: JobContext, state: dict[str, Any], ba
             _event(run_id, "done", f"全书完结：{prog['chapters_total']} 章，{prog['words']} 字")
             return {"run_id": run_id, "status": "done", "chapters": prog["chapters_total"], "words": prog["words"]}
         _clamp_batch(book_id, st, state)
-        r = _retry(run_id, book_id, "连写", lambda: wanben._run_one_batch(book_id, ctx, batch_state))  # noqa: SLF001
+
+        def on_chapter(res: dict[str, Any]) -> str:  # v0.17 按章自愈：写完一章马上审批，不过就停
+            n = int(res.get("number") or 0)
+            ctx.progress(95, f"第{n}章：自动审批")
+            return _retry(run_id, book_id, f"第{n}章自愈",
+                          lambda: heal_chapter(book_id, run_id, int(res["chapter_id"]), golden=n <= int(st["golden_chapters"])))
+
+        r = _retry(run_id, book_id, "连写", lambda: wanben._run_one_batch(book_id, ctx, batch_state, on_chapter))  # noqa: SLF001
         batch_state.pop("current", None)
         batch_state.pop("chapter_cp", None)
         r = r or {}
@@ -374,6 +384,11 @@ def _drive(book_id: int, run_id: int, ctx: JobContext, state: dict[str, Any], ba
             _event(run_id, "batch", f"第{b.get('start_no')}–{b.get('end_no')}章：{b.get('message') or r.get('message') or ''}")
         if r.get("reason") == "paused":
             raise _Halt("paused", "paused", "已暂停")
+        if r.get("reason") == "needs_review":
+            _save(run_id, ctx, state, batch_state, "write")
+            raise _Halt("waiting", "needs_review", r.get("message") or "有一章待你看")
+        if r.get("stopped") and r.get("reason") in ("pending_chapter", "refine_pending", "awaiting_adopt", "review_failed"):
+            continue  # 下一轮先按章自愈再接着写
         _save(run_id, ctx, state, batch_state, "write")
 
 
@@ -442,17 +457,27 @@ def _score(review: dict[str, Any] | None) -> tuple[int, int, int]:
 
 
 def _heal_pending(book_id: int, run_id: int, st: dict[str, Any], ctx: JobContext) -> None:
+    """继续运行时：前面停下没提交的章先处理（按章号逐章）；还没过就停在这里待你看，不往下写。"""
     with session_scope() as s:
         pend = [(c.id or 0, c.number) for c in s.exec(select(Chapter).where(Chapter.book_id == book_id, Chapter.status != "committed")
                                                      .order_by(Chapter.number))]
     for cid, number in pend:
         ctx.progress(95, f"第{number}章：自动审批")
-        _retry(run_id, book_id, f"第{number}章自愈", lambda: heal_chapter(book_id, run_id, cid, golden=number <= int(st["golden_chapters"])))
+        verdict = _retry(run_id, book_id, f"第{number}章自愈",
+                         lambda: heal_chapter(book_id, run_id, cid, golden=number <= int(st["golden_chapters"])))
+        if verdict != "committed":
+            raise _Halt("waiting", "needs_review", f"第{number}章自动修了 {HEAL_ROUNDS} 轮还没过审，待你看")
 
 
 def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = False) -> str:
-    """没提交的章：没选版本的先采纳最高分版本；审稿没过（开篇章读者分不够）的按问题整章重写一次，
-    分数更好才换上；然后提交。还没过的照样提交，记进待看清单。返回 committed / forced。"""
+    """一章没提交（审稿没过、精修章等审批）：
+    - 没选版本的先采纳最高分版本；
+    - 过审：开篇章读者分不到 GOLDEN_READER_MIN 时再打磨，其余直接提交；
+    - 没过审：带完整上下文和审稿问题 + 读者意见整章重写，最多 HEAL_ROUNDS 轮；新稿字数不到目标 85% 不用，
+      分数不比原稿高不换；过审就提交；
+    - 还没过：标「待你看」，返回 needs_review，调用方停下不往下写。
+    作者改过正文后再点继续：正文变了就重审一次，过审就提交；没改还没过的不再自动重写，继续等作者。
+    返回 committed / needs_review。"""
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
         if ch is None or ch.status == "committed":
@@ -469,36 +494,106 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
         guide = "；".join(guidance_lines(s, book_id, number))
     if not content.strip():
         raise Conflict(f"第{number}章正文为空，没法自动提交")
+    heal = dict(review.get("heal") or {})
+    if heal.get("exhausted"):
+        if heal.get("content_hash") == writing._content_hash(content) and not review.get("passed"):  # noqa: SLF001
+            return _needs_review(run_id, chapter_id, number, review)
+        review, _ = wanben._evaluate_text(chapter_id, content)  # noqa: SLF001
+        _save_review(chapter_id, review, {**heal, "content_hash": writing._content_hash(content)})  # noqa: SLF001
+        if not review.get("passed"):
+            return _needs_review(run_id, chapter_id, number, review)
+        return _commit(run_id, chapter_id, number, healed=False)
     if not review or "passed" not in review:
         review, _ = wanben._evaluate_text(chapter_id, content)  # noqa: SLF001
     sc = _score(review)
-    if not sc[0] or (golden and sc[1] < GOLDEN_READER_MIN):
-        new = wanben._rewrite_full(chapter_id, content, wanben._issues_instruction(review, guide), None)  # noqa: SLF001
-        if new.strip() and new != content:
+    target = writing.target_words(chapter_id)
+    rounds = int(heal.get("rounds") or 0)
+    improved = False
+    def reader_low(rv: dict[str, Any]) -> bool:
+        r = (rv.get("reader") or {}).get("score")
+        return golden and isinstance(r, int) and r < GOLDEN_READER_MIN
+
+    while rounds < HEAL_ROUNDS and (not sc[0] or reader_low(review)):
+        rounds += 1
+        new = writing.rewrite_full(chapter_id, content, wanben._issues_instruction(review, guide))  # noqa: SLF001
+        words = writing.count_words(new)
+        if not new.strip() or new == content:
+            _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写没给出新稿")
+        elif words < HEAL_MIN_RATIO * target:
+            _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写只有 {words} 字（目标 {target} 字），不采用")
+        else:
             rv2, _ = wanben._evaluate_text(chapter_id, new)  # noqa: SLF001
-            if _score(rv2) >= sc:
-                writing.apply_rewrite(chapter_id, new, "一键成书自愈重写前")
-                review = rv2
-                _event(run_id, "heal", f"第{number}章按审稿问题整章重写，读者分 {sc[1]} → {_score(rv2)[1]}")
-        with session_scope() as s:
-            ch = s.get(Chapter, chapter_id)
-            assert ch is not None
-            ch.review = review
-            s.add(ch)
-            s.commit()
-    writing.commit_chapter(chapter_id)
+            sc2 = _score(rv2)
+            if sc2 > sc:
+                writing.apply_rewrite(chapter_id, new, f"一键成书自愈第 {rounds} 轮前")
+                _event(run_id, "heal", f"第{number}章第 {rounds} 轮整章重写，读者分 {sc[1]} → {sc2[1]}，综合分 {sc[2]} → {sc2[2]}")
+                content, review, sc, improved = new, rv2, sc2, True
+            else:
+                _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写没比原稿好（读者分 {sc2[1]}，综合分 {sc2[2]}），保留原稿")
+        _save_review(chapter_id, review, {"rounds": rounds})
+    if sc[0]:
+        return _commit(run_id, chapter_id, number, healed=improved)
+    _save_review(chapter_id, review, {"rounds": rounds, "exhausted": True, "content_hash": writing._content_hash(content)})  # noqa: SLF001
+    return _needs_review(run_id, chapter_id, number, review)
+
+
+def _save_review(chapter_id: int, review: dict[str, Any], heal: dict[str, Any]) -> None:
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
         assert ch is not None
-        if review.get("passed"):
-            _bump(run_id, "healed")
-            return "committed"
-        highs = [str(i.get("comment") or "") for i in review.get("issues") or [] if i.get("severity") == "high"]
-        reason = highs[0] if highs else "审稿没过（读者分偏低）"
-        _flag(run_id, ch, reason)
-    _bump(run_id, "forced")
-    _event(run_id, "forced", f"第{number}章重写后仍没过审，先放行，已记进待看清单")
-    return "forced"
+        ch.review = writing.carry_review(ch.review, {**review, "heal": {**heal, "at": utcnow().isoformat()}})
+        s.add(ch)
+        s.commit()
+
+
+def _commit(run_id: int, chapter_id: int, number: int, healed: bool) -> str:
+    writing.commit_chapter(chapter_id)
+    if healed:
+        _bump(run_id, "healed")
+    with session_scope() as s:  # 之前标过待你看的章，作者改好过审了就从清单上划掉
+        r = s.get(AutoRun, run_id)
+        if r is not None and any(f.get("chapter_id") == chapter_id and not f.get("resolved") for f in r.flags or []):
+            r.flags = [{**f, "resolved": True} if f.get("chapter_id") == chapter_id else f for f in r.flags or []]
+            s.add(r)
+            s.commit()
+    return "committed"
+
+
+def _needs_review(run_id: int, chapter_id: int, number: int, review: dict[str, Any]) -> str:
+    highs = [str(i.get("comment") or "") for i in review.get("issues") or [] if i.get("severity") == "high"]
+    reader = review.get("reader") or {}
+    reason = highs[0] if highs else (f"读者分 {reader['score']}：{reader.get('verdict') or ''}" if isinstance(reader.get("score"), int)
+                                     else "审稿没过")
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        assert ch is not None
+        already = False
+        r = s.get(AutoRun, run_id)
+        if r is not None:
+            already = any(f.get("chapter_id") == chapter_id and f.get("blocking") and not f.get("resolved") for f in r.flags or [])
+    _flag(run_id, ch, reason, blocking=True)
+    if not already:
+        _bump(run_id, "needs_review")
+        _event(run_id, "needs_review", f"第{number}章自动修了 {HEAL_ROUNDS} 轮还没过审，停下待你看：{reason}")
+    return "needs_review"
+
+
+def accept_flag(book_id: int, chapter_id: int) -> dict[str, Any]:
+    """作者看过「待你看」的章，选择放行：照现在的正文提交，划掉清单，之后点继续接着写。"""
+    with session_scope() as s:
+        run = latest_run(s, book_id)
+        ch = s.get(Chapter, chapter_id)
+        if ch is None or ch.book_id != book_id:
+            raise NotFound("章节不存在")
+        if not ch.content.strip():
+            raise Conflict("这一章正文为空，先采纳一个版本")
+        committed = ch.status == "committed"
+    if not committed:
+        writing.commit_chapter(chapter_id)
+    if run is not None:
+        resolve_flag(book_id, chapter_id)
+        _event(run.id or 0, "accept", f"第{ch.number}章作者放行")
+    return {"ok": True, "chapter_id": chapter_id}
 
 
 # ------------------------------------------------------------------ 决策点

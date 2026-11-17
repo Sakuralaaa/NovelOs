@@ -13,6 +13,7 @@ from app.services import common
 from app.skills.loader import render, system_prompt
 
 SAMPLE_MAX = 5000
+BASELINE_LIMIT = 2000  # v0.17 文风基准上限（建议 600–1000 字）
 EXCERPT_MIN, EXCERPT_MAX = 800, 1500
 
 

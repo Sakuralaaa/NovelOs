@@ -59,7 +59,7 @@ def _pack_chars(s: Session, book: Book) -> tuple[int, int, str]:
         return len(common.book_context(s, book)) + 2500, 600, f"第{nxt}章还没有章纲，按书级设定粗估"
     pack = build_context_pack(s, book, node)
     plan = node_plan_text(node)
-    return len(pack.prefix) + len(pack.suffix) + len(scene_plan_context(s, book, node)) // SCENES_EST, len(plan), \
+    return len(pack.prefix) + len(pack.suffix) + len(pack.prev_tail) + len(scene_plan_context(s, book, node)) // SCENES_EST, len(plan), \
         f"按第{nxt}章的实际上下文估算"
 
 
@@ -96,11 +96,12 @@ def estimate(s: Session, kind: str, book_id: int | None = None, chapter_id: int 
             notes.append(n)
         else:
             pack_len, plan_len = 6000, 600
-        scenes_in = SCENES_EST * (pack_len + plan_len + target // 2 + 800)
-        inp = (book_ctx + plan_len + 1500) + scenes_in + (target + plan_len + 2500) + target
-        out = int(target * 1.05) + 800 + 600 + 200
-        calls = 1 + SCENES_EST + 2
-        notes.append(f"拆场景 1 次 + 约 {SCENES_EST} 个场景 + 审稿与摘要；没过审时还会多 1–2 次定点重写")
+        write_in = pack_len + plan_len + 800
+        state_in = target + 1500
+        inp = (book_ctx + plan_len + 1500) + write_in + state_in + 2 * (target + plan_len + 2500) + target
+        out = int(target * 1.05) + 800 + 600 + 600 + 200
+        calls = 1 + 1 + 1 + 3
+        notes.append("排段落 1 次 + 整章写作 1 次 + 抽状态 1 次 + 审稿、读者审读与摘要；开篇第 1 章和大爽点章写 2 版再成对比较，约翻倍；没过审时还会多 1–2 次重写")
     elif kind in ("chapter_rewrite", "polish_voice"):
         inp, out, calls = content_len + 1500 + SYSTEM_CHARS, content_len, 1
     elif kind in ("humanize", "thicken"):

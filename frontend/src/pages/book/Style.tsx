@@ -20,6 +20,7 @@ import type { Style } from '@/lib/types'
 import { cn, countWords } from '@/lib/utils'
 
 const LIMIT = 5000
+const BASE_LIMIT = 2000
 const TONES = ['冷峻写实', '轻松幽默', '热血燃', '细腻温柔', '悬疑压抑', '古风典雅', '爽快直白']
 const pctFmt = (v: unknown) => (typeof v === 'number' ? `${Math.round(v * (v <= 1 ? 100 : 1))}%` : '—')
 
@@ -35,12 +36,13 @@ export default function StylePage() {
   useEffect(() => { if (q.data && !dirty) setF(q.data) }, [q.data, dirty])
 
   const save = useMutation({
-    mutationFn: (s: Style) => api.saveStyle(id, { sample_text: s.sample_text, voice_notes: s.voice_notes, pov: s.pov, tone: s.tone }),
+    mutationFn: (s: Style) => api.saveStyle(id, { sample_text: s.sample_text, baseline: s.baseline ?? '', voice_notes: s.voice_notes, pov: s.pov, tone: s.tone }),
     meta: { errorTitle: '保存失败' },
     onSuccess: (s) => { qc.setQueryData(qk.style(id), s); setDirty(false) },
   })
 
   const words = countWords(f?.sample_text ?? '')
+  const baseWords = countWords(f?.baseline ?? '')
   const over = words > LIMIT
   const local = useMemo(() => (f?.sample_text ? analyzeText(f.sample_text) : null), [f?.sample_text])
 
@@ -99,6 +101,15 @@ export default function StylePage() {
             </div>
             <div className="-mt-2 flex flex-wrap gap-1.5">
               {TONES.map((t) => <button key={t} onClick={() => set({ tone: t })} className={cn('h-6 rounded-full border px-2.5 text-xs transition', f.tone === t ? 'border-primary bg-primary-soft text-primary' : 'text-muted-foreground hover:text-foreground')}>{t}</button>)}
+            </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-[13px] font-medium">文风基准</span>
+                <span className={cn('num text-xs', baseWords > BASE_LIMIT ? 'font-medium text-danger' : 'text-muted-foreground')}>{baseWords.toLocaleString()} 字</span>
+              </div>
+              <Textarea value={f.baseline ?? ''} onChange={(e) => set({ baseline: e.target.value })}
+                className={cn('min-h-[180px] resize-y font-serif text-[14.5px] leading-[1.9]', baseWords > BASE_LIMIT && 'border-danger focus:border-danger')}
+                placeholder="一段 600–1000 字的正文" />
             </div>
             <Field label="文风笔记">
               <Textarea value={f.voice_notes} onChange={(e) => set({ voice_notes: e.target.value })} className="min-h-[90px]" placeholder="例如：多用动作代替心理描写；对白短，前后要有动作或环境；不要用“不禁”“仿佛”。" />

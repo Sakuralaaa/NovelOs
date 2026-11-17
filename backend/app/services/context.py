@@ -28,7 +28,10 @@ MAX_FORESHADOWS = 6
 MAX_RELATED_OLD = 4          # 回读推荐：与本章实体/伏笔/细纲相关的更早章节摘要条数（v0.16 加了按细纲文字的相似度检索）
 RECAP_BUDGET = 1400          # v0.16 前情卷回顾的总字数预算（最近一卷全文，更早的卷压缩）
 OLDER_INDEX_CHARS = 600      # 更早章节“一句话索引”的总字数预算（长篇记忆压缩）
-PREV_TAIL_CHARS = 300        # 上一章结尾原文，保证章与章之间动作、位置、情绪的衔接
+PREV_TAIL_CHARS = 800        # 上一章结尾原文上限（v0.17：600–800 字，放在写作提示的最后，动笔前最后读到的是正文）
+PREV_TAIL_MIN = 600          # 上一章结尾原文下限：整段取到不够时截取上一段的末尾补足
+HABIT_MAX = 2                # 人物习惯动作：全章同一个最多 2 次（lint 计数）
+CATCHPHRASE_NOTE_MAX = 1     # 口头禅：全章最多 1 次
 MAX_GLOBAL_FACTS = 8
 NEXT_OUTLINES = 2            # v0.9：后几章章纲（只用来埋伏笔）
 NEXT_OUTLINE_CHARS = 220     # 每章章纲的字数上限
@@ -41,12 +44,12 @@ DEAD_KEY_RX = re.compile(r"(生死|状态|存活|身体|处境)")
 
 # 黄金三章：入局 → 加压 → 承诺（参考 maliangwriter.com 黄金三章检查、番茄开篇硬指标；文字自写）
 GOLDEN_TASKS = {
-    1: "【黄金三章·第1章：入局】前三行就进入冲突或异常，前 300 字内主角在做事并撞上它；金手指/核心卖点本章必须露一次"
-       "读者能感知的苗头（见细纲 cheat_beat）；只交代当下行动需要的设定；章末钩子要让读者问“他接下来怎么办”。",
-    2: "【黄金三章·第2章：加压】阻力升级，规则露出：金手指第一次使用时写清怎么用、付出什么、哪里用不了；"
-       "主角必须主动做一次选择，不要重复第1章的惊讶。",
-    3: "【黄金三章·第3章：承诺】给出第一次小胜并结算收益（资源、认可、资格至少一项），同时把短期冲突接到长期目标上；"
-       "章末钩子比前两章更贴近主角本人。",
+    1: "【黄金三章·第1章：入局】前三行就进入冲突或异常，主角一出场就在做事并撞上它；金手指本章露一次读者能感知的苗头；"
+       "只交代当下行动需要的设定；章末停在让读者想问“他接下来怎么办”的那一刻。",
+    2: "【黄金三章·第2章：加压】对手加码，主角主动做一次选择；金手指第一次真正用出来：怎么触发、给了什么、主角拿它干成了什么，"
+       "收获写成能比较的结果。",
+    3: "【黄金三章·第3章：承诺】给出第一次小胜并结算收益（资源、认可、资格至少一项），把眼前的冲突接到主角的长线目标上；"
+       "章末停在一件更贴近主角本人的事上。",
 }
 
 
@@ -64,6 +67,10 @@ class ContextPack:
     # v0.6
     opening_state: dict[str, Any] | None = None  # 上一章结束时的场景状态账本（站位/手持物/服装/身体）
     cheat_terms: list[str] = field(default_factory=list)  # 金手指关键词（第 1 章检查是否露面）
+    # v0.17
+    prev_tail: str = ""        # 上一章结尾原文（600–800 字），放在写作提示的最后
+    cast_notes: str = ""       # 视点主角与原著主角（同人）提醒
+    habits: dict[str, list[str]] = field(default_factory=dict)  # 相关人物的习惯动作（lint 计数用）
 
     def summary(self) -> dict[str, Any]:
         return {"cards": [c.name for c in self.relevant_cards], "prefix_chars": len(self.prefix), "suffix_chars": len(self.suffix)}
@@ -90,7 +97,7 @@ def style_block(s: Session, book_id: int) -> str:
             lines.append(f"范文写法：{llm['summary']}")
         for t in (llm.get("techniques") or [])[:8]:
             lines.append(f"- {t}")
-        if ex.get("excerpt"):
+        if ex.get("excerpt") and not (getattr(st, "baseline", "") or "").strip():  # v0.17 有文风基准时只用基准段落
             lines.append("范文片段（只学写法：句长节奏、对白配动作的方式、描写密度；不要照搬情节、人名、设定）：")
             lines.append("<<<\n" + str(ex["excerpt"]) + "\n>>>")
     return "【风格卡】\n" + "\n".join(lines)
@@ -116,6 +123,16 @@ def relevant_cards(all_cards: list[Card], beats: dict[str, Any], protagonist: Ca
     return out
 
 
+def baseline_block(s: Session, book_id: int) -> str:
+    """v0.17 文风基准：一段 600–1000 字的正文，放在 system 末尾，照这个语感写。"""
+    st = common.get_style(s, book_id)
+    text = (getattr(st, "baseline", "") or "").strip()
+    if not text:
+        return ""
+    return ("【文风基准（照这段的语感、句子长短、对白和动作的配法来写；只学写法，人名、情节、设定以本书为准）】\n<<<\n"
+            + text + "\n>>>")
+
+
 def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: str = "", ignore_exclude: bool = False) -> ContextPack:
     bid = book.id or 0
     beats = node.beats or {}
@@ -139,23 +156,38 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
     from app.skills.loader import PLATFORMS  # v0.11：含可选档 duanju（短剧分镜）
 
     platform = book.platform_style if getattr(book, "platform_style", None) in PLATFORMS else "fanqie"
-    prefix = system_prompt("writing_scene", "\n".join(fixed), platform=platform)
+    base = baseline_block(s, bid)
+    if base:
+        fixed.append(base)
+    prefix = system_prompt("writing_chapter", "\n".join(fixed), platform=platform)
 
     # ---------- 动态后缀 ----------
     rel = relevant_cards(all_cards, beats, prot)
     rel_names = {c.name for c in rel}
     parts: list[str] = ["【本章相关设定】"]
     voices: dict[str, dict[str, Any]] = {}
+    habits: dict[str, list[str]] = {}
     for c in rel:
         line = f"[{c.type}] {c.name}：{c.summary}"
         if c.type == "character":
             v = common.voice_of(c)
             voices[c.name] = v
-            cp = "、".join(v["catchphrases"])
-            line += (
-                f"\n  说话方式：{v['voice'] or '未设定'}；口头禅：{(cp + '（每章最多 1–2 次，靠句式和用词体现腔调，不靠口头禅刷存在）') if cp else '无'}；"
-                f"小动作：{'、'.join(v['habits']) or '无'}；神态：{v['demeanor'] or '未设定'}"
-            )
+            if v["habits"]:
+                habits[c.name] = list(v["habits"])
+            if prot is not None and c.id == prot.id:
+                line += "（本书视点主角）"
+            elif common.is_canon_lead(c, prot):
+                line += "（原著主角，本书里是重要配角，不是视点人物）"
+            line += f"\n  说话方式：{v['voice'] or '未设定'}"
+            ref = []
+            if v["catchphrases"]:
+                ref.append(f"口头禅「{'、'.join(v['catchphrases'])}」全章最多 {CATCHPHRASE_NOTE_MAX} 次")
+            if v["habits"]:
+                ref.append(f"习惯动作「{'、'.join(v['habits'])}」偶尔体现，全章同一个不超过 {HABIT_MAX} 次")
+            if v["demeanor"]:
+                ref.append(f"神态：{v['demeanor']}")
+            if ref:
+                line += "\n  参考（腔调靠句式和用词带出来）：" + "；".join(ref)
             sl = soul_line(c)
             if sl:
                 line += f"\n  灵魂五维（动机与底线，决定他这场怎么选、怎么说）：{sl}"
@@ -165,14 +197,16 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         elif c.type == "location" and (c.data or {}).get("sensory"):
             line += f"\n  感官：{c.data['sensory']}"  # type: ignore[index]
         parts.append(line)
-    facts = list(
-        s.exec(select(Fact).where(Fact.book_id == bid, Fact.to_chapter == None))  # noqa: E711
-    )
+    facts = facts_at(s, bid, node.order)
     state_text = state_block(facts, rel, all_cards)
+    written = common.written_chapters(s, bid, before=node.order)
+    pend = pending_state_lines([c for c in written if c.status != "committed"], {c.name for c in rel})
+    if pend:
+        state_text = (state_text + "\n" if state_text else "") + pend
     if state_text:
         parts.append(state_text)
 
-    committed = common.committed_chapters(s, bid, before=node.order)
+    committed = written
     recent = committed[-RECENT_SUMMARIES:]
     older = committed[:-RECENT_SUMMARIES] if len(committed) > RECENT_SUMMARIES else []
     planned_descs = [str(f.get("desc", "")) for f in beats.get("foreshadow") or []]
@@ -190,11 +224,10 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         if idx:
             parts.append("【更早章节索引（压缩）】\n" + idx)
     if recent:
-        parts.append("【最近章节摘要】\n" + "\n".join(f"第{c.number}章 {c.title}：{c.summary}" for c in recent))
+        parts.append("【最近章节摘要】\n" + "\n".join(f"第{c.number}章 {c.title}：{chapter_brief(c)}" for c in recent))
     tail = ""
     if committed and committed[-1].number == node.order - 1 and committed[-1].content:
         tail = chapter_tail(committed[-1].content)
-        parts.append(f"【上一章结尾原文（本章第一个场景从这里接，位置、时间、情绪要连上）】\n{tail}")
 
     opens = common.open_foreshadows(s, bid)
     picked = pick_foreshadows(opens, rel_names, planned_descs, node.order)
@@ -202,10 +235,10 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         parts.append("【未回收伏笔（相关）】\n" + "\n".join(
             f"- #{f.id} {f.desc}（第{f.planted_ch}章埋，状态 {f.status}，{foreshadow_age_label(f, node.order)}）" for f in picked))
 
-    plan_lines = chapter_task_lines(beats, node.order)
+    plan_lines = chapter_task_lines(beats, node.order, prot.name if prot else None)
     ledger = rhythm_ledger(chapter_beats_list(s, bid), node.order, 5)
     if ledger:
-        plan_lines.append("最近几章的节奏（本章不要重复同一种爽点模式和钩子类型）：\n" + ledger)
+        plan_lines.append("最近几章的节奏（本章换一种爽点模式和章末画面）：\n" + ledger)
     if plan_lines:
         parts.append("【本章写作任务】\n" + "\n".join(plan_lines))
 
@@ -233,6 +266,10 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
     if committed and committed[-1].number == node.order - 1 and isinstance(committed[-1].changes, dict):
         es = committed[-1].changes.get("end_state")
         opening_state = es if isinstance(es, dict) else None
+    if opening_state:
+        from app.services.scene_state import render_state
+
+        parts.append(render_state(opening_state, "上一章结束时的场面（本章开头从这里接，人在哪、手里拿着什么以此为准）"))
     cheat_terms: list[str] = []
     for c in all_cards:
         if c.type == "cheat":
@@ -244,6 +281,14 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         from app.services.vars import filter_parts
 
         parts = filter_parts(s, bid, parts)
+    notes: list[str] = []
+    if prot is not None:
+        notes.append(f"视点主角：{prot.name}。全章贴着{prot.name}写，他的判断和盘算用一两句内心带出。")
+    leads = [c.name for c in all_cards if common.is_canon_lead(c, prot)]
+    if leads:
+        notes.append(f"{'、'.join(leads)}是原著主角，本书里是重要配角：有戏份、有分量，但视点和高光留给{prot.name if prot else '主角'}。")
+    if habits:
+        notes.append(f"人物卡里的口头禅全章最多 {CATCHPHRASE_NOTE_MAX} 次，同一个习惯动作全章不超过 {HABIT_MAX} 次。")
     return ContextPack(
         prefix=prefix,
         suffix="\n\n".join(parts),
@@ -256,7 +301,21 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         preflight=pre,
         opening_state=opening_state,
         cheat_terms=cheat_terms,
+        prev_tail=tail,
+        cast_notes="\n".join(notes) or "（无）",
+        habits=habits,
     )
+
+
+def facts_at(s: Session, book_id: int, number: int) -> list[Fact]:
+    """v0.17：写（或重写）第 number 章时有效的事实：第 number-1 章结束时的状态。
+    写最新一章时就是全部当前事实；回头重写前面的章时，不会把后面章节才发生的变化当成“当前状态”。"""
+    prev = max(0, int(number or 1) - 1)
+    out: list[Fact] = []
+    for f in s.exec(select(Fact).where(Fact.book_id == book_id, Fact.from_chapter <= prev)):
+        if f.to_chapter is None or f.to_chapter >= prev:
+            out.append(f)
+    return out
 
 
 def scene_plan_context(s: Session, book: Book, node: OutlineNode, limit: int = 2400) -> str:
@@ -268,13 +327,13 @@ def scene_plan_context(s: Session, book: Book, node: OutlineNode, limit: int = 2
         if c.type in ("faction", "character", "location", "item"):
             lines.append(f"[{c.type}] {c.name}：{(c.summary or '')[:50]}")
     out = ["【设定底账（势力、人物、地点只能用这里已有的；确需新配角，写清他属于哪个已有势力）】", *lines]
-    committed = common.committed_chapters(s, bid, before=node.order)
+    committed = common.written_chapters(s, bid, before=node.order)
     if committed:
         out.append("【最近章节摘要】")
-        out += [f"第{c.number}章 {c.title}：{(c.summary or '')[:160]}" for c in committed[-3:]]
+        out += [f"第{c.number}章 {c.title}：{chapter_brief(c, 160)}" for c in committed[-3:]]
         last = committed[-1]
         if last.number == node.order - 1 and last.content:
-            out.append("【上一章结尾原文（第一个场景从这里接）】\n" + chapter_tail(last.content))
+            out.append("【上一章结尾原文（第一段从这里接）】\n" + chapter_tail(last.content, 400, 200))
     text = "\n".join(out)[:limit]
     rb = refs_block(s, bid, _plan_text(node.beats or {}), node.title or "", node.summary or "")
     return text + ("\n" + rb if rb else "")
@@ -307,23 +366,51 @@ def next_outlines_block(s: Session, book_id: int, order: int, n: int = NEXT_OUTL
         used += len(line)
     if not lines:
         return ""
-    return ("【后两章章纲（只用来提前埋线索、留伏笔：可以让相关的人、物、说法在本章自然露一下；"
-            "不得提前写出这些事件，不得剧透结果）】\n" + "\n".join(lines))
+    return ("【后两章章纲（只用来提前埋线索：相关的人、物、说法可以在本章自然露一下；这些事件留到那一章再写）】\n"
+            + "\n".join(lines))
 
 
 # ------------------------------------------------------------------ 状态 / 记忆 / 伏笔 / 写前核对
 
-def chapter_tail(content: str, budget: int = PREV_TAIL_CHARS) -> str:
-    """上一章结尾：从末尾按整段往前取，总长不超过 budget（至少一段，过长的单段截取末尾）。"""
+def chapter_tail(content: str, budget: int = PREV_TAIL_CHARS, min_chars: int = PREV_TAIL_MIN) -> str:
+    """上一章结尾：从末尾按整段往前取，总长不超过 budget；整段取完还不到 min_chars 时，截取再前一段的末尾补足。
+    单段就超过 budget 的截取末尾。"""
     paras = [p.strip() for p in content.split("\n") if p.strip()]
     out: list[str] = []
     used = 0
     for p in reversed(paras):
         if out and used + len(p) > budget:
+            if used < min_chars:
+                out.append("…" + p[-(budget - used):])
             break
         out.append(p if len(p) <= budget else "…" + p[-budget:])
         used += len(p)
     return "\n".join(reversed(out))
+
+
+def chapter_brief(c: Any, n: int = 0) -> str:
+    """章节摘要；还没提交的章（精修范围待审批）可能还没有摘要，用正文开头顶上。"""
+    summ = (c.summary or "").strip()
+    if not summ:
+        body = re.sub(r"\s+", "", c.content or "")
+        summ = (body[:120] + "…") if body else "（未写）"
+    return summ[:n] if n else summ
+
+
+def pending_state_lines(pending: list[Any], names: set[str] | None = None) -> str:
+    """v0.17：还没提交的章（精修范围待审批）在变更声明里登记的状态变化，叠在事实底账上面（越新越靠后，以后面的为准）。"""
+    lines: list[str] = []
+    for c in sorted(pending, key=lambda x: x.number):
+        chg = c.changes if isinstance(c.changes, dict) else {}
+        for sc in chg.get("state_changes") or []:
+            if not isinstance(sc, dict) or not sc.get("entity") or not sc.get("key"):
+                continue
+            if names and sc["entity"] not in names and sc["entity"] != "全书":
+                continue
+            lines.append(f"- {sc['entity']}｜{sc['key']}：{sc.get('value', '')}[第{c.number}章，待审]")
+    if not lines:
+        return ""
+    return "【前几章（写好待审）里的新变化，以这里为准】\n" + "\n".join(lines[-24:])
 
 
 def _key_rank(key: str) -> int:
@@ -359,7 +446,7 @@ def state_block(facts: list[Fact], rel: list[Card], all_cards: list[Card]) -> st
             lines.append(f"- 全书·{f.key}：{f.value}{tag}")
     if not lines:
         return ""
-    return "【人物与世界当前状态（以此为准，正文不得与之矛盾；变化要在变更声明里登记）】\n" + "\n".join(lines)
+    return "【人物与世界当前状态（以此为准）】\n" + "\n".join(lines)
 
 
 _GRAM_RX = re.compile(r"[\u4e00-\u9fffA-Za-z0-9]+")
@@ -489,33 +576,53 @@ _PAYOFF_SHAPE = {
 }
 
 
-def chapter_task_lines(beats: dict[str, Any], number: int) -> list[str]:
+def chapter_task_lines(beats: dict[str, Any], number: int, protagonist: str | None = None) -> list[str]:
+    """v0.17 读者账本：写手看到的本章任务，全部写成正面要求。"""
+    who = protagonist or "主角"
     lines: list[str] = []
     if number in GOLDEN_TASKS:
         lines.append(GOLDEN_TASKS[number])
+    want = beats.get("want") or beats.get("goal")
+    if want:
+        lines.append(f"{who}本章想要：{want}")
+    if beats.get("conflict"):
+        lines.append(f"阻力：{beats['conflict']}")
+    if beats.get("turn"):
+        lines.append(f"转折：{beats['turn']}")
+    res = beats.get("result")
+    if res or beats.get("outcome"):
+        lab = {"yes": "得手", "no": "没得手", "yes-but": "得手但有麻烦", "no-and": "没得手且局面更糟"}.get(str(beats.get("outcome") or ""), "")
+        lines.append(f"结果：{res or lab}" + (f"（{lab}）" if res and lab else ""))
+    if beats.get("characters"):
+        lines.append("出场人物：" + "、".join(str(x) for x in beats["characters"] if x)
+                     + (f"；地点：{beats['location']}" if beats.get("location") else ""))
+    cb = str(beats.get("cheat_beat") or "").strip()
+    if cb and not cb.startswith(("本章不用", "不用")):
+        lines.append(f"金手指：{cb}（写清怎么触发、给了什么、{who}拿它干成了什么）")
     pt = beats.get("payoff_type")
     if pt or beats.get("payoff"):
         shape = _PAYOFF_SHAPE.get(str(pt), "")
-        lines.append(
-            f"爽点：{beats.get('payoff') or pt}"
-            + (f"（{pt}：{shape}）" if shape else "")
-            + "。按“期待 → 压抑 → 释放”写：先让读者想要，再写清阻力和代价，释放的分量配得上压抑的长度，释放后给围观反应或实际收获。"
-        )
+        lines.append(f"爽点：{beats.get('payoff') or pt}" + (f"（{pt}：{shape}）" if shape else "")
+                     + ("" if beats.get("payoff_mechanism") else "。按期待 → 压抑 → 释放写，释放后给围观反应或实际收获。"))
+    if beats.get("payoff_mechanism"):
+        lines.append(f"爽点机制：{beats['payoff_mechanism']}。按期待、压抑、释放三拍写，释放时写清谁输了、怎么输、谁在场看见、{who}拿到什么。")
     if beats.get("expectation"):
-        lines.append(f"读者期待：{beats['expectation']}（本章要么推进它，要么兑现它，不能让它静止）")
+        lines.append(f"读者在等：{beats['expectation']}（本章推进它或兑现它）")
     if beats.get("info_gap"):
-        lines.append(f"信息差：{beats['info_gap']}（读者知道、角色不知道，用它蓄爽感，不要让角色提前知道）")
+        lines.append(f"信息差：{beats['info_gap']}（读者知道、角色还不知道，用它蓄爽感）")
     if number <= 3 and beats.get("opening_hook"):
-        lines.append(f"开篇三行：{beats['opening_hook']}（前三段内必须出现，不先铺环境）")
-    if beats.get("cheat_beat"):
-        lines.append(f"卖点露出：{beats['cheat_beat']}")
+        lines.append(f"开篇三行：{beats['opening_hook']}")
+    fs = [f"{ {'plant': '埋下', 'advance': '推进', 'resolve': '回收'}.get(str(f.get('action')), '') }「{f.get('desc')}」"
+          for f in (beats.get("foreshadow") or []) if isinstance(f, dict) and f.get("desc")]
+    if fs:
+        lines.append("伏笔：" + "；".join(fs))
     if beats.get("hook_end"):
         ht = beats.get("hook_type")
-        lines.append(f"章末钩子：{beats['hook_end']}" + (f"（类型：{ht}）" if ht else "") + "。断在变化发生的那一刻，不写总结句。")
+        lines.append(f"章末最后一拍：{beats['hook_end']}" + (f"（类型：{ht}）" if ht else "") + "，停在事件进行中或一句话上")
     if beats.get("time"):
         lines.append(f"故事时间：{beats['time']}")
     for a in beats.get("must_avoid") or []:
-        lines.append(f"本章避免：{a}")
+        lines.append(f"本章换个写法：{a}")
     return lines
 
 

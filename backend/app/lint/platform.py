@@ -32,7 +32,8 @@ class PlatformProfile:
     intensifier_min_allow: int = 2
     intensifier_per_k: float = 0.6
     dialogue_tic_max: int = 2
-    catchphrase_max: int = 2
+    catchphrase_max: int = 1
+    habit_max: int = 2
     weak_adverb_per_k_max: float = 3.0
     subject_start_max: float = 0.60
     sent_cv_min: float = 0.40

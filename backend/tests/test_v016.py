@@ -88,8 +88,9 @@ def test_guided_decisions_and_guidance(client: TestClient) -> None:
 
 
 def test_heal_and_retry(client: TestClient, monkeypatch: Any) -> None:
+    """v0.17：按章自愈，最多 2 轮；还没过就停下「待你看」，不放行、不往下写；作者放行后接着写到完。"""
     from app.llm.gateway import LLMError
-    from app.services import autopilot, wanben
+    from app.services import autopilot, wanben, writing
 
     monkeypatch.setattr(autopilot, "RETRY_WAITS", (0, 0, 0))
     real = wanben._run_one_batch
@@ -99,43 +100,102 @@ def test_heal_and_retry(client: TestClient, monkeypatch: Any) -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise LLMError("所有渠道均失败：测试")
-        out = real(*a, **k)
-        from app.db import session_scope
-        from app.models.tables import Chapter
-        from sqlmodel import select
-        with session_scope() as s:  # 把没提交的章标成审稿没过，逼出自愈
-            for ch in s.exec(select(Chapter).where(Chapter.status != "committed")):
-                ch.review = {**(ch.review or {}), "passed": False}
-                s.add(ch)
-            s.commit()
-        return out
+        return real(*a, **k)
 
     monkeypatch.setattr(wanben, "_run_one_batch", flaky)
-    real_eval = wanben._evaluate_text
+    state = {"fail": True}
+    real_ev = writing._evaluate
 
-    def bad_eval(cid: int, content: str) -> Any:
-        rv, lint = real_eval(cid, content)
-        return {**rv, "passed": False, "issues": [{"severity": "high", "comment": "测试：冲突没立住", "quote": ""}]}, lint
+    def ev(*a: Any, **k: Any) -> Any:
+        rv, lint, dropped = real_ev(*a, **k)
+        if state["fail"]:
+            rv = {**rv, "passed": False, "issues": [*rv["issues"], {"severity": "high", "dimension": "hook", "quote": "",
+                                                                   "comment": "测试：冲突没立住"}]}
+        return rv, lint, dropped
 
-    monkeypatch.setattr(wanben, "_evaluate_text", bad_eval)
+    monkeypatch.setattr(writing, "_evaluate", ev)
     b = client.post("/api/books", json={"title": "自愈", "genre": "都市", "gender": "male", "premise": "外卖员捡到神秘手机。"}).json()
     bid = b["id"]
-    # 写章流程里不自动提交，逼出待处理章节
-    from app.services import writing
-    real_ws = writing.effective_writing_settings
-    monkeypatch.setattr(writing, "effective_writing_settings", lambda s, b: {**real_ws(s, b), "auto_commit": False})
     r = client.post(f"/api/books/{bid}/autopilot/start", json={**SMALL, "target_words": 10_000, "batch_size": 4, "golden_chapters": 0})
     assert r.status_code == 200
-    o = _wait_run(client, bid, ("done", "stopped"))
+    o = _wait_run(client, bid, ("waiting", "done", "stopped"))
     run = o["run"]
-    assert run["status"] == "done", run
+    assert run["status"] == "waiting" and run["stop_reason"] == "needs_review", run
     assert run["stats"].get("retries", 0) >= 1 and any(e["kind"] == "retry" for e in run["events"])
+    assert run["stats"].get("forced", 0) == 0 and run["stats"].get("needs_review") == 1
     chs = client.get(f"/api/books/{bid}/chapters").json()
-    assert chs and all(c["status"] == "committed" for c in chs)
-    assert run["flags"] and run["stats"].get("forced", 0) >= 1, (run["stats"], run["events"][:12])
+    assert [c["number"] for c in chs] == [1] and chs[0]["status"] != "committed"  # 没往下写
+    heal_events = [e for e in run["events"] if e["kind"] == "heal"]
+    assert 1 <= len(heal_events) <= 2
     fl = run["flags"][0]
-    assert client.post(f"/api/books/{bid}/autopilot/flags/{fl['chapter_id']}/resolve").json()["ok"]
-    assert len(client.get(f"/api/books/{bid}/autopilot").json()["run"]["flags"]) == len(run["flags"]) - 1
+    assert fl["blocking"] and fl["chapter_id"] == chs[0]["id"] and "冲突没立住" in fl["reason"]
+    ch = client.get(f"/api/chapters/{chs[0]['id']}").json()
+    assert ch["review"]["heal"]["rounds"] == 2 and ch["review"]["heal"]["exhausted"]
+    # 再点继续：正文没改，不再自动重写，继续等作者
+    client.post(f"/api/books/{bid}/autopilot/start")
+    o = _wait_run(client, bid, ("waiting", "done", "stopped"))
+    assert o["run"]["stop_reason"] == "needs_review"
+    assert len([e for e in o["run"]["events"] if e["kind"] == "heal"]) == len(heal_events)
+    # 作者放行：照现在的正文提交，划掉清单，接着写到完
+    j = wait_job(client, client.post(f"/api/books/{bid}/autopilot/flags/{fl['chapter_id']}/accept").json())
+    assert j["status"] == "succeeded", j
+    assert client.get(f"/api/chapters/{fl['chapter_id']}").json()["status"] == "committed"
+    assert not client.get(f"/api/books/{bid}/autopilot").json()["run"]["flags"]
+    state["fail"] = False
+    client.post(f"/api/books/{bid}/autopilot/start")
+    o = _wait_run(client, bid, ("waiting", "done", "stopped"))
+    assert o["run"]["status"] == "done", o["run"]
+    assert all(c["status"] == "committed" for c in client.get(f"/api/books/{bid}/chapters").json())
+
+
+def test_heal_rejects_short_and_equal_rewrites(client: TestClient, monkeypatch: Any) -> None:
+    """自愈新稿不到目标字数 85% 不用；分数不比原稿高不换；比原稿好且过审就换上并提交。"""
+    from app.db import session_scope
+    from app.models.tables import AutoRun, Chapter
+    from app.services import autopilot, wanben, writing
+
+    b = client.post("/api/books", json={"title": "自愈细则", "genre": "都市", "gender": "male", "premise": "外卖员捡到神秘手机。",
+                                        "chapter_words": 2000}).json()
+    bid = b["id"]
+    wait_job(client, client.post(f"/api/books/{bid}/bible/generate").json())
+    wait_job(client, client.post(f"/api/books/{bid}/outline/generate").json())
+    monkeypatch.setattr(writing, "effective_writing_settings", lambda s, b: {**writing.writing_settings(s), "auto_commit": False})
+    r = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next", json={"variants": 1}).json(), timeout=120)["result"]
+    cid = r["chapter_id"]
+    with session_scope() as s:
+        run = AutoRun(book_id=bid, status="running", stage="write", settings={}, state={}, stats={})
+        s.add(run)
+        ch = s.get(Chapter, cid)
+        ch.review = {**(ch.review or {}), "passed": False, "scores": {"overall": 60},
+                     "reader": {"score": 4, "verdict": "主角一直挨打，没意思", "waiting": "等他还手"}}
+        s.add(ch)
+        s.commit()
+        run_id = run.id
+        original = ch.content
+    seen: list[str] = []
+    monkeypatch.setattr(writing, "rewrite_full", lambda cid_, content, ins, route=None: seen.append(ins) or "短稿。" * 50)
+    assert autopilot.heal_chapter(bid, run_id, cid) == "needs_review"
+    with session_scope() as s:
+        ch = s.get(Chapter, cid)
+        assert ch.content == original and ch.status != "committed"
+        evs = [e["text"] for e in s.get(AutoRun, run_id).events]
+    assert sum("不采用" in t for t in evs) == 2
+    assert "读者意见" in seen[0] and "主角这章想要什么" in seen[0]
+
+    # 新稿够长、过审、分数更高 → 换上并提交
+    good = original + "\n\n" + "陈野把单据往桌上一拍，对面的人脸色当场变了。" * 10
+    with session_scope() as s:
+        ch = s.get(Chapter, cid)
+        ch.review = {"passed": False, "scores": {"overall": 60}, "issues": []}  # 新一轮：清掉耗尽标记
+        s.add(ch)
+        s.commit()
+    monkeypatch.setattr(writing, "rewrite_full", lambda cid_, content, ins, route=None: good)
+    monkeypatch.setattr(wanben, "_evaluate_text", lambda cid_, content: ({"passed": True, "scores": {"overall": 90}, "issues": [],
+                                                                         "reader": {"score": 8}}, {}))
+    assert autopilot.heal_chapter(bid, run_id, cid) == "committed"
+    with session_scope() as s:
+        ch = s.get(Chapter, cid)
+        assert ch.status == "committed" and "当场变了" in ch.content
 
 
 def test_llm_down_stops_and_pause(client: TestClient, monkeypatch: Any) -> None:

@@ -132,8 +132,11 @@ def test_pick_foreshadows_prioritises_planned_then_stale() -> None:
 
 def test_chapter_tail_cuts_at_paragraphs() -> None:
     content = "\n\n".join(["第一段很长" * 40, "第二段。", "最后一段，门开了。"])
-    tail = chapter_tail(content, 50)
+    tail = chapter_tail(content, 50, 0)
     assert tail.endswith("最后一段，门开了。") and "第一段" not in tail
+    # v0.17：整段取完不到下限时，截取再前一段的末尾补足，总长不超过上限
+    tail = chapter_tail(content, 60, 40)
+    assert tail.startswith("…") and tail.endswith("最后一段，门开了。") and len(tail) <= 64
 
 
 def test_chapter_task_lines_golden_three_and_payoff_shape() -> None:
@@ -141,6 +144,8 @@ def test_chapter_task_lines_golden_three_and_payoff_shape() -> None:
                                 "info_gap": "读者知道他已筑基"}, 2)
     text = "\n".join(lines)
     assert "黄金三章·第2章" in text and "表面示弱" in text and "期待 → 压抑 → 释放" in text
+    mech = "\n".join(chapter_task_lines({"payoff_mechanism": "管事当众认错，围观弟子看见，主角拿回名额", "want": "拿回名额"}, 5, "陈野"))
+    assert "陈野本章想要：拿回名额" in mech and "谁在场看见" in mech
     assert "类型：发现" in text and "信息差" in text
     assert not any("黄金三章" in x for x in chapter_task_lines({}, 9))
 
@@ -211,7 +216,7 @@ def test_rule_packs_parse_and_new_sections_loaded() -> None:
     assert "节奏账本" in packs["outline"].body and "爽点三拍" in packs["chapter_plan"].body
     assert any("oh-story" in s.repo for s in packs["humanize"].sources)
     assert all(s.license for p in packs.values() for s in p.sources)
-    assert "章末断在变化发生的那一刻" in system_prompt("writing_scene")
+    assert "章末停在事件进行中" in system_prompt("writing_chapter") and "读者账本" in packs["chapter_plan"].body
     rv = render("review", number=1, chapter_plan="{}", content="正文", context="底账X")
     assert "底账X" in rv and "$" not in rv
     ex = render("expand", book_context="", node_level="arc", node_title="", node_summary="", siblings="", recent="",

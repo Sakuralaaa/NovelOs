@@ -554,6 +554,51 @@ def mock_writing_scene(meta: dict[str, Any]) -> str:
     return text
 
 
+def mock_writing_chapter(meta: dict[str, Any]) -> str:
+    """v0.17 整章一次写：按段落安排逐段拼（复用逐场景的 mock 文本），只输出正文。"""
+    scenes = list(meta.get("scenes") or (meta.get("beats") or {}).get("scenes") or []) or [{}, {}, {}]
+    total = len(scenes)
+    words = int(meta.get("words") or 2200)
+    parts = []
+    for i, sc in enumerate(scenes, 1):
+        out = mock_writing_scene({**meta, "scene": sc, "scene_index": i, "scene_total": total,
+                                  "scene_words": max(300, words // total), "include_changes": False})
+        parts.append(out.split("---STATE---")[0].strip())
+    return "\n\n".join(parts)
+
+
+def mock_chapter_state(meta: dict[str, Any]) -> str:
+    """v0.17 从正文抽状态：主角与对手站位、道具沿用上一章；变更声明按细纲给。"""
+    beats = meta.get("beats") or {}
+    p = meta.get("protagonist") or "林照"
+    number = int(meta.get("number") or 1)
+    chars = [c for c in beats.get("characters") or [] if c != p]
+    a = meta.get("villain") or (chars[0] if chars else "那人")
+    loc = beats.get("location") or "屋里"
+    item = meta.get("item") or "那样东西"
+    prev = meta.get("prev_state") or {}
+    props = list(prev.get("props") or []) or [{"name": item, "where": f"{p}怀里", "state": "完好"}]
+    outcome = beats.get("outcome") or "yes"
+    state = {"cast": [{"name": p, "position": f"{loc}里，门边", "facing": f"面朝{a}", "holding": [f"{item}（怀里）"], "wearing": "旧外套",
+                       "body": {"no-and": "后脑挨了一下，发晕", "yes-but": "手背划了道口子"}.get(outcome, "无伤")},
+                      {"name": a, "position": f"{loc}里，桌边", "facing": f"面朝{p}", "holding": [], "wearing": "", "body": ""}],
+             "props": props, "env": "雨还没停"}
+    changes: dict[str, Any] = {"new_entities": [], "state_changes": [], "foreshadow": []}
+    if number == 2:
+        changes["new_entities"].append({"type": "character", "name": "斗笠客", "summary": "人群后冲主角点头的神秘人，身份未知。"})
+    changes["state_changes"].append({"entity": p, "key": "处境", "value": {
+        "yes": "占了上风", "no": "吃了闭门羹", "yes-but": "得手但付出代价", "no-and": "受伤落入下风"}.get(outcome, "局面未定"), "visibility": "reader"})
+    for f in beats.get("foreshadow") or []:
+        changes["foreshadow"].append({"action": f.get("action"), "id": f.get("id"), "desc": f.get("desc")})
+    return _j({"state": state, "changes": changes})
+
+
+def mock_pairwise(meta: dict[str, Any]) -> str:
+    """v0.17 成对比较：字数多的那版赢（正反两次结论一致），模拟“更想点下一章”。"""
+    a, b = str(meta.get("a") or ""), str(meta.get("b") or "")
+    return _j({"winner": "A" if len(a) >= len(b) else "B", "reason": "开头更快进事，结尾停在动作上"})
+
+
 # ---------------------------------------------------------------- 审稿 / 重写 / 精修 / 摘要
 
 def _sentences(content: str) -> list[str]:
@@ -1190,6 +1235,9 @@ HANDLERS = {
     "expand": mock_expand,
     "scene_plan": mock_scene_plan,
     "writing_scene": mock_writing_scene,
+    "writing_chapter": mock_writing_chapter,
+    "chapter_state": mock_chapter_state,
+    "pairwise": mock_pairwise,
     "review": mock_review,
     "humanize": mock_humanize,
     "thicken": mock_thicken,

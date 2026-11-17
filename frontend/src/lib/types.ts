@@ -379,7 +379,11 @@ export interface Review {
   issues: ReviewIssue[]
   passed: boolean
   /** v0.8.4：读者视角打分（0–10）与一句读后感 */
-  reader?: { score: number | null; verdict: string }
+  reader?: { score: number | null; verdict: string; want?: string; waiting?: string; next?: string; drop?: string }
+  /** v0.17 多候选成对比较记录 */
+  pairwise?: { winner: number; reason: string; rounds: { a: number; b: number; winner: number; reason: string }[] } | null
+  /** v0.17 一键成书自愈记录 */
+  heal?: { rounds: number; exhausted?: boolean; at?: string } | null
   /** v0.9：审稿补丁（逐字替换）与应用记录 */
   patches?: ReviewPatch[]
   patch_log?: PatchLogEntry[]
@@ -450,10 +454,14 @@ export interface ChapterVariant {
   words: number
   lint: Lint | null
   review_overall: number | null
+  /** v0.17 多候选：成对比较选中的为 true，落选为 false，没比较过为 null */
+  picked?: boolean | null
 }
 
 export interface Style {
   sample_text: string
+  /** v0.17 文风基准（600–1000 字的正文样例，写作时照这个语感写） */
+  baseline: string
   voice_notes: string
   pov: 'first' | 'third'
   tone: string
@@ -905,7 +913,7 @@ export interface WanbenPlanResult {
   warnings: string[]; chapter_words: number; target_words: number
 }
 export type BatchStatus = 'running' | 'done' | 'stopped' | 'paused' | 'failed'
-export type BatchStopReason = '' | 'refine_pending' | 'pending_chapter' | 'review_failed' | 'awaiting_adopt' | 'paused' | 'target_reached' | 'error'
+export type BatchStopReason = '' | 'refine_pending' | 'pending_chapter' | 'review_failed' | 'awaiting_adopt' | 'paused' | 'target_reached' | 'error' | 'needs_review'
 export interface BatchConsistency { kind: 'name' | 'number' | 'power' | 'continuity' | string; severity: 'high' | 'mid' | 'low' | string; quote: string; comment: string }
 export interface BatchChapterCheck {
   number: number; chapter_id: number; title: string; status: string; in_refine: boolean
@@ -1072,7 +1080,7 @@ export interface AutoSettings {
   max_cost_cny: number
 }
 export interface AutoEvent { at: string; kind: string; text: string }
-export interface AutoFlag { chapter_id: number; number: number; title: string; reason: string; at: string; resolved: boolean }
+export interface AutoFlag { chapter_id: number; number: number; title: string; reason: string; at: string; resolved: boolean; blocking?: boolean }
 export interface AutoGuidance { text: string; from_chapter: number; to_chapter: number | null; source: string; at: string }
 export type AutoRunStatus = 'running' | 'waiting' | 'paused' | 'stopped' | 'done'
 export interface AutoRun {
@@ -1083,7 +1091,7 @@ export interface AutoRun {
   message: string
   job_id: number | null
   settings: AutoSettings
-  stats: Partial<Record<'healed' | 'forced' | 'retries' | 'llm_failures' | 'volumes_reviewed', number>>
+  stats: Partial<Record<'healed' | 'forced' | 'needs_review' | 'retries' | 'llm_failures' | 'volumes_reviewed', number>>
   events: AutoEvent[]
   flags: AutoFlag[]
   flags_total: number

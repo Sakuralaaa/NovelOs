@@ -9,7 +9,7 @@ from pathlib import Path
 from string import Template
 
 _ROOT = Path(__file__).parent
-STAGES = ("ideation", "bible", "outline", "chapter_plan", "writing", "review", "humanize", "package", "trend_report")
+STAGES = ("ideation", "bible", "outline", "chapter_plan", "writing", "craft_check", "review", "humanize", "package", "trend_report")
 
 # 各任务挂载哪些规则包（system 提示词）
 TASK_SKILLS: dict[str, tuple[str, ...]] = {
@@ -21,10 +21,13 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "outline": ("outline", "chapter_plan"),
     "expand": ("outline", "chapter_plan"),
     "scene_plan": ("chapter_plan",),
-    "writing_scene": ("writing",),
-    "review": ("review",),
+    "writing_chapter": ("writing",),   # v0.17 整章一次写：写手只读正面写法
+    "writing_scene": ("writing",),     # 旧任务名（v0.16 及以前逐场景写），保留给提示词覆盖与测试
+    "chapter_state": (),               # v0.17 写完后从正文抽状态账本与变更声明
+    "pairwise": (),                    # v0.17 两版候选成对比较
+    "review": ("review", "craft_check"),
     "reader": (),
-    "humanize": ("humanize",),
+    "humanize": ("humanize", "craft_check"),
     "thicken": ("humanize", "writing"),
     "summary": (),
     "package": ("package",),
@@ -37,7 +40,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "bible_propose": ("bible",),
     "outline_node": ("outline",),
     "outline_sync": ("outline",),
-    "chapter_rewrite": ("writing", "humanize"),
+    "chapter_rewrite": ("writing",),
     "foreshadow_plan": ("outline",),
     "teardown": (),
     "teardown_deep": (),
@@ -185,6 +188,12 @@ SYSTEM_BASE = (
     "你是一位熟悉番茄小说读者口味的中文网文作者兼编辑。"
     "严格遵守下列规则；要求输出 JSON 时只输出 JSON，不加解释、不加代码块标记。"
 )
+# v0.17：写正文的任务用这一句开头，避免「只输出 JSON」和「输出正文」打架
+PROSE_BASE = (
+    "你是一位熟悉番茄小说读者口味的中文网文作者。"
+    "照下面的写法写小说正文，输出的就是可以直接发布的正文。"
+)
+PROSE_TASKS = ("writing_chapter", "writing_scene", "chapter_rewrite", "polish_voice")
 
 
 # v0.9 平台风格档：规则包里用 <!-- platform:fanqie --> … <!-- /platform --> 包住只对某个平台生效的小节
@@ -211,7 +220,7 @@ def platform_filter(body: str, platform: str | None) -> str:
 
 
 def system_prompt(task: str, extra: str = "", platform: str | None = None) -> str:
-    parts = [SYSTEM_BASE]
+    parts = [PROSE_BASE if task in PROSE_TASKS else SYSTEM_BASE]
     stages = TASK_SKILLS.get(task, ())
     for stage in stages:
         parts.append(platform_filter(load_pack(stage).body, platform))

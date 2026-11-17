@@ -20,7 +20,7 @@ from app.config import LintThresholds
 from app.lint.banned_zh import BANNED_PATTERNS, DESCRIPTOR_WORDS, ENDING_SUMMARY_PATTERNS, SUMMARY_MARKERS, WEAK_ADVERBS
 from app.lint.platform import get_profile
 from app.lint.craft_zh import (
-    CATCHPHRASE_MAX, CLICHE_SIMILES, CROWD_MARKERS, CROWD_REACTIONS, CROWD_SHOTS_MAX, DIALOGUE_TIC_MAX, DIALOGUE_TICS,
+    CATCHPHRASE_MAX, HABIT_MAX, CLICHE_SIMILES, CROWD_MARKERS, CROWD_REACTIONS, CROWD_SHOTS_MAX, DIALOGUE_TIC_MAX, DIALOGUE_TICS,
     INTENSIFIER_MIN_ALLOW, INTENSIFIER_PER_K, INTENSIFIERS, MEASURE_RULES,
 )
 
@@ -417,6 +417,42 @@ def catchphrase_report(text: str, catchphrases: dict[str, list[str]] | None, max
     return out
 
 
+_HABIT_SENT = re.compile(r"[^。！？!?\n]+[。！？!?]?")
+
+
+def _cjk_grams(text: str) -> set[str]:
+    out: set[str] = set()
+    for run in re.findall(r"[\u4e00-\u9fff]+", text or ""):
+        out.update(run[i:i + 2] for i in range(len(run) - 1))
+    return out
+
+
+def habit_report(text: str, habits: dict[str, list[str]] | None, max_n: int = HABIT_MAX) -> list[dict[str, Any]]:
+    """v0.17 人物卡习惯动作在本章出现的次数。短习惯（≤6 字）按原文计；长习惯按句子比对：
+    句子里有这个习惯七成以上的字、三成五以上的二字词就算一次（“摩挲腕上那条旧疤”≈“摩挲着腕上旧疤”）。
+    超过 max_n 记 over，quotes 是命中的句子。"""
+    out: list[dict[str, Any]] = []
+    sents = [m.group(0).strip() for m in _HABIT_SENT.finditer(text or "") if m.group(0).strip()]
+    for who, items in (habits or {}).items():
+        for h in items or []:
+            key = re.sub(r"[，,。！？!?、…\s“”\"（）()]+", "", str(h))
+            if len(key) < 2:
+                continue
+            if len(key) <= 6:
+                quotes = [x for x in sents if key in x]
+            else:
+                g = _cjk_grams(key)
+                chars = set(re.findall(r"[\u4e00-\u9fff]", key))
+                if not g or not chars:
+                    continue
+                quotes = [x for x in sents if len(g & _cjk_grams(x)) / len(g) >= 0.35
+                          and len(chars & set(x)) / len(chars) >= 0.7]
+            if quotes:
+                out.append({"who": who, "word": str(h)[:30], "count": len(quotes), "over": len(quotes) > max_n,
+                            "allow": max_n, "quotes": quotes})
+    return out
+
+
 def craft_fix_targets(text: str, intens: list[dict[str, Any]], cliches: list[dict[str, Any]],
                       measures: list[dict[str, str]], tics: list[dict[str, Any]], cps: list[dict[str, Any]],
                       tic_max: int = DIALOGUE_TIC_MAX, cp_max: int = CATCHPHRASE_MAX) -> list[dict[str, str]]:
@@ -480,6 +516,7 @@ class LintResult:
     crowd_paragraphs: list[int] = field(default_factory=list)
     dialogue_tics: list[dict[str, Any]] = field(default_factory=list)
     catchphrases: list[dict[str, Any]] = field(default_factory=list)
+    habits: list[dict[str, Any]] = field(default_factory=list)  # v0.17 习惯动作计数
     fix_targets: list[dict[str, str]] = field(default_factory=list)
     # v0.9 平台风格档
     platform: str = "generic"
@@ -511,6 +548,7 @@ class LintResult:
             "crowd_shots": self.crowd_shots,
             "dialogue_tics": self.dialogue_tics,
             "catchphrases": self.catchphrases,
+            "habits": [{k: v for k, v in d.items() if k != "quotes"} for d in self.habits],
             "fix_targets": self.fix_targets,
             "platform": self.platform,
             "long_paragraphs": len(self.long_paragraphs),
@@ -522,6 +560,7 @@ class LintResult:
         """需要定点修的手艺类问题数（超频强化词、陈词比喻、量词错、口癖/口头禅超频、群众镜头超限）。"""
         return (sum(1 for d in self.intensifiers if d.get("over")) + len(self.cliche_similes) + len(self.measure_errors)
                 + sum(1 for d in self.dialogue_tics if d.get("over")) + sum(1 for d in self.catchphrases if d.get("over"))
+                + sum(1 for d in self.habits if d.get("over"))
                 + (1 if self.crowd_shots > self.crowd_max else 0) + (1 if self.long_para_flagged else 0)
                 + len(self.numeric_issues))
 
@@ -550,6 +589,7 @@ def lint_chapter(
     catchphrases: dict[str, list[str]] | None = None,
     platform: str | None = None,
     ledger: Sequence[dict[str, Any]] | None = None,
+    habits: dict[str, list[str]] | None = None,
 ) -> LintResult:
     """platform：v0.9 平台风格档（fanqie / qidian / generic），按档调阈值；不传按 generic（原有阈值）。
     ledger：v0.9.4 数值一致性对照用的设定/账本条目 [{entity, key, value, source}]（可省略，只查同章）。"""
@@ -585,6 +625,12 @@ def lint_chapter(
     tics = dialogue_tic_report(text, prof.dialogue_tic_max)
     cps = catchphrase_report(text, catchphrases, prof.catchphrase_max)
     targets = craft_fix_targets(text, intens, cliches, measures, tics, cps, prof.dialogue_tic_max, prof.catchphrase_max)
+    habs = habit_report(text, habits, getattr(prof, "habit_max", HABIT_MAX))
+    for d in habs:
+        if d["over"]:
+            for q in d["quotes"][int(d["allow"]):][:4]:
+                targets.append({"kind": "习惯动作重复", "word": d["word"], "quote": q,
+                                "hint": f"{d['who']}的习惯动作「{d['word']}」本章 {d['count']} 次（上限 {d['allow']}），这一处删掉或换成推动局面的动作"})
     from app.lint.numeric_zh import numeric_consistency
 
     numeric = numeric_consistency(text, exclude_names, ledger)
@@ -629,7 +675,7 @@ def lint_chapter(
         s_extra += 3
     # v0.6 手艺类（合计至多 10 分）：超频强化词、陈词比喻、量词错、口癖/口头禅超频、群众镜头超限
     s_craft = (min(4, sum(1 for d in intens if d["over"])) + min(3, len(cliches)) + min(2, len(measures))
-               + min(2, sum(1 for d in [*tics, *cps] if d["over"])) + (1 if len(crowd) > prof.crowd_shots_max else 0)
+               + min(2, sum(1 for d in [*tics, *cps, *habs] if d["over"])) + (1 if len(crowd) > prof.crowd_shots_max else 0)
                + (min(3, len(long_paras) // 2) if long_flag else 0) + min(2, len(numeric)))
     s_extra += min(10, s_craft)
     ai_score = round(
@@ -699,7 +745,11 @@ def lint_chapter(
     if over_t:
         warnings.append("口头禅/句末口癖超频：" + "、".join(
             (f"{d['who']}「{d['word']}」×{d['count']}" if "who" in d else f"「{d['word']}」×{d['count']}") for d in over_t)
-            + "（每章最多 1–2 次）")
+            + f"（每章最多 {prof.catchphrase_max} 次）")
+    over_h = [d for d in habs if d["over"]]
+    if over_h:
+        warnings.append("习惯动作超频：" + "、".join(f"{d['who']}「{d['word']}」×{d['count']}" for d in over_h)
+                        + f"（同一个每章最多 {over_h[0]['allow']} 次），多出来的删掉或换成推动局面的动作")
     if chapter_number is not None and chapter_number <= 3:
         for p in paras:
             if count_words(p) > th.first3_monologue_chars and not _DIALOGUE.search(p):
@@ -732,6 +782,7 @@ def lint_chapter(
         crowd_paragraphs=crowd,
         dialogue_tics=tics,
         catchphrases=cps,
+        habits=habs,
         fix_targets=targets,
         platform=prof.name,
         long_paragraphs=long_paras,

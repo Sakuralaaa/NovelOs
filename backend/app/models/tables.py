@@ -278,6 +278,8 @@ class Package(SQLModel, table=True):
 class Style(SQLModel, table=True):
     book_id: int = Field(primary_key=True)
     sample_text: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    # v0.17 文风基准：一段 600–1000 字的正文，写作时放在 system 末尾「照这个语感写」；为空时第 1 章定稿后自动回填
+    baseline: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
     voice_notes: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
     pov: str = "third"
     tone: str = ""
@@ -404,7 +406,7 @@ class JobCheckpoint(SQLModel, table=True):
     job_id: int = Field(primary_key=True)
     kind: str = ""
     book_id: Optional[int] = Field(default=None, index=True)
-    stage: str = ""  # 最后完成的步骤名，如 scenes / scene:1:3 / variant:1 / chapter / refined / patched / committed
+    stage: str = ""  # 最后完成的步骤名，如 scenes / draft:1（v0.17 整章正文）/ variant:1 / chapter / refined / patched / committed
     state: Optional[dict[str, Any]] = _json_dict_nullable()
     resumes: int = 0  # 已续跑次数
     updated_at: datetime = Field(default_factory=utcnow)

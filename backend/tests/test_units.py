@@ -162,7 +162,7 @@ def test_context_pack_relevance_filter(client: TestClient) -> None:
     rel = {c.name for c in pack.relevant_cards}
     assert prot in rel and "老码头七号仓" in rel and "铜扣账本" in rel
     assert "无关路人丙" not in rel and "无关路人丙" not in pack.suffix
-    assert "风格卡" in pack.prefix and pack.prefix.index("正文写作规则") < pack.prefix.index("【本书】")
+    assert "风格卡" in pack.prefix and pack.prefix.index("正文写法") < pack.prefix.index("【本书】")
 
 
 def test_thicken_rejects_new_facts(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:

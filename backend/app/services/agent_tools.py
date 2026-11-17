@@ -222,7 +222,7 @@ def t_list_foreshadows(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
 def t_get_style(c: ToolCtx, a: dict[str, Any]) -> ToolResult:
     with session_scope() as s:
         st = common.get_style(s, c.book_id)
-        d = {"pov": st.pov, "tone": st.tone, "voice_notes": st.voice_notes, "sample_excerpt": _clip(st.sample_text, 800),
+        d = {"pov": st.pov, "tone": st.tone, "voice_notes": st.voice_notes, "sample_excerpt": _clip(st.sample_text, 800), "baseline_excerpt": _clip(st.baseline or "", 800),
              "extracted": st.extracted}
     return ToolResult(d, "读取文风卡" + ("" if st.sample_text else "（还没有范文）"))
 

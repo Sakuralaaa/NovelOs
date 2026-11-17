@@ -668,7 +668,9 @@ def batch_job(book_id: int, ctx: JobContext, force: bool = False, resume: dict[s
     return result
 
 
-def _run_one_batch(book_id: int, ctx: JobContext, state: dict[str, Any]) -> dict[str, Any]:
+def _run_one_batch(book_id: int, ctx: JobContext, state: dict[str, Any], on_chapter: Any = None) -> dict[str, Any]:
+    """写一批。v0.17：on_chapter(result) 由一键成书传入，每章写完没提交时马上调用（按章自愈），
+    返回 "committed" 就接着写下一章，否则本批停下（reason=needs_review），不在整批写完后回头重写。"""
     force = bool(state.get("force"))
     with session_scope() as s:
         book = common.get_book(s, book_id)
@@ -761,6 +763,13 @@ def _run_one_batch(book_id: int, ctx: JobContext, state: dict[str, Any]) -> dict
             if r.get("committed"):
                 continue
             num = r.get("number") or nxt
+            if on_chapter is not None and r.get("chapter_id"):
+                verdict = on_chapter(r)
+                if verdict == "committed":
+                    continue
+                msg = f"第{num}章自动修了 2 轮还没过审，待你看"
+                return {"stopped": True, "reason": "needs_review", "message": msg, "chapter_id": r.get("chapter_id"),
+                        "batch": _finish_batch(batch_id, "stopped", "needs_review", msg, refine)}
             if r.get("awaiting_approval"):
                 if pause_refine:
                     msg = f"第{num}章在精修范围内，已写好等待审批；审批后继续连写"
@@ -904,41 +913,44 @@ def _delta(a: Any, b: Any) -> Any:
 
 
 def _issues_instruction(review: dict[str, Any], user_ins: str) -> str:
+    """审稿问题 + 读者意见（读后感、弃读点、三问、划走点）拼成重写指令。"""
     lines = []
     for it in (review or {}).get("issues") or []:
         if it.get("severity") in ("high", "mid"):
             lines.append(f"- [{it.get('severity')}/{it.get('dimension')}] 「{str(it.get('quote') or '')[:60]}」：{it.get('comment', '')}")
     reader = (review or {}).get("reader") or {}
-    for k in ("drop_points", "complaints", "comment", "summary"):
+    rl: list[str] = []
+    if isinstance(reader.get("score"), int):
+        rl.append(f"- 读者分 {reader['score']}/10" + (f"，读后感：{str(reader.get('verdict') or '').strip()[:160]}" if reader.get("verdict") else ""))
+    elif str(reader.get("verdict") or "").strip():
+        rl.append(f"- 读后感：{str(reader['verdict']).strip()[:160]}")
+    if reader.get("drop"):
+        rl.append(f"- 读到这句想弃：「{str(reader['drop'])[:80]}」")
+    want = str(reader.get("want") or "").strip()
+    rl.append(f"- 主角这章想要什么：{want}" if want else "- 读者说不出主角这章想要什么：让主角主动去争一样看得见的东西")
+    if reader.get("waiting"):
+        rl.append(f"- 读者在等：{str(reader['waiting'])[:100]}（这一章要推进或兑现它）")
+    nxt = str(reader.get("next") or "").strip()
+    rl.append(f"- 最后一句之后读者想知道：{nxt}" if nxt else "- 最后一句没让读者想知道后面：章末停在事件进行中或一句话上")
+    for k in ("drop_points", "complaints", "comment", "summary"):  # 旧版读者字段
         v = reader.get(k)
         if isinstance(v, list):
-            lines += [f"- 读者：{str(x)[:100]}" for x in v[:4]]
+            rl += [f"- 读者：{str(x)[:100]}" for x in v[:4]]
         elif isinstance(v, str) and v.strip():
-            lines.append(f"- 读者：{v.strip()[:160]}")
-    ins = "按下列审稿与读者审读问题修改本章，保留情节与人名设定：\n" + ("\n".join(lines[:12]) or "- 整体提升追读欲与画面感")
+            rl.append(f"- 读者：{v.strip()[:160]}")
+    ins = "按下列审稿问题和读者意见修改本章，情节走向、人名和设定保持不变，字数和原文相当：\n" + ("\n".join(lines[:12]) or "- 整体提升追读欲与画面感")
+    if reader:
+        ins += "\n读者意见：\n" + "\n".join(rl[:10])
     if user_ins.strip():
         ins += "\n作者额外要求：" + user_ins.strip()
     return ins
 
 
 def _rewrite_full(chapter_id: int, content: str, instruction: str, route: str | None) -> str:
-    """整章重写（同 writing.rewrite_chapter_job 的整章分支，但以本轮的底稿为输入、不读库里的正文）。"""
-    with session_scope() as s:
-        ch = s.get(Chapter, chapter_id)
-        assert ch is not None
-        pack, meta, plan = writing._pack_for_chapter(s, ch)  # noqa: SLF001
-        number = ch.number
-    voices = "\n".join(f"- {n}：{v.get('voice', '')}；口头禅：{'、'.join(v.get('catchphrases') or [])}" for n, v in pack.voices.items()) or "（未设定）"
-    user = render("chapter_rewrite", number=number, scope_label="（全章）", chapter_plan=plan, voices=voices, context="",
-                  text=content, instruction=instruction)
-    out = get_gateway().chat(
-        "chapter_rewrite", [{"role": "system", "content": system_prompt("chapter_rewrite", platform=meta.get("platform"))},
-                            {"role": "user", "content": user}],
-        meta={**meta, "text": content, "instruction": instruction, "scope": "chapter"}, temperature=0.8, route=route,
-    )
-    new = writing.normalize_paragraphs(writing._clean_rewrite(out))  # noqa: SLF001
+    """整章重写（v0.17：带完整上下文，同写新章）。疑似截断（不到原文 30%）时当作没改，由调用方换定点修。"""
+    new = writing.rewrite_full(chapter_id, content, instruction, route)
     if not new.strip() or len(new) < 0.3 * len(content):
-        return content  # 疑似截断：本轮当作没改，由调用方换定点修
+        return content
     return new
 
 

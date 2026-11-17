@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle, CheckCheck, ChevronLeft, Feather, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3, Gauge, ShieldCheck, Zap,
+  AlertTriangle, CheckCheck, Layers, ChevronLeft, Feather, CloudCheck, CloudUpload, Loader2, PanelRightClose, PanelRightOpen, PenLine, RotateCcw, RotateCw, Sparkles, Trash2, Type, Wand2, AlertCircle, Copy, Rows3, Gauge, ShieldCheck, Zap,
 } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -141,6 +141,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
   const [showAigc, setShowAigc] = useState(false)
   const [rwOpen, setRwOpen] = useState(false)
   const [rwSel, setRwSel] = useState<{ start: number; end: number; text: string } | null>(null)
+  const [candOpen, setCandOpen] = useState(false)
   const [confirmUndo, setConfirmUndo] = useState(false)
 
   const scroller = useRef<HTMLDivElement>(null)
@@ -528,6 +529,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                 onTitle={(t) => edit({ title: t })} onLocate={locateQuote} onRewrite={(ins) => openRewrite(ins)}
                 onFormat={() => { void v013Api.format(content).then((r) => { if (!r.changed) { toast.info('排版已经是规范的'); return } edit({ content: r.text }); toast.success('已规范排版', { description: r.notes.join('；') }) }) }} />
               <Tip content={serif ? '切换为黑体' : '切换为宋体'}><Button size="icon-sm" variant="ghost" className={TBI} onClick={() => { setSerif(!serif); localStorage.setItem('novelos-serif', serif ? '0' : '1') }} aria-label="字体"><Type className="h-4 w-4" /></Button></Tip>
+              {!hasVariants && variants.length > 1 && <Tip content="当时写的几版候选稿"><Button size="sm" variant="ghost" className={TB} disabled={busy || !!diff} onClick={() => setCandOpen(true)} icon={<Layers className="h-3.5 w-3.5" />}>候选稿</Button></Tip>}
               {!!ch.history && !hasVariants && <Tip content={`撤回到「${ch.last_history_label || '上一版'}」的正文（共 ${ch.history} 个旧版本）`}><Button size="icon-sm" variant="ghost" className={TBI} disabled={busy || !!diff} onClick={() => setConfirmUndo(true)} aria-label="撤回"><RotateCcw className="h-4 w-4" /></Button></Tip>}
               <ToolSep />
               {book && <ApprovalToggle book={book} disabled={busy || !!diff} />}
@@ -548,6 +550,12 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <DialogContent title="撤回到上一版正文？" desc={`恢复「${ch.last_history_label || '上一版'}」时的正文，之后的修改会丢掉。`}
               footer={<><Button variant="ghost" onClick={() => setConfirmUndo(false)}>取消</Button><Button variant="primary" loading={undoMut.isPending} onClick={() => undoMut.mutate()}>撤回</Button></>} />
           </Dialog>
+          <CandidatesDialog open={candOpen} onOpenChange={setCandOpen} variants={variants} reason={ch.review?.pairwise?.reason}
+            current={content} busy={busy || !!diff} onUse={(v) => {
+              setCandOpen(false)
+              autoReviewRef.current = false
+              setDiff({ title: `换成第 ${v.id} 版 · 逐段对比，确定后才写入`, before: content, after: v.content, kind: 'rewrite', label: `换成候选稿第 ${v.id} 版前` })
+            }} />
           <RewriteDialog open={rwOpen} onOpenChange={setRwOpen} selection={rwSel} committed={ch.status === 'committed'} onSubmit={runCustomRewrite} seed={rwSeed} />
           <Dialog open={confirmDel} onOpenChange={setConfirmDel}>
             <DialogContent title={`删除第 ${ch.number} 章草稿？`} desc="大纲会保留，之后可以重新写这一章。"
@@ -732,4 +740,33 @@ function SaveIndicator({ state, at }: { state: 'saved' | 'dirty' | 'saving' | 'e
 function normWarnings(w: unknown): string[] {
   if (!Array.isArray(w)) return []
   return w.map((x) => (typeof x === 'string' ? x : x && typeof x === 'object' ? String((x as any).message ?? (x as any).text ?? JSON.stringify(x)) : String(x))).filter(Boolean)
+}
+
+/** v0.17 候选稿：开篇第 1 章和大爽点章写了 2 版，成对比较选了一版；落选的在这里看，也可以换成它 */
+function CandidatesDialog({ open, onOpenChange, variants, reason, current, busy, onUse }: {
+  open: boolean; onOpenChange: (v: boolean) => void; variants: ChapterVariant[]; reason?: string; current: string; busy: boolean
+  onUse: (v: ChapterVariant) => void
+}) {
+  const [sel, setSel] = useState<number | null>(null)
+  const cur = variants.find((v) => v.id === sel) ?? variants.find((v) => v.picked === false) ?? variants[0]
+  if (!cur) return null
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent wide title="候选稿" desc={reason || undefined}
+        footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>关闭</Button>
+          <Button variant="primary" disabled={busy || cur.content === current} onClick={() => onUse(cur)}>换成这一版</Button></>}>
+        <div className="flex flex-wrap gap-1.5">
+          {variants.map((v) => (
+            <button key={v.id} onClick={() => setSel(v.id)} className={cn('flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] transition',
+              v.id === cur.id ? 'border-primary bg-primary-soft text-primary' : 'text-muted-foreground hover:text-foreground')}>
+              第 {v.id} 版<span className="num">{fmtNum(v.words)} 字</span>
+              {v.picked === true && <Badge tone="success">入选</Badge>}
+              {v.picked === false && <Badge tone="neutral">落选</Badge>}
+            </button>
+          ))}
+        </div>
+        <div className="prose-zh mt-3 max-h-[52vh] overflow-y-auto whitespace-pre-wrap rounded-lg bg-subtle p-3 font-serif text-[14px] leading-[1.9]">{cur.content}</div>
+      </DialogContent>
+    </Dialog>
+  )
 }

@@ -807,6 +807,10 @@ def put_style(book_id: int, body: StyleIn, s: Session = Depends(get_session)) ->
     if st.sample_text != body.sample_text:
         st.extracted = None  # 范文变了，旧的提炼结果作废
     st.sample_text, st.voice_notes, st.pov, st.tone = body.sample_text, body.voice_notes, body.pov, body.tone
+    if body.baseline is not None:
+        if count_words(body.baseline) > style_svc.BASELINE_LIMIT:
+            raise HTTPException(400, f"文风基准不超过 {style_svc.BASELINE_LIMIT} 字（当前 {count_words(body.baseline)} 字）")
+        st.baseline = body.baseline.strip()
     s.add(st)
     s.commit()
     s.refresh(st)

@@ -110,7 +110,9 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     for k in ("avg_sentence_len", "short_sentence_ratio", "bare_dialogue_ratio", "summary_ratio", "ai_score"):
         assert isinstance(lint[k], (int, float))
     assert lint["avg_sentence_len"] > 10
-    assert len(ch1["variants"]) == 1
+    # v0.17 开篇第 1 章写 2 版，成对比较选优，落选版留在章节版本里
+    assert len(ch1["variants"]) == 2 and r.get("pairwise") and ch1["review"].get("pairwise")
+    assert sum(1 for v in ch1["variants"] if v.get("picked")) == 1
     assert "林" in ch1["content"] or ch1["content"]
 
     j = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-batch", json={"count": 2}).json(), timeout=180)

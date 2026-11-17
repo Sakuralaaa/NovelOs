@@ -186,7 +186,7 @@ function seedDemo() {
     chosen_cover: coverDataUrl('我在末世开超市', 1),
   })
   db.styles.set(bookId, {
-    sample_text: STYLE_SAMPLE, voice_notes: '冷峻克制，多用动作代替心理描写；对白短，前后要有动作或环境。', pov: 'third', tone: '冷峻写实',
+    sample_text: STYLE_SAMPLE, baseline: STYLE_SAMPLE.slice(0, 800), voice_notes: '冷峻克制，多用动作代替心理描写；对白短，前后要有动作或环境。', pov: 'third', tone: '冷峻写实',
     extracted: null,
   })
 
@@ -835,8 +835,8 @@ on('POST', '/books/:id/covers/delete', (m, body) => { const id = +m[1]; const p 
 on('GET', '/books/:id/package', (m) => pkgOf(+m[1]))
 on('PUT', '/books/:id/package', (m, b) => { const p = { ...pkgOf(+m[1]), ...b }; db.packages.set(+m[1], p); if (b.chosen_cover) bookOf(m[1]).cover_url = b.chosen_cover; return p })
 
-on('GET', '/books/:id/style', (m) => db.styles.get(+m[1]) ?? { sample_text: '', voice_notes: '', pov: 'third', tone: '', extracted: null })
-on('PUT', '/books/:id/style', (m, b) => { const s = { ...(db.styles.get(+m[1]) ?? { sample_text: '', voice_notes: '', pov: 'third', tone: '', extracted: null }), ...b }; db.styles.set(+m[1], s); return s })
+on('GET', '/books/:id/style', (m) => db.styles.get(+m[1]) ?? { sample_text: '', baseline: '', voice_notes: '', pov: 'third', tone: '', extracted: null })
+on('PUT', '/books/:id/style', (m, b) => { const s = { ...(db.styles.get(+m[1]) ?? { sample_text: '', baseline: '', voice_notes: '', pov: 'third', tone: '', extracted: null }), ...b }; db.styles.set(+m[1], s); return s })
 on('POST', '/books/:id/style/extract', (m) => { const b = bookOf(m[1]); return createJob('style_extract', b.id, 3000, ['切句与分段…', '统计句长分布…', '分析描写密度与对话写法…'], () => {
   const s = db.styles.get(b.id)
   if (!s?.sample_text) throw new Error('请先粘贴范文')

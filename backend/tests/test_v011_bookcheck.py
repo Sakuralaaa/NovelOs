@@ -190,9 +190,9 @@ def test_duanju_platform_style(client: TestClient) -> None:
     assert client.get(f"/api/books/{bid}").json()["platform_style"] == "duanju"
     assert client.patch(f"/api/books/{bid}", json={"platform_style": "fanqie"}).json()["platform_style"] == "fanqie"
     assert client.patch(f"/api/books/{bid}", json={"platform_style": "duanju"}).json()["platform_style"] == "duanju"
-    p = system_prompt("writing_scene", platform="duanju")
-    assert "短剧分镜" in p and "前 100 字" in p and "本书按【番茄】档写" in p and "本书按【起点】档写" not in p
-    assert "短剧分镜写法" not in system_prompt("writing_scene", platform="fanqie")
+    p = system_prompt("writing_chapter", platform="duanju")
+    assert "短剧分镜" in p and "前 100 字" in p and "番茄写法" in p and "起点写法" not in p
+    assert "短剧分镜写法" not in system_prompt("writing_chapter", platform="fanqie")
     assert "短剧分镜写法" not in system_prompt("review", platform="duanju")  # 只挂在写作/细纲类任务上
     # 写章上下文按 duanju 档组装
     from app.db import session_scope

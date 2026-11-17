@@ -56,6 +56,9 @@ TASK_ROLE: dict[str, str] = {
     "cover_prompt": "planner",
     "style_extract": "reviewer",
     "writing_scene": "writer",
+    "writing_chapter": "writer",   # v0.17 整章一次写
+    "chapter_state": "planner",    # v0.17 从正文抽状态账本与变更声明
+    "pairwise": "reviewer",        # v0.17 两版候选成对比较
     "humanize": "writer",
     "thicken": "writer",
     "summary": "reviewer",

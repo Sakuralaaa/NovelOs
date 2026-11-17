@@ -34,7 +34,7 @@ export function registerAutoMocks({ on, createJob, bookOf, now, ago, HttpErr }: 
         { at: ago(1440), kind: 'setup', text: '切到完本模式：120 万字，每章约 2000 字' },
       ],
       flags: [
-        { chapter_id: 101, number: 118, title: '夜探城主府', reason: '主角在第 112 章已经知道密道位置，这里又写成第一次发现', at: ago(9), resolved: false },
+        { chapter_id: 101, number: 118, title: '夜探城主府', reason: '主角在第 112 章已经知道密道位置，这里又写成第一次发现', at: ago(9), resolved: false, blocking: true },
         { chapter_id: 102, number: 96, title: '擂台第三场', reason: '审稿没过（读者分偏低）', at: ago(300), resolved: false },
       ],
       flags_total: 3,
@@ -102,6 +102,10 @@ export function registerAutoMocks({ on, createJob, bookOf, now, ago, HttpErr }: 
     return { run_id: r.id, job_id: job.id }
   })
   on('POST', '/books/:id/autopilot/flags/:cid/resolve', (m) => { const r = runs.get(bookOf(m[1]).id); if (r) r.flags = r.flags.filter((f) => f.chapter_id !== +m[2]); return { ok: true } })
+  on('POST', '/books/:id/autopilot/flags/:cid/accept', (m) => {
+    const id = bookOf(m[1]).id
+    return createJob('autopilot_accept', id, 800, ['提交入账'], () => { const r = runs.get(id); if (r) r.flags = r.flags.filter((f) => f.chapter_id !== +m[2]); return { ok: true, chapter_id: +m[2] } })
+  })
   on('GET', '/settings/routing/backup', () => backup)
   on('PUT', '/settings/routing/backup', (_m, b) => Object.assign(backup, b))
   on('POST', '/fanfic/idea/rewrite', (_m, b) => ({

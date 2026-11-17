@@ -566,6 +566,8 @@ export const autoApi = {
   /** 拍板后自动继续：Job（autopilot） */
   answer: (bookId: number, decisionId: number, b: { choice: number | null; custom: string }) => viaJobId(post(`/books/${bookId}/autopilot/decisions/${decisionId}`, b)),
   resolveFlag: (bookId: number, chapterId: number) => post<{ ok: boolean }>(`/books/${bookId}/autopilot/flags/${chapterId}/resolve`),
+  /** v0.17 待你看的章放行：Job（autopilot_accept） */
+  acceptFlag: (bookId: number, chapterId: number) => post<Job>(`/books/${bookId}/autopilot/flags/${chapterId}/accept`),
   fromIdea: (ideaId: number, b?: Partial<AutoSettings>) => post<{ book: Book; run_id: number; job: Job }>(`/ideas/${ideaId}/autopilot`, b ?? {}),
 }
 
