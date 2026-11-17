@@ -3,7 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  AlertTriangle, BookOpenCheck, BookPlus, ChevronLeft, CloudUpload, FileText, Globe2, Loader2, Plus, RotateCcw, Save, Sparkles, Trash,
+  AlertTriangle, BookOpenCheck, BookPlus, ChevronLeft, CloudUpload, FileText, Globe2, Loader2, Plus, RotateCcw, Save, Search, Sparkles, Trash,
 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -12,7 +12,8 @@ import { Segmented } from '@/components/ui/tabs'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { EmptyState, ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
-import { Chips, DEPTHS, Lbl, RemoveBtn, StrList, depthLabel, sourceLabel } from '@/components/fanfic/bits'
+import { Chips, DEPTHS, Lbl, Pager, RemoveBtn, StrList, depthLabel, sourceLabel } from '@/components/fanfic/bits'
+import { Select } from '@/components/ui/select'
 import { TemplatePicker } from '@/components/fanfic/TemplatePicker'
 import { ApiError, fanficApi, fqk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
@@ -41,7 +42,7 @@ export default function FanficPage() {
   // 旧地址：/fanfic、/fanfic/:id、/fanfic?source=
   if (loc.pathname === '/fanfic' || loc.pathname === '/fanfic/') {
     const src = sp.get('source')
-    return <Navigate to={src && /^\d+$/.test(src) ? `/fanfic/sources/${src}` : '/fanfic/search'} replace />
+    return <Navigate to={src && /^\d+$/.test(src) ? `/fanfic/sources/${src}` : '/fanfic/new'} replace />
   }
   if (sid && !loc.pathname.startsWith('/fanfic/sources/')) return <Navigate to={`/fanfic/sources/${sid}`} replace />
   if (sid) return (
@@ -274,8 +275,22 @@ function SourceList() {
 
 // ---------------------------------------------------------------- 设定卡详情
 
+type ViewTab = 'world' | 'characters' | 'timeline' | 'relations'
+const TABS: { value: ViewTab; label: string; parts: SourceCardPart[] }[] = [
+  { value: 'world', label: '世界设定', parts: ['world', 'factions'] }, { value: 'characters', label: '角色档案', parts: ['characters'] },
+  { value: 'timeline', label: '时间线', parts: ['timeline', 'scenes'] }, { value: 'relations', label: '关系索引', parts: [] },
+]
+const PAGE = 12
+const hit = (kw: string, ...xs: (string | string[] | undefined)[]) => !kw || xs.some((x) => (Array.isArray(x) ? x.join(' ') : x ?? '').toLowerCase().includes(kw))
+function usePaged(all: number[], kw: string, size = PAGE) {
+  const [page, setPage] = useState(1)
+  useEffect(() => setPage(1), [kw])
+  const pages = Math.max(1, Math.ceil(all.length / size))
+  const p = Math.min(page, pages)
+  return { idx: all.slice((p - 1) * size, p * size), page: p, pages, setPage }
+}
 const PARTS: { value: SourceCardPart; label: string }[] = [
-  { value: 'characters', label: '角色' }, { value: 'world', label: '世界观' }, { value: 'factions', label: '势力' },
+  { value: 'characters', label: '角色档案' }, { value: 'world', label: '世界设定' }, { value: 'factions', label: '势力' },
   { value: 'timeline', label: '时间线' }, { value: 'scenes', label: '名场面' },
 ]
 const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : [])
@@ -299,14 +314,15 @@ function SourceDetail({ id }: { id: number }) {
   const qc = useQueryClient()
   const nav = useNavigate()
   const q = useQuery({ queryKey: fqk.source(id), queryFn: () => fanficApi.source(id), retry: false })
-  const [tab, setTab] = useState<SourceCardPart>('characters')
+  const [tab, setTab] = useState<ViewTab>('world')
+  const [kw, setKw] = useState('')
   const [draft, setDraft] = useState<SourceCards | null>(null)
   const [title, setTitle] = useState('')
   const [saveWarn, setSaveWarn] = useState<string[]>([])
   const [forceAsk, setForceAsk] = useState<string | null>(null)
   const base = useMemo(() => (q.data ? normCards(q.data.cards) : null), [q.data])
   useEffect(() => { if (q.data) { setDraft(normCards(q.data.cards)); setTitle(q.data.title) } }, [q.data])
-  useEffect(() => { setSaveWarn([]); setTab('characters') }, [id])
+  useEffect(() => { setSaveWarn([]); setTab('world'); setKw('') }, [id])
 
   const dirtyParts = useMemo(() => (draft && base ? PARTS.map((p) => p.value).filter((k) => JSON.stringify(draft[k]) !== JSON.stringify(base[k])) : []), [draft, base])
   const titleDirty = !!q.data && title.trim() !== q.data.title && !!title.trim()
@@ -412,20 +428,35 @@ function SourceDetail({ id }: { id: number }) {
         </ul>
       )}
 
-      <div className="-mx-3 mt-4 overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:px-0">
-        <Segmented value={tab} onChange={setTab} className="h-10" options={PARTS.map((p) => ({
-          value: p.value,
-          label: <span className="inline-flex items-center gap-1">{p.label}{p.value !== 'world' && <span className="num text-[11px] opacity-60">{(draft[p.value] as unknown[]).length}</span>}{dirtyParts.includes(p.value) && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}</span>,
-        }))} />
+      <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2">
+        <div className="-mx-3 min-w-0 overflow-x-auto px-3 [scrollbar-width:none] sm:mx-0 sm:px-0">
+          <Segmented value={tab} onChange={(v) => { setTab(v); setKw('') }} className="h-10" options={TABS.map((t) => {
+            const n = t.value === 'world' ? draft.factions.length + draft.world.locations.length + draft.world.rules.length
+              : t.value === 'characters' ? draft.characters.length : t.value === 'timeline' ? draft.timeline.length + draft.scenes.length
+                : draft.characters.reduce((x, c) => x + c.relations.length, 0)
+            const d = (t.value === 'relations' ? ['characters'] : t.parts).some((k) => dirtyParts.includes(k as SourceCardPart))
+            return { value: t.value, label: <span className="inline-flex items-center gap-1 whitespace-nowrap">{t.label}<span className="num text-[11px] opacity-60">{n}</span>{d && <span className="h-1.5 w-1.5 rounded-full bg-warning" />}</span> }
+          })} />
+        </div>
+        <div className="relative ml-auto min-w-[180px] flex-1 sm:max-w-[260px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={kw} onChange={(e) => setKw(e.target.value)} placeholder={`搜${TABS.find((t) => t.value === tab)!.label}`} className="h-10 pl-8" aria-label="搜索原著资料" />
+        </div>
       </div>
-      <p className="mt-2 text-[11.5px] text-muted-foreground">请用自己的话描述；和原著原文连续 8 字相同的字段会在保存时提醒（不会删掉）。名字与口癖不算。</p>
 
       <div className="mt-3">
-        {tab === 'characters' && <CharactersEdit value={draft.characters} onChange={(v) => set('characters', v)} />}
-        {tab === 'world' && <WorldEdit value={draft.world} onChange={(v) => set('world', v)} />}
-        {tab === 'factions' && <FactionsEdit value={draft.factions} onChange={(v) => set('factions', v)} />}
-        {tab === 'timeline' && <TimelineEdit value={draft.timeline} onChange={(v) => set('timeline', v)} />}
-        {tab === 'scenes' && <ScenesEdit value={draft.scenes} onChange={(v) => set('scenes', v)} />}
+        {tab === 'world' && <>
+          <WorldEdit value={draft.world} kw={kw.trim().toLowerCase()} onChange={(v) => set('world', v)} />
+          <h3 className="mb-2 mt-5 text-[14px] font-semibold">势力</h3>
+          <FactionsEdit value={draft.factions} kw={kw.trim().toLowerCase()} onChange={(v) => set('factions', v)} />
+        </>}
+        {tab === 'characters' && <CharactersEdit value={draft.characters} kw={kw.trim().toLowerCase()} onChange={(v) => set('characters', v)} />}
+        {tab === 'timeline' && <>
+          <TimelineEdit value={draft.timeline} kw={kw.trim().toLowerCase()} onChange={(v) => set('timeline', v)} />
+          <h3 className="mb-2 mt-5 text-[14px] font-semibold">名场面</h3>
+          <ScenesEdit value={draft.scenes} kw={kw.trim().toLowerCase()} onChange={(v) => set('scenes', v)} />
+        </>}
+        {tab === 'relations' && <RelationsEdit value={draft.characters} kw={kw.trim().toLowerCase()} onChange={(v) => set('characters', v)} />}
       </div>
 
       {dirty && (
@@ -458,11 +489,13 @@ const AddBtn = ({ onClick, children }: { onClick: () => void; children: React.Re
 )
 const upd = <T,>(list: T[], i: number, patch: Partial<T>) => list.map((x, k) => (k === i ? { ...x, ...patch } : x))
 
-function CharactersEdit({ value, onChange }: { value: SourceCharacter[]; onChange: (v: SourceCharacter[]) => void }) {
+function CharactersEdit({ value, kw, onChange }: { value: SourceCharacter[]; kw: string; onChange: (v: SourceCharacter[]) => void }) {
   const [open, setOpen] = useState<number | null>(null)
+  const all = value.map((_, i) => i).filter((i) => { const c = value[i]; return hit(kw, c.name, c.aliases, c.role, c.personality, c.abilities, c.notes) })
+  const pg = usePaged(all, kw)
   return (
     <div className="space-y-2">
-      {value.map((c, i) => {
+      {pg.idx.map((i) => { const c = value[i]
         const p = (x: Partial<SourceCharacter>) => onChange(upd(value, i, x))
         const isOpen = open === i
         return (
@@ -510,27 +543,31 @@ function CharactersEdit({ value, onChange }: { value: SourceCharacter[]; onChang
           </Box>
         )
       })}
-      {value.length < 30 && <AddBtn onClick={() => { onChange([...value, { name: '', aliases: [], role: '', personality: '', speech_style: '', catchphrases: [], relations: [], abilities: [], limits: [], notes: '' }]); setOpen(value.length) }}>添加角色</AddBtn>}
+      <Pager page={pg.page} pages={pg.pages} onChange={pg.setPage} />
+      {kw && !all.length && <p className="py-4 text-center text-[12.5px] text-muted-foreground">没有匹配的角色</p>}
+      {value.length < 60 && !kw && <AddBtn onClick={() => { onChange([...value, { name: '', aliases: [], role: '', personality: '', speech_style: '', catchphrases: [], relations: [], abilities: [], limits: [], notes: '' }]); setOpen(value.length); pg.setPage(Math.ceil((value.length + 1) / PAGE)) }}>添加角色</AddBtn>}
       {!value.length && <p className="text-center text-[12.5px] text-muted-foreground">没有提炼出角色</p>}
     </div>
   )
 }
 
-function WorldEdit({ value, onChange }: { value: SourceCards['world']; onChange: (v: SourceCards['world']) => void }) {
+function WorldEdit({ value, kw, onChange }: { value: SourceCards['world']; kw: string; onChange: (v: SourceCards['world']) => void }) {
+  const locs = value.locations.map((_, i) => i).filter((i) => hit(kw, value.locations[i].name, value.locations[i].desc))
   return (
     <div className="space-y-3">
-      <Box><Lbl hint={`${value.summary.length}/400`}>世界观概述</Lbl><Textarea rows={4} value={value.summary} onChange={(e) => onChange({ ...value, summary: e.target.value.slice(0, 400) })} /></Box>
-      <Box><Lbl hint="最多 12 条，每条 ≤80 字">规则</Lbl><StrList max={12} value={value.rules} onChange={(v) => onChange({ ...value, rules: v.map((x) => x.slice(0, 80)) })} addLabel="添加规则" /></Box>
+      {kw && <Box><Lbl>匹配的规则</Lbl>{value.rules.filter((r) => hit(kw, r)).map((r, i) => <p key={i} className="py-1 text-[13px]">{r}</p>)}{!value.rules.some((r) => hit(kw, r)) && <p className="text-[12.5px] text-muted-foreground">无</p>}</Box>}
+      {!kw && <Box><Lbl hint={`${value.summary.length}/400`}>世界观概述</Lbl><Textarea rows={4} value={value.summary} onChange={(e) => onChange({ ...value, summary: e.target.value.slice(0, 400) })} /></Box>}
+      {!kw && <Box><Lbl hint="最多 12 条，每条 ≤80 字">规则</Lbl><StrList max={12} value={value.rules} onChange={(v) => onChange({ ...value, rules: v.map((x) => x.slice(0, 80)) })} addLabel="添加规则" /></Box>}
       <Box>
         <Lbl>地点</Lbl>
         <div className="space-y-2">
-          {value.locations.map((l, i) => (
+          {locs.map((i) => { const l = value.locations[i]; return (
             <div key={i} className="flex min-w-0 flex-wrap items-start gap-1.5 sm:flex-nowrap">
               <Input className="h-10 min-w-0 flex-1 sm:w-[30%] sm:flex-none" placeholder="地名" value={l.name} onChange={(e) => onChange({ ...value, locations: upd(value.locations, i, { name: e.target.value }) })} />
               <Input className="h-10 min-w-0 flex-[2] basis-[60%]" placeholder="描述" value={l.desc} onChange={(e) => onChange({ ...value, locations: upd(value.locations, i, { desc: e.target.value }) })} />
               <RemoveBtn onClick={() => onChange({ ...value, locations: value.locations.filter((_, k) => k !== i) })} />
             </div>
-          ))}
+          ) })}
           <button type="button" onClick={() => onChange({ ...value, locations: [...value.locations, { name: '', desc: '' }] })} className="focus-ring inline-flex h-10 items-center gap-1 rounded-md px-2 text-[13px] text-primary hover:bg-primary-soft/60"><Plus className="h-3.5 w-3.5" />添加地点</button>
         </div>
       </Box>
@@ -538,10 +575,12 @@ function WorldEdit({ value, onChange }: { value: SourceCards['world']; onChange:
   )
 }
 
-function FactionsEdit({ value, onChange }: { value: SourceFaction[]; onChange: (v: SourceFaction[]) => void }) {
+function FactionsEdit({ value, kw, onChange }: { value: SourceFaction[]; kw: string; onChange: (v: SourceFaction[]) => void }) {
+  const all = value.map((_, i) => i).filter((i) => hit(kw, value[i].name, value[i].stance, value[i].members, value[i].notes))
+  const pg = usePaged(all, kw)
   return (
     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
-      {value.map((f, i) => {
+      {pg.idx.map((i) => { const f = value[i]
         const p = (x: Partial<SourceFaction>) => onChange(upd(value, i, x))
         return (
           <Box key={i} className="space-y-2">
@@ -555,15 +594,18 @@ function FactionsEdit({ value, onChange }: { value: SourceFaction[]; onChange: (
           </Box>
         )
       })}
-      <div className="col-span-full"><AddBtn onClick={() => onChange([...value, { name: '', stance: '', members: [], notes: '' }])}>添加势力</AddBtn></div>
+      <div className="col-span-full"><Pager page={pg.page} pages={pg.pages} onChange={pg.setPage} /></div>
+      {!kw && <div className="col-span-full"><AddBtn onClick={() => { onChange([...value, { name: '', stance: '', members: [], notes: '' }]); pg.setPage(Math.ceil((value.length + 1) / PAGE)) }}>添加势力</AddBtn></div>}
     </div>
   )
 }
 
-function TimelineEdit({ value, onChange }: { value: SourceTimelineItem[]; onChange: (v: SourceTimelineItem[]) => void }) {
+function TimelineEdit({ value, kw, onChange }: { value: SourceTimelineItem[]; kw: string; onChange: (v: SourceTimelineItem[]) => void }) {
+  const all = value.map((_, i) => i).filter((i) => hit(kw, value[i].event, value[i].characters, value[i].impact))
+  const pg = usePaged(all, kw, 20)
   return (
     <div className="space-y-2">
-      {value.map((t, i) => {
+      {pg.idx.map((i) => { const t = value[i]
         const p = (x: Partial<SourceTimelineItem>) => onChange(upd(value, i, x))
         return (
           <Box key={i} className="space-y-2">
@@ -577,18 +619,22 @@ function TimelineEdit({ value, onChange }: { value: SourceTimelineItem[]; onChan
           </Box>
         )
       })}
-      {value.length < 60 && <AddBtn onClick={() => onChange([...value, { order: (value.at(-1)?.order ?? 0) + 1, event: '', characters: [], impact: '' }])}>添加事件</AddBtn>}
-      {value.length > 1 && (
+      <Pager page={pg.page} pages={pg.pages} onChange={pg.setPage} />
+      {kw && !all.length && <p className="py-4 text-center text-[12.5px] text-muted-foreground">没有匹配的事件</p>}
+      {value.length < 120 && !kw && <AddBtn onClick={() => { onChange([...value, { order: (value.at(-1)?.order ?? 0) + 1, event: '', characters: [], impact: '' }]); pg.setPage(Math.ceil((value.length + 1) / 20)) }}>添加事件</AddBtn>}
+      {value.length > 1 && !kw && (
         <Button variant="ghost" className="h-10 w-full" onClick={() => onChange([...value].sort((a, b) => a.order - b.order))}>按顺序号重新排序</Button>
       )}
     </div>
   )
 }
 
-function ScenesEdit({ value, onChange }: { value: SourceScene[]; onChange: (v: SourceScene[]) => void }) {
+function ScenesEdit({ value, kw, onChange }: { value: SourceScene[]; kw: string; onChange: (v: SourceScene[]) => void }) {
+  const all = value.map((_, i) => i).filter((i) => hit(kw, value[i].title, value[i].summary, value[i].characters))
+  const pg = usePaged(all, kw)
   return (
     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
-      {value.map((s, i) => {
+      {pg.idx.map((i) => { const s = value[i]
         const p = (x: Partial<SourceScene>) => onChange(upd(value, i, x))
         return (
           <Box key={i} className="space-y-2">
@@ -601,8 +647,50 @@ function ScenesEdit({ value, onChange }: { value: SourceScene[]; onChange: (v: S
           </Box>
         )
       })}
-      {value.length < 30 && <div className="col-span-full"><AddBtn onClick={() => onChange([...value, { title: '', summary: '', characters: [] }])}>添加名场面</AddBtn></div>}
+      <div className="col-span-full"><Pager page={pg.page} pages={pg.pages} onChange={pg.setPage} /></div>
+      {value.length < 30 && !kw && <div className="col-span-full"><AddBtn onClick={() => { onChange([...value, { title: '', summary: '', characters: [] }]); pg.setPage(Math.ceil((value.length + 1) / PAGE)) }}>添加名场面</AddBtn></div>}
     </div>
   )
 }
 
+
+/** v0.14.0 关系索引：把各角色的关系摊平成「谁 — 关系 — 谁」一张表，改动写回对应角色 */
+function RelationsEdit({ value, kw, onChange }: { value: SourceCharacter[]; kw: string; onChange: (v: SourceCharacter[]) => void }) {
+  const rows = value.flatMap((c, ci) => c.relations.map((r, ri) => ({ ci, ri, from: c.name, ...r })))
+  const all = rows.map((_, i) => i).filter((i) => hit(kw, rows[i].from, rows[i].target, rows[i].relation))
+  const pg = usePaged(all, kw, 30)
+  const [adder, setAdder] = useState<string | null>(null)
+  const setRel = (ci: number, ri: number, patch: Partial<{ target: string; relation: string }>) =>
+    onChange(upd(value, ci, { relations: upd(value[ci].relations, ri, patch) }))
+  const move = (ci: number, ri: number, to: number) => {
+    if (to === ci || to < 0) return
+    const r = value[ci].relations[ri]
+    onChange(value.map((c, k) => (k === ci ? { ...c, relations: c.relations.filter((_, j) => j !== ri) } : k === to ? { ...c, relations: [...c.relations, r] } : c)))
+  }
+  const names = value.map((c, i) => ({ value: String(i), label: c.name || `未命名 #${i + 1}` }))
+  if (!value.length) return <p className="py-6 text-center text-[12.5px] text-muted-foreground">还没有角色，先在角色档案里添加</p>
+  return (
+    <div className="space-y-1.5">
+      {pg.idx.map((i) => {
+        const r = rows[i]
+        return (
+          <div key={`${r.ci}-${r.ri}`} className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl border bg-surface p-2 sm:flex-nowrap">
+            <Select value={String(r.ci)} onChange={(v) => v != null && move(r.ci, r.ri, Number(v))} className="h-10 w-full sm:w-[28%]" options={names} />
+            <Input className="h-10 min-w-0 flex-1" placeholder="关系，如：师徒、宿敌" value={r.relation} onChange={(e) => setRel(r.ci, r.ri, { relation: e.target.value })} />
+            <Input className="h-10 min-w-0 flex-1 sm:w-[28%] sm:flex-none" placeholder="对象" value={r.target} onChange={(e) => setRel(r.ci, r.ri, { target: e.target.value })} />
+            <RemoveBtn onClick={() => onChange(upd(value, r.ci, { relations: value[r.ci].relations.filter((_, j) => j !== r.ri) }))} />
+          </div>
+        )
+      })}
+      <Pager page={pg.page} pages={pg.pages} onChange={pg.setPage} />
+      {!all.length && <p className="py-4 text-center text-[12.5px] text-muted-foreground">{kw ? '没有匹配的关系' : '还没有关系条目'}</p>}
+      {!kw && (
+        <div className="flex min-w-0 items-center gap-1.5 pt-1">
+          <Select value={adder} onChange={(v) => setAdder(v)} placeholder="选一个角色" className="h-10 min-w-0 flex-1" options={names} />
+          <Button variant="soft" className="h-10 shrink-0" icon={<Plus className="h-4 w-4" />} disabled={adder == null}
+            onClick={() => { const ci = Number(adder); onChange(upd(value, ci, { relations: [...value[ci].relations, { target: '', relation: '' }] })); pg.setPage(Math.ceil((rows.length + 1) / 30)) }}>添加关系</Button>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, BookOpenCheck, BookPlus, Check, ChevronLeft, CloudUpload, Download, Layers, ShieldCheck, UserCircle } from '@/components/icons'
+import { AlertTriangle, ArrowRight, BookOpenCheck, BookPlus, Check, CloudUpload, Download, Globe2, Layers, Search, ShieldCheck, Sparkles, UserCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Field, Input, Textarea } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -12,9 +12,9 @@ import { Skeleton } from '@/components/ui/misc'
 import { Segmented } from '@/components/ui/tabs'
 import { Select } from '@/components/ui/select'
 import { ErrorState } from '@/components/common/States'
-import { FIDELITY_FALLBACK, Lbl, sourceLabel } from '@/components/fanfic/bits'
+import { FIDELITY_FALLBACK, IDEAS, Lbl, sourceLabel } from '@/components/fanfic/bits'
 import { fanficApi, fqk, qk } from '@/lib/api'
-import type { Book, FanficDirectionId, FanficFidelity, FanficImportPart, FanficOcType, FanficPov, FanficProtagonist, FanficTemplateStyle, Gender } from '@/lib/types'
+import type { Book, FanficDirection, FanficDirectionId, FanficSourceBrief, FanficTemplate, FanficFidelity, FanficImportPart, FanficOcType, FanficPov, FanficProtagonist, Gender } from '@/lib/types'
 import { GENRES_FEMALE, GENRES_MALE, cn } from '@/lib/utils'
 
 const IMPORT_PARTS: { value: FanficImportPart; label: string; desc: string }[] = [
@@ -48,56 +48,54 @@ export default function FanficNewPage() {
   const pre = Number(sp.get('source')) || 0
   const sources = useQuery({ queryKey: fqk.sources, queryFn: fanficApi.sources })
   const cat = useQuery({ queryKey: fqk.directions, queryFn: fanficApi.directions, staleTime: 3600_000 })
+  const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000 })
   const [f, setF] = useState<Draft>(() => ({ ...loadDraft(), ...(pre ? { sourceId: pre } : {}) }))
   const up = (p: Partial<Draft>) => setF((x) => ({ ...x, ...p }))
   useEffect(() => { localStorage.setItem(DRAFT_KEY, JSON.stringify(f)) }, [f])
-  const [stepN, setStepN] = useState(1)
   const [ack, setAck] = useState(false)
   const [created, setCreated] = useState<Book | null>(null)
   const { sourceId, extra, direction, fidelity, notes } = f
 
-  useEffect(() => { if (!sourceId && sources.data?.length && !pre) up({ sourceId: sources.data[0].id }) }, [sources.data, sourceId, pre])
   const src = sources.data?.find((s) => s.id === sourceId) ?? null
-  const detail = useQuery({ queryKey: fqk.source(sourceId), queryFn: () => fanficApi.source(sourceId), enabled: !!sourceId })
+  const detail = useQuery({ queryKey: fqk.source(sourceId), queryFn: () => fanficApi.source(sourceId), enabled: !!src })
   const timeline = detail.data?.cards.timeline ?? []
   const canonChars = detail.data?.cards.characters ?? []
-  const tq = useQuery({ queryKey: fqk.templates, queryFn: fanficApi.templates, staleTime: 600_000, enabled: !!src?.template_id })
   const tpl = (src?.template_id && tq.data?.templates.find((t) => t.id === src.template_id)) || null
-  const styleLine = (st: FanficTemplateStyle) => `【写法】${st.label}：${st.desc}`
-  const styleOn = (st: FanficTemplateStyle) => notes.split('\n').includes(styleLine(st))
-  const toggleStyle = (st: FanficTemplateStyle) => {
-    const line = styleLine(st)
-    if (styleOn(st)) { up({ notes: notes.split('\n').filter((x) => x !== line).join('\n') }); return }
-    up({ notes: (notes.trim() ? `${notes.replace(/\s+$/, '')}\n${line}` : line).slice(0, 1000) })
-    if (!direction) pickDir(st.direction)
-  }
   const dirs = cat.data?.directions ?? []
   const fids = cat.data?.fidelities?.length ? cat.data.fidelities : FIDELITY_FALLBACK
   const povs = cat.data?.povs?.length ? cat.data.povs : POV_FALLBACK
   const ocTypes = cat.data?.oc_types?.length ? cat.data.oc_types : OC_FALLBACK
   const dir = dirs.find((d) => d.id === direction) ?? null
+  const workName = src?.title || '原著'
   const pickDir = (id: FanficDirectionId) => {
     const d = dirs.find((x) => x.id === id)
-    setF((x) => ({ ...x, direction: id, slots: x.direction === id ? x.slots : {}, ...(d && !x.fidTouched ? { fidelity: d.suggested_fidelity } : {}),
+    setF((x) => ({ ...x, direction: id, slots: {}, ...(d && !x.fidTouched ? { fidelity: d.suggested_fidelity } : {}),
       ...(['transmigration', 'multi_transmigration', 'system'].includes(id) && x.prot.source === 'canon' && !x.prot.canon_name ? { prot: { source: 'oc', oc_type: 'transmigrator' } } : {}) }))
   }
+  /** 点想法/方向：把成型文字接到想法框末尾（已在框里就不重复加），并选上方向 */
+  const addIdea = (text: string, id: FanficDirectionId) => {
+    pickDir(id)
+    setF((x) => x.premise.includes(text) ? x : ({ ...x, premise: x.premise.trim() ? `${x.premise.replace(/\s+$/, '')}\n\n${text}` : text }))
+  }
+  const ideaText = (t: string) => t.replace(/原著/g, workName)
+  const dirText = (d: FanficDirection) => (d.template || d.desc).replace(/[（(][^）)]*[）)]/g, '').replace(/：；/g, '：……；').replace(/：$/, '：……')
+
   const volumes = Math.max(1, Math.ceil(f.chapters / Math.max(5, f.perVolume)))
   const totalWords = f.chapters * f.chapterWords
   const missing = useMemo(() => {
     const m: string[] = []
     if (!src) m.push('选原著')
-    if (!direction) m.push('选方向')
+    if (!direction) m.push('选一个创作方向')
     if (!ack) m.push('勾选版权声明')
     return m
   }, [src, direction, ack])
-  const slotText = dir?.slots?.length ? dir.slots.filter((x) => f.slots[x.key]?.trim()).map((x) => `${x.label}：${f.slots[x.key].trim()}`).join('；') : ''
 
   const create = useMutation({
     mutationFn: () => fanficApi.createBook({
       title: f.title.trim() || undefined, genre: f.genre.trim() || '同人', gender: f.gender,
-      premise: [f.premise.trim(), slotText].filter(Boolean).join('\n') || undefined,
+      premise: f.premise.trim() || undefined,
       fanfic: { source_id: sourceId, direction: direction!, fidelity, extra_source_ids: extra.filter((x) => x !== sourceId).slice(0, 9), notes: notes.trim().slice(0, 1000),
-        protagonist: f.prot, pov: f.pov, slots: f.slots },
+        protagonist: f.prot, pov: f.pov, slots: {} },
       copyright_ack: ack, target_words: totalWords, chapter_words: f.chapterWords, mode: f.wanben ? 'wanben' : 'serial', volume_chapters: f.perVolume,
     }),
     meta: { errorTitle: '建书失败' },
@@ -121,11 +119,9 @@ export default function FanficNewPage() {
 
   if (created) return <Created book={created} oc={f.prot.source === 'oc'} onOpen={() => nav(`/books/${created.id}`)} />
 
-  const STEP_NAMES = ['选原著', '创作想法', '确认设置']
   return (
     <div className="page max-w-[960px] !pb-0">
-      <Link to={pre ? `/fanfic/sources/${pre}` : '/fanfic/sources'} className="focus-ring -ml-1 inline-flex h-10 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" />同人</Link>
-      <div className="mt-1 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h1 className="flex items-center gap-2 text-[22px] font-semibold tracking-tight"><BookPlus className="h-5 w-5 text-primary" />建同人书</h1>
         <div className="ml-auto flex gap-1">
           <Button size="sm" variant="ghost" icon={<Download className="h-3.5 w-3.5" />} onClick={exportDraft}>导出草稿</Button>
@@ -133,227 +129,215 @@ export default function FanficNewPage() {
           <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => { importDraft(e.target.files?.[0]); e.target.value = '' }} />
         </div>
       </div>
-      <ol className="mt-4 flex items-center gap-1 overflow-x-auto pb-1 [scrollbar-width:none]">
-        {STEP_NAMES.map((s2, i) => {
-          const n = i + 1, on = n === stepN, ok = n === 1 || (n === 2 && !!src) || (n === 3 && !!src && !!direction)
-          return (
-            <li key={s2} className="flex shrink-0 items-center gap-1">
-              {i > 0 && <span className={cn('h-px w-4 sm:w-8', ok ? 'bg-primary/40' : 'bg-border')} />}
-              <button type="button" disabled={!ok || on} onClick={() => setStepN(n)}
-                className={cn('flex h-10 items-center gap-2 rounded-full pl-1.5 pr-3.5 text-[13px] font-medium transition disabled:cursor-default', on ? 'bg-foreground text-background' : ok ? 'bg-surface hairline hover:bg-subtle' : 'text-muted-foreground/60')}>
-                <span className={cn('num flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-semibold', on ? 'bg-background/15' : n < stepN ? 'bg-primary text-primary-foreground' : 'bg-muted')}>{n < stepN ? <Check className="h-3.5 w-3.5" /> : n}</span>{s2}
-              </button>
-            </li>
-          )
-        })}
-      </ol>
 
-      {stepN === 1 && (
-        <Step n={1} title="选原著" done={!!src}>
-          {sources.isLoading ? <Skeleton className="h-10 rounded-md" /> : sources.isError ? <ErrorState error={sources.error} onRetry={() => sources.refetch()} /> : !sources.data?.length ? (
-            <p className="rounded-xl border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">还没有原著资料。<Link to="/fanfic/search" className="text-primary underline-offset-2 hover:underline">先去导入一份 →</Link></p>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <Lbl>主原著</Lbl>
-                <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))]">
-                  {sources.data.map((s2) => (
-                    <button key={s2.id} type="button" onClick={() => up({ sourceId: s2.id, extra: extra.filter((x) => x !== s2.id) })}
-                      className={cn('min-h-[72px] min-w-0 rounded-xl border bg-surface p-3 text-left transition', sourceId === s2.id ? 'border-primary bg-primary-soft/40 ring-2 ring-primary/15' : 'hover:border-foreground/20')}>
-                      <span className="flex items-center gap-1.5"><span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{s2.title || `原著 #${s2.id}`}</span>{sourceId === s2.id && <Check className="h-4 w-4 text-primary" />}</span>
-                      <span className="num mt-1 block text-[12px] text-muted-foreground">{sourceLabel(s2)} · {s2.counts.characters} 角色 · 完整度 {s2.completeness}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {sources.data.length > 1 && (
-                <div>
-                  <Lbl hint="最多 9 部">融合原著</Lbl>
-                  <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))]">
-                    {sources.data.filter((s2) => s2.id !== sourceId).map((s2) => {
-                      const on = extra.includes(s2.id)
-                      return (
-                        <button key={s2.id} type="button" onClick={() => up({ extra: on ? extra.filter((y) => y !== s2.id) : extra.length >= 9 ? extra : [...extra, s2.id] })}
-                          className={cn('flex min-h-[48px] min-w-0 items-center gap-2 rounded-xl border bg-surface px-3 text-left transition', on ? 'border-primary bg-primary-soft/40' : 'hover:border-foreground/20')}>
-                          <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/25')}>{on && <Check className="h-3 w-3" />}</span>
-                          <span className="min-w-0 flex-1 truncate text-[13.5px]">{s2.title}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              {src && <Link to={`/fanfic/sources/${src.id}`} className="inline-flex h-10 items-center text-[13px] text-primary underline-offset-2 hover:underline">查看/修改设定卡</Link>}
-            </div>
-          )}
-        </Step>
-      )}
-
-      {stepN === 2 && (
-        <>
-          <Step n={2} title="创作方向" done={!!direction}>
-            {tpl && (
-              <div className="mb-3 rounded-xl border bg-surface p-3" data-testid="template-styles">
-                <div className="text-[13.5px] font-semibold">《{tpl.title}》常见同人写法</div>
-                <div className="mt-2 grid gap-1.5 grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))]">
-                  {tpl.styles.map((st) => {
-                    const on = styleOn(st)
-                    const dl = dirs.find((d) => d.id === st.direction)?.label ?? st.direction
-                    return (
-                      <button key={st.label} type="button" aria-pressed={on} onClick={() => toggleStyle(st)}
-                        className={cn('focus-ring flex min-h-[56px] min-w-0 items-start gap-2 rounded-lg border px-2.5 py-2 text-left transition', on ? 'border-primary bg-primary-soft/40' : 'hover:border-foreground/20')}>
-                        <span className={cn('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/25')}>{on && <Check className="h-3 w-3" />}</span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex min-w-0 items-center gap-1.5"><span className={cn('min-w-0 truncate text-[13px] font-semibold', on && 'text-primary')}>{st.label}</span>
-                            <span className="ml-auto shrink-0 whitespace-nowrap rounded bg-muted px-1.5 text-[10.5px] leading-[17px] text-muted-foreground">{dl}</span></span>
-                          <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{st.desc}</span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            {cat.isLoading ? <Skeleton className="h-40 rounded-xl" /> : cat.isError ? <ErrorState error={cat.error} onRetry={() => cat.refetch()} /> : (
-              <>
-                <div className="flex flex-wrap gap-1.5">
-                  {dirs.map((d) => {
-                    const on = direction === d.id
-                    return (
-                      <button key={d.id} type="button" onClick={() => pickDir(d.id)} aria-pressed={on} title={d.desc}
-                        className={cn('inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[13px] transition', on ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>
-                        {d.label}{tpl?.directions.includes(d.id) && <span className="rounded bg-primary-soft px-1 text-[10.5px] text-primary">推荐</span>}
-                      </button>
-                    )
-                  })}
-                </div>
-                {dir && (
-                  <div className="mt-3 space-y-3 rounded-xl border bg-surface p-3.5">
-                    <p className="text-[13px] text-foreground/80">{dir.desc}</p>
-                    {!!dir.slots?.length && (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {dir.slots.map((x) => (
-                          <Field key={x.key} label={x.label}><Input className="h-10" value={f.slots[x.key] ?? ''} placeholder={x.placeholder || '可不填'} onChange={(e) => up({ slots: { ...f.slots, [x.key]: e.target.value } })} /></Field>
-                        ))}
-                      </div>
-                    )}
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <ul className="space-y-1 text-[12.5px] leading-relaxed">{dir.tips.map((t, i) => <li key={i} className="flex gap-1.5"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" /><span className="min-w-0 break-words">{t}</span></li>)}</ul>
-                      <ul className="space-y-1 text-[12.5px] leading-relaxed text-warning">{dir.risks.map((t, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{t}</span></li>)}</ul>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </Step>
-          <Step n={3} title="主角" done={f.prot.source === 'canon' ? !!f.prot.canon_name : true}>
-            <div className="space-y-3 rounded-xl border bg-surface p-3.5">
-              <Segmented value={f.prot.source} onChange={(v) => up({ prot: v === 'oc' ? { source: 'oc', oc_type: 'transmigrator' } : { source: 'canon' } })}
-                options={[{ value: 'canon', label: '原著角色' }, { value: 'oc', label: '原创主角' }]} />
-              {f.prot.source === 'canon' ? (
-                <Field label="哪个原著角色">
-                  <Select value={f.prot.canon_name || null} onChange={(v) => up({ prot: { ...f.prot, canon_name: v || '' } })} placeholder="选择角色" className="h-10"
-                    options={canonChars.map((c) => ({ value: c.name, label: c.role ? `${c.name}（${c.role}）` : c.name }))} />
-                </Field>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-1.5">
-                    {ocTypes.map((o) => <button key={o.id} type="button" onClick={() => up({ prot: { ...f.prot, oc_type: o.id } })}
-                      className={cn('inline-flex h-9 items-center rounded-full border px-3 text-[13px]', f.prot.oc_type === o.id ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>{o.label}</button>)}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Field label="名字"><Input className="h-10" value={f.prot.name ?? ''} onChange={(e) => up({ prot: { ...f.prot, name: e.target.value } })} placeholder="可不填" /></Field>
-                    {f.prot.oc_type === 'soul_swap' && (
-                      <Field label="魂穿到谁身上">
-                        <Select value={f.prot.canon_name || null} onChange={(v) => up({ prot: { ...f.prot, canon_name: v || '' } })} placeholder="选择原著角色" className="h-10"
-                          options={canonChars.map((c) => ({ value: c.name, label: c.name }))} />
-                      </Field>
-                    )}
-                  </div>
-                  <Field label="描述"><Textarea rows={2} value={f.prot.brief ?? ''} onChange={(e) => up({ prot: { ...f.prot, brief: e.target.value } })} placeholder="可不填，建书后 AI 按原著补全" /></Field>
-                </>
-              )}
-              <Field label="切入时间点">
-                <Select value={f.prot.entry_event || null} onChange={(v) => up({ prot: { ...f.prot, entry_event: v || '' } })} placeholder={timeline.length ? '选原著时间线上的节点' : '原著资料没有时间线'} className="h-10"
-                  options={timeline.map((t) => ({ value: t.event, label: `${t.order}. ${t.event}` }))} />
-              </Field>
-            </div>
-          </Step>
-          <Step n={4} title="简介与补充" done={!!f.premise.trim()}>
-            <div className="space-y-3">
-              <Textarea rows={3} value={f.premise} onChange={(e) => up({ premise: e.target.value })} placeholder="一句话简介，或你想写的故事" />
-              <div><Lbl hint={`${notes.length}/1000`}>作者补充</Lbl>
-                <Textarea rows={3} value={notes} onChange={(e) => up({ notes: e.target.value.slice(0, 1000) })} placeholder="如：CP 固定为 A×B；不写原著第二卷之后的剧情" /></div>
-            </div>
-          </Step>
-        </>
-      )}
-
-      {stepN === 3 && (
-        <>
-          <Step n={1} title="遵循度" done>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {fids.map((x) => {
-                const on = fidelity === x.id
-                return (
-                  <button key={x.id} type="button" aria-pressed={on} onClick={() => up({ fidelity: x.id, fidTouched: true })}
-                    className={cn('focus-ring min-h-[72px] min-w-0 rounded-xl border bg-surface p-3 text-left transition', on ? 'border-primary bg-primary-soft/40' : 'hover:border-foreground/20')}>
-                    <span className="flex items-center gap-1.5"><span className={cn('text-[14px] font-semibold', on && 'text-primary')}>{x.label}</span>{on && <Check className="h-4 w-4 text-primary" />}
-                      <span className="num ml-auto text-[11.5px] text-muted-foreground">OOC 通过线 {x.pass_score}</span></span>
-                    <span className="mt-1 block text-[12.5px] leading-relaxed text-muted-foreground">{x.desc}</span>
-                  </button>
-                )
+      <Step n={1} title="原著" done={!!src}>
+        <SourcePicker sources={sources.data ?? []} loading={sources.isLoading} templates={tq.data?.templates ?? []} canSearch={tq.data ? tq.data.search.available : true}
+          selected={sourceId} onSelect={(id) => { const t = sources.data?.find((s2) => s2.id === id)?.title; setF((x) => ({ ...x, sourceId: id, extra: x.extra.filter((y) => y !== id), premise: t ? x.premise.replace(/《原著》/g, `《${t}》`) : x.premise })) }} />
+        {src && (sources.data?.length ?? 0) > 1 && (
+          <details className="mt-2 rounded-xl border bg-surface px-3 py-1.5">
+            <summary className="flex min-h-[36px] cursor-pointer items-center text-[13px] text-foreground/80">融合其他原著{extra.length > 0 && <span className="num ml-1 text-primary">（已选 {extra.length}）</span>}</summary>
+            <div className="flex flex-wrap gap-1.5 pb-2 pt-1">
+              {sources.data!.filter((s2) => s2.id !== sourceId).map((s2) => {
+                const on = extra.includes(s2.id)
+                return <button key={s2.id} type="button" aria-pressed={on} onClick={() => up({ extra: on ? extra.filter((y) => y !== s2.id) : extra.length >= 9 ? extra : [...extra, s2.id] })}
+                  className={cn('inline-flex h-9 max-w-full items-center gap-1 rounded-full border px-3 text-[13px]', on ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>
+                  {on && <Check className="h-3.5 w-3.5 shrink-0" />}<span className="truncate">{s2.title}</span></button>
               })}
             </div>
-          </Step>
-          <Step n={2} title="视角与篇幅" done>
-            <div className="space-y-4 rounded-xl border bg-surface p-3.5">
-              <div className="flex flex-wrap gap-1.5">
-                {povs.map((x) => <button key={x.id} type="button" onClick={() => up({ pov: x.id })}
-                  className={cn('inline-flex h-9 items-center rounded-full border px-3 text-[13px]', f.pov === x.id ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>{x.label}</button>)}
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="每章字数"><Segmented block value={String(f.chapterWords)} onChange={(v) => up({ chapterWords: Number(v) })} options={[2000, 3000, 5000, 8000].map((n) => ({ value: String(n), label: String(n) }))} /></Field>
-                <Field label="总章数"><Input type="number" min={10} max={5000} className="h-10 num" value={f.chapters} onChange={(e) => up({ chapters: Math.max(1, Number(e.target.value) || 0) })} /></Field>
-                <Field label="每卷章数"><Input type="number" min={5} max={500} className="h-10 num" value={f.perVolume} onChange={(e) => up({ perVolume: Math.max(5, Number(e.target.value) || 0) })} /></Field>
-              </div>
-              <div className="num flex flex-wrap gap-2 text-[12.5px]">
-                <span className="rounded-full bg-subtle px-3 py-1">{volumes} 卷</span>
-                <span className="rounded-full bg-subtle px-3 py-1">约 {(totalWords / 10000).toFixed(totalWords >= 1_000_000 ? 0 : 1)} 万字</span>
-              </div>
-              <label className="flex min-h-[44px] cursor-pointer items-center justify-between gap-3 text-[13.5px] font-medium">完本模式<Switch checked={f.wanben} onCheckedChange={(v) => up({ wanben: v })} /></label>
-            </div>
-          </Step>
-          <Step n={3} title="书名" done={!!f.title.trim()}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2"><Input className="h-10" value={f.title} onChange={(e) => up({ title: e.target.value })} placeholder={src ? `如：${src.title}之……` : '书名'} /></div>
-              <Segmented block value={f.gender} onChange={(g) => up({ gender: g })} className="h-10" options={[{ value: 'male', label: '男频' }, { value: 'female', label: '女频' }]} />
-              <Select value={f.genre} onChange={(v) => up({ genre: v || '同人' })} className="h-10" options={['同人', ...(f.gender === 'male' ? GENRES_MALE : GENRES_FEMALE)].map((g) => ({ value: g, label: g }))} />
-            </div>
-          </Step>
-          <Step n={4} title="版权声明" done={ack}>
-            <div className="rounded-xl border bg-surface p-3.5">
-              <p className="flex gap-2 text-[13px] leading-relaxed text-foreground/85"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span className="min-w-0 break-words">{cat.data?.copyright_notice ?? '同人创作仅供个人创作与学习交流使用，对外发布前请自行确认原著授权范围，不得用于商业用途。'}</span></p>
-              <label className="mt-3 flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-lg bg-subtle px-3">
-                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="h-5 w-5 shrink-0 accent-[hsl(var(--primary))]" />
-                <span className="text-[13.5px] font-medium">我已阅读并同意以上声明</span>
-              </label>
-            </div>
-          </Step>
-        </>
-      )}
+          </details>
+        )}
+      </Step>
 
-      <div className="sticky bottom-0 z-20 -mx-5 mt-8 border-t bg-background/95 backdrop-blur md:-mx-10">
-        <div className="flex items-center gap-3 px-5 py-2.5 md:px-10">
-          {stepN > 1 && <Button variant="ghost" className="h-11" onClick={() => setStepN(stepN - 1)}>上一步</Button>}
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{stepN === 3 ? (missing.length ? `还差：${missing.join('、')}` : '可以创建了') : ''}</span>
-          {stepN < 3 ? (
-            <Button variant="primary" className="h-11 shrink-0" disabled={stepN === 1 ? !src : !direction} icon={<ArrowRight className="h-4 w-4" />} onClick={() => setStepN(stepN + 1)}>下一步</Button>
-          ) : (
-            <Button variant="primary" className="h-11 shrink-0" disabled={missing.length > 0} loading={create.isPending} icon={<BookPlus className="h-4 w-4" />} onClick={() => create.mutate()}>创建同人书</Button>
+      <Step n={2} title="创作想法" done={!!direction && !!f.premise.trim()}>
+        <div className="space-y-2.5">
+          <div>
+            <Lbl>常用想法</Lbl>
+            <div className="flex flex-wrap gap-1.5">
+              {tpl?.styles.map((st) => (
+                <button key={`t-${st.label}`} type="button" title={st.desc} onClick={() => addIdea(`${st.label}：${st.desc}`, st.direction)}
+                  className="inline-flex h-9 items-center gap-1 rounded-full border border-primary/30 bg-primary-soft/40 px-3 text-[13px] text-primary hover:bg-primary-soft"><Sparkles className="h-3.5 w-3.5" />{st.label}</button>
+              ))}
+              {IDEAS.map((it) => (
+                <button key={it.label} type="button" title={ideaText(it.text)} onClick={() => addIdea(ideaText(it.text), it.direction)}
+                  className="inline-flex h-9 items-center rounded-full border px-3 text-[13px] hover:bg-muted">{it.label}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Lbl hint={dir ? dir.desc : '必选一个'}>方向</Lbl>
+            {cat.isLoading ? <Skeleton className="h-9 rounded-full" /> : cat.isError ? <ErrorState error={cat.error} onRetry={() => cat.refetch()} /> : (
+              <div className="flex flex-wrap gap-1.5">
+                {dirs.map((d) => {
+                  const on = direction === d.id
+                  return (
+                    <button key={d.id} type="button" aria-pressed={on} title={d.desc}
+                      onClick={() => (on ? undefined : f.premise.trim() ? pickDir(d.id) : addIdea(dirText(d), d.id))}
+                      className={cn('inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[13px] transition', on ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>
+                      {on && <Check className="h-3.5 w-3.5" />}{d.label}{tpl?.directions.includes(d.id) && <span className="rounded bg-primary-soft px-1 text-[10.5px] text-primary">推荐</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <Textarea rows={8} value={f.premise} onChange={(e) => up({ premise: e.target.value })} className="text-[14px] leading-relaxed"
+            placeholder="写下你想写的故事：主角是谁、从哪里切入、想改变什么、想要什么爽点。也可以点上面的想法先填一段再改。" />
+          {dir && (dir.tips.length > 0 || dir.risks.length > 0) && (
+            <details className="rounded-xl border bg-surface px-3 py-1.5">
+              <summary className="flex min-h-[36px] cursor-pointer items-center text-[13px] text-foreground/80">「{dir.label}」写作要点</summary>
+              <div className="grid gap-3 pb-2 pt-1 sm:grid-cols-2">
+                <ul className="space-y-1 text-[12.5px] leading-relaxed">{dir.tips.map((t, i) => <li key={i} className="flex gap-1.5"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" /><span className="min-w-0 break-words">{t}</span></li>)}</ul>
+                <ul className="space-y-1 text-[12.5px] leading-relaxed text-warning">{dir.risks.map((t, i) => <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{t}</span></li>)}</ul>
+              </div>
+            </details>
+          )}
+          <div><Lbl hint={`${notes.length}/1000`}>作者补充</Lbl>
+            <Textarea rows={2} value={notes} onChange={(e) => up({ notes: e.target.value.slice(0, 1000) })} placeholder="如：CP 固定为 A×B；不写原著第二卷之后的剧情" /></div>
+        </div>
+      </Step>
+
+      <Step n={3} title="主角" done={f.prot.source === 'canon' ? !!f.prot.canon_name : true}>
+        <div className="space-y-3 rounded-xl border bg-surface p-3.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented value={f.prot.source} onChange={(v) => up({ prot: v === 'oc' ? { source: 'oc', oc_type: 'transmigrator' } : { source: 'canon' } })}
+              options={[{ value: 'canon', label: '原著角色' }, { value: 'oc', label: '原创主角' }]} />
+            {f.prot.source === 'oc' && ocTypes.map((o) => <button key={o.id} type="button" onClick={() => up({ prot: { ...f.prot, oc_type: o.id } })}
+              className={cn('inline-flex h-9 items-center rounded-full border px-3 text-[13px]', f.prot.oc_type === o.id ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>{o.label}</button>)}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {f.prot.source === 'canon' ? (
+              <Field label="哪个原著角色">
+                <Select value={f.prot.canon_name || null} onChange={(v) => up({ prot: { ...f.prot, canon_name: v || '' } })} placeholder={src ? '选择角色' : '先选原著'} className="h-10"
+                  options={canonChars.map((c) => ({ value: c.name, label: c.role ? `${c.name}（${c.role}）` : c.name }))} />
+              </Field>
+            ) : f.prot.oc_type === 'soul_swap' ? (
+              <Field label="魂穿到谁身上">
+                <Select value={f.prot.canon_name || null} onChange={(v) => up({ prot: { ...f.prot, canon_name: v || '' } })} placeholder="选择原著角色" className="h-10"
+                  options={canonChars.map((c) => ({ value: c.name, label: c.name }))} />
+              </Field>
+            ) : (
+              <Field label="名字"><Input className="h-10" value={f.prot.name ?? ''} onChange={(e) => up({ prot: { ...f.prot, name: e.target.value } })} placeholder="可不填" /></Field>
+            )}
+            <Field label="切入时间点">
+              <Select value={f.prot.entry_event || null} onChange={(v) => up({ prot: { ...f.prot, entry_event: v || '' } })} placeholder={timeline.length ? '选原著时间线上的节点' : '原著资料没有时间线'} className="h-10"
+                options={timeline.map((t) => ({ value: t.event, label: `${t.order}. ${t.event}` }))} />
+            </Field>
+          </div>
+          {f.prot.source === 'oc' && (
+            <Textarea rows={2} value={f.prot.brief ?? ''} onChange={(e) => up({ prot: { ...f.prot, brief: e.target.value } })} placeholder="主角描述，可不填，建书后 AI 按原著补全" />
           )}
         </div>
+      </Step>
+
+      <Step n={4} title="设置" done>
+        <div className="space-y-2.5 rounded-xl border bg-surface p-3.5">
+          <div className="grid gap-2 grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_auto_1fr]">
+            <Input className="col-span-2 h-10 md:col-span-1" value={f.title} onChange={(e) => up({ title: e.target.value })} placeholder={src ? `书名，如：${src.title}之……` : '书名（可不填）'} aria-label="书名" />
+            <Select value={fidelity} onChange={(v) => v && up({ fidelity: v as FanficFidelity, fidTouched: true })} className="h-10" options={fids.map((x) => ({ value: x.id, label: x.label }))} />
+            <Select value={f.pov} onChange={(v) => v && up({ pov: v as FanficPov })} className="h-10" options={povs.map((x) => ({ value: x.id, label: x.label }))} />
+            <Segmented value={f.gender} onChange={(g) => up({ gender: g })} className="h-10" options={[{ value: 'male', label: '男频' }, { value: 'female', label: '女频' }]} />
+            <Select value={f.genre} onChange={(v) => up({ genre: v || '同人' })} className="h-10" options={['同人', ...(f.gender === 'male' ? GENRES_MALE : GENRES_FEMALE)].map((g) => ({ value: g, label: g }))} />
+          </div>
+          <div className="num grid items-center gap-2 grid-cols-2 md:grid-cols-[1fr_1fr_1fr_auto_auto]">
+            <Select value={String(f.chapterWords)} onChange={(v) => v && up({ chapterWords: Number(v) })} className="h-10" options={[2000, 3000, 5000, 8000].map((n) => ({ value: String(n), label: `每章 ${n} 字` }))} />
+            <label className="flex h-10 min-w-0 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[13px] text-muted-foreground">共<input type="number" min={10} max={5000} value={f.chapters} onChange={(e) => up({ chapters: Math.max(1, Number(e.target.value) || 0) })} className="min-w-0 flex-1 bg-transparent text-foreground outline-none" />章</label>
+            <label className="flex h-10 min-w-0 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[13px] text-muted-foreground">每卷<input type="number" min={5} max={500} value={f.perVolume} onChange={(e) => up({ perVolume: Math.max(5, Number(e.target.value) || 0) })} className="min-w-0 flex-1 bg-transparent text-foreground outline-none" />章</label>
+            <span className="whitespace-nowrap text-[12.5px] text-muted-foreground">{volumes} 卷 · 约 {(totalWords / 10000).toFixed(totalWords >= 1_000_000 ? 0 : 1)} 万字</span>
+            <label className="flex h-10 cursor-pointer items-center gap-2 whitespace-nowrap text-[13px]">完本模式<Switch checked={f.wanben} onCheckedChange={(v) => up({ wanben: v })} /></label>
+          </div>
+        </div>
+      </Step>
+
+      <div className="sticky bottom-0 z-20 -mx-5 mt-8 border-t bg-background/95 backdrop-blur md:-mx-10">
+        <div className="flex flex-wrap items-center gap-3 px-5 py-2.5 md:px-10">
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-[13px]" title={cat.data?.copyright_notice ?? ''}>
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="h-4.5 w-4.5 shrink-0 accent-[hsl(var(--primary))]" />
+            <ShieldCheck className="h-4 w-4 text-primary" />同意同人版权声明
+          </label>
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{missing.length ? `还差：${missing.join('、')}` : ''}</span>
+          <Button variant="primary" className="h-11 shrink-0" disabled={missing.length > 0} loading={create.isPending} icon={<BookPlus className="h-4 w-4" />} onClick={() => create.mutate()}>创建同人书</Button>
+        </div>
       </div>
+    </div>
+  )
+}
+
+const SRC_KEY = 'fanfic-source-create'
+const normName = (s: string) => s.replace(/[\s·・:：《》]/g, '').toLowerCase()
+
+/** v0.14.0 选原著：就地搜作品名，已有资料 / 热门原著点一下即选；没有资料就后台联网取材，取完自动选上 */
+function SourcePicker({ sources, loading, templates, canSearch, selected, onSelect }: {
+  sources: FanficSourceBrief[]; loading: boolean; templates: FanficTemplate[]; canSearch: boolean; selected: number; onSelect: (id: number) => void
+}) {
+  const qc = useQueryClient()
+  const { start } = useJobs()
+  const running = useActiveJob(SRC_KEY)
+  const [kw, setKw] = useState('')
+  const k = normName(kw)
+  const sel = sources.find((s) => s.id === selected) ?? null
+  const mine = sources.filter((s) => !k || normName(s.title).includes(k))
+  const hot = templates.filter((t) => !k || [t.title, ...t.aliases, ...t.characters].some((x) => normName(x).includes(k))).slice(0, k ? 12 : 16)
+  const findSource = (title: string, tplId?: string) => sources.find((s) => (tplId && s.template_id === tplId) || normName(s.title) === normName(title))
+  const fetchSource = async (title: string, t?: FanficTemplate) => {
+    if (!canSearch) { toast.error('还没配置联网搜索', { description: '在 设置 → 任务路由 → 联网搜索 选好模型后再取材，或先导入原著文本。' }); return }
+    await start(fanficApi.createSource({ source: 'search', title, depth: 'standard', focus: t ? t.characters.slice(0, 2) : undefined, template_id: t?.id }), {
+      label: `联网取材《${title}》`, key: SRC_KEY, successMsg: `《${title}》资料已取好`,
+      onSuccess: (j) => {
+        const id = j.result?.source_id ?? j.result?.source?.id
+        void qc.invalidateQueries({ queryKey: fqk.sources }).then(() => { if (id) onSelect(id) })
+        setKw('')
+      },
+    })
+  }
+  const pickHot = (t: FanficTemplate) => { const s = findSource(t.title, t.id); if (s) onSelect(s.id); else void fetchSource(t.title, t) }
+  const exact = k && (sources.some((s) => normName(s.title) === k) || templates.some((t) => normName(t.title) === k))
+
+  return (
+    <div className="min-w-0 space-y-2.5">
+      {sel && (
+        <div className="flex min-w-0 items-center gap-2 rounded-xl border border-primary bg-primary-soft/40 px-3 py-2.5">
+          <Check className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{sel.title}</span>
+          <span className="num hidden shrink-0 text-[12px] text-muted-foreground sm:inline">{sourceLabel(sel)} · {sel.counts.characters} 角色 · 时间线 {sel.counts.timeline}</span>
+          <Link to={`/fanfic/sources/${sel.id}`} className="shrink-0 text-[12.5px] text-primary hover:underline">看资料</Link>
+        </div>
+      )}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="搜作品名 / 人物，如：斗罗大陆、唐三" className="h-10 pl-8" aria-label="搜原著"
+          onKeyDown={(e) => { if (e.key === 'Enter' && kw.trim() && !running) { const s = findSource(kw.trim()); if (s) onSelect(s.id); else { const t = templates.find((x) => normName(x.title) === k); void fetchSource(t?.title ?? kw.trim(), t) } } }} />
+      </div>
+      {running && <JobInline job={running} />}
+      {k && !exact && !running && (
+        <button type="button" onClick={() => void fetchSource(kw.trim())}
+          className="focus-ring flex min-h-[44px] w-full items-center gap-2 rounded-xl border border-dashed px-3 text-left text-[13.5px] hover:border-primary hover:text-primary">
+          <Globe2 className="h-4 w-4 shrink-0" /><span className="min-w-0 flex-1 truncate">联网取材《{kw.trim()}》，取完自动选上</span><ArrowRight className="h-4 w-4 shrink-0" />
+        </button>
+      )}
+      {loading ? <Skeleton className="h-10 rounded-md" /> : mine.length > 0 && (
+        <div>
+          <Lbl>我的原著资料</Lbl>
+          <div className="flex flex-wrap gap-1.5">
+            {mine.map((s) => <button key={s.id} type="button" aria-pressed={s.id === selected} onClick={() => onSelect(s.id)}
+              className={cn('inline-flex h-9 max-w-full items-center gap-1 rounded-full border px-3 text-[13px]', s.id === selected ? 'border-primary bg-primary-soft text-primary' : 'hover:bg-muted')}>
+              {s.id === selected && <Check className="h-3.5 w-3.5 shrink-0" />}<span className="truncate">{s.title}</span></button>)}
+          </div>
+        </div>
+      )}
+      {hot.length > 0 && (
+        <div>
+          <Lbl>热门原著</Lbl>
+          <div className="flex flex-wrap gap-1.5">
+            {hot.map((t) => {
+              const has = !!findSource(t.title, t.id)
+              return <button key={t.id} type="button" disabled={!!running} title={t.intro} onClick={() => pickHot(t)}
+                className="inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[13px] hover:bg-muted disabled:opacity-50">
+                {t.title}{!has && <Globe2 className="h-3.5 w-3.5 text-muted-foreground" />}</button>
+            })}
+          </div>
+        </div>
+      )}
+      <p className="text-[12px] text-muted-foreground">有原著文本？<Link to="/fanfic/import" className="text-primary hover:underline">粘贴或上传 TXT 提炼</Link></p>
     </div>
   )
 }

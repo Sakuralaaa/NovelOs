@@ -88,3 +88,33 @@ export function Chips({ value, onChange, placeholder = '输入后回车添加', 
     </div>
   )
 }
+
+/** 翻页：上一页 / 页码 / 下一页（总页数 ≤1 时不显示） */
+export function Pager({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void }) {
+  if (pages <= 1) return null
+  return (
+    <div className="num mt-3 flex items-center justify-center gap-2 text-[13px]">
+      <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="focus-ring h-9 rounded-lg border px-3 disabled:opacity-40 hover:bg-muted">上一页</button>
+      <span className="min-w-[64px] text-center text-muted-foreground">{page} / {pages}</span>
+      <button type="button" disabled={page >= pages} onClick={() => onChange(page + 1)} className="focus-ring h-9 rounded-lg border px-3 disabled:opacity-40 hover:bg-muted">下一页</button>
+    </div>
+  )
+}
+
+/** v0.14.0 常用创作想法：点一下把成型的设想填进想法框（「原著」会换成所选作品名），同时选上对应方向 */
+export const IDEAS: { label: string; direction: import('@/lib/types').FanficDirectionId; text: string }[] = [
+  { label: '穿成炮灰逆袭', direction: 'transmigration', text: '主角穿进《原著》，成了开篇就该领盒饭的炮灰。靠着对剧情的先知先苟住性命，再一步步截胡机缘、抢在原著主角前面崛起，最终改写自己的结局。' },
+  { label: '带系统闯原著', direction: 'system', text: '主角带着系统进入《原著》世界，完成和原著剧情挂钩的任务就能拿奖励（功法、血脉、道具）。系统只给好处不添堵，主角越改剧情奖励越大，一路升级碾压。' },
+  { label: '重生改命', direction: 'rebirth', text: '《原著》中的角色带着前世记忆重生回到故事开头。这一次知道谁是敌人、哪里有机缘，先补上最大的遗憾，再把前世欺负过自己的人一个个收拾掉。' },
+  { label: '原创天才加入', direction: 'if_line', text: '一个原创天才角色在《原著》开篇出现在主角团身边，天赋不输原著主角。他的加入让原著几场关键战斗换了打法，人物关系也跟着重新洗牌。' },
+  { label: '配角逆袭成主角', direction: 'side_pov', text: '以《原著》里一个戏份不多的配角为主角，从他的视角重走原著主线，补上他没被写到的奋斗和高光，最后打出不输原著主角的名声。' },
+  { label: '反派洗白', direction: 'villain_redemption', text: '主角成了《原著》里的大反派，提前知道自己的下场。他不想再当垫脚石，开始换一种活法：收拢手下、避开死局，把反派阵营带成能和主角分庭抗礼的一方。' },
+  { label: '主角提前开挂', direction: 'if_line', text: '《原著》主角在故事开头就提前觉醒了后期才有的能力，开局即强者。原著里压着他的人和事都提前被掀翻，剧情走向完全不同。' },
+  { label: '诸天穿越', direction: 'multi_transmigration', text: '主角以《原著》为起点，在多个作品世界之间轮流穿越，每个世界拿到关键机缘后带回来，实力和底牌在不同世界里叠加。' },
+  { label: '原著角色穿到现代', direction: 'reverse_transmigration', text: '《原著》里的强者意外来到现代都市，用原著世界的本事在现代混得风生水起，同时引出原著世界跟着打通的后续。' },
+  { label: '复活意难平', direction: 'revival', text: '《原著》里死得最让人意难平的角色被救了回来。他的存活让后面的剧情全部改写，主角团多了一份关键战力。' },
+  { label: '结局后新冒险', direction: 'epilogue', text: '《原著》大结局之后，主角团的下一代（或主角本人）迎来新的危机，在更大的世界里继续冒险，原著老角色以长辈和强援身份登场。' },
+  { label: '烂尾续写', direction: 'unfinished', text: '接着《原著》没写完的地方往下写，把埋下的伏笔一一回收，给主角和重要角色一个完整、爽快的结局。' },
+  { label: '都市 AU', direction: 'au_modern', text: '把《原著》的人物放进现代都市，保留各自性格和关系，原著里的势力换成公司、家族和学院，原著的大事件换成都市里的对应冲突。' },
+  { label: 'CP 甜文', direction: 'cp', text: '以《原著》中的一对 CP 为主线，在原著剧情之外多写两人的相处、并肩作战和感情升温，甜为主、虐点少。' },
+]

@@ -26,10 +26,10 @@ const MAIN: MainItem[] = [
     { to: '/teardown/history', label: '拆书历史', match: /^\/teardown\/(history|\d+)/ },
   ] },
   { to: '/fanfic', label: '同人', icon: BookOpenCheck, children: [
+    { to: '/fanfic/new', label: '建同人书' },
+    { to: '/fanfic/sources', label: '原著资料' },
     { to: '/fanfic/search', label: '联网取材' },
     { to: '/fanfic/import', label: '导入原著' },
-    { to: '/fanfic/sources', label: '原著资料' },
-    { to: '/fanfic/new', label: '建同人书' },
   ] },
   { to: '/ideas', label: '选题', icon: Lightbulb },
   { to: '/books', label: '我的书', icon: BookOpen },
