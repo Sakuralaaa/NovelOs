@@ -1217,6 +1217,10 @@ from app.llm.mock_wanben import WANBEN_HANDLERS  # noqa: E402  v0.11 完本模�
 
 HANDLERS.update(WANBEN_HANDLERS)
 
+from app.llm.mock_batch import BATCH_HANDLERS  # noqa: E402  v0.12 E6 批量质检：章节标题候选
+
+HANDLERS.update(BATCH_HANDLERS)
+
 
 def complete(task: str, messages: list[dict[str, str]], meta: dict[str, Any]) -> str:
     fn = HANDLERS.get(task)

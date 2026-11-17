@@ -1403,15 +1403,16 @@ def _banned_for(text: str, k: int = 30) -> str:
     return "、".join(words[:k + len(base)])
 
 
-def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = None) -> dict[str, Any]:
+def polish_voice_job(chapter_id: int, ctx: JobContext, book_id: int | None = None, text: str | None = None) -> dict[str, Any]:
     """语感重塑：只生成润色稿（不落库），结构同改写稿（before/after…），作者对比后 apply-rewrite 采纳、undo 撤回。
-    生成后做程序校验，不符的写进 warnings；不会因为任何检测分数自动再改。"""
+    生成后做程序校验，不符的写进 warnings；不会因为任何检测分数自动再改。
+    v0.12：text 不为 None 时以它为底稿（批量质检多轮复修用），不读库里的正文。"""
     with session_scope() as s:
         ch = _require_content(s.get(Chapter, chapter_id))
         if book_id is not None and ch.book_id != book_id:
             raise NotFound("章节不存在")
         pack, meta, _ = _pack_for_chapter(s, ch)
-        content, number = ch.content, ch.number
+        content, number = (text if text is not None else ch.content), ch.number
         names = [c.name for c in common.cards(s, ch.book_id) if c.type == "character"]
         for n in (meta.get("beats") or {}).get("characters") or []:
             n = str(n.get("name") if isinstance(n, dict) else n or "").strip()

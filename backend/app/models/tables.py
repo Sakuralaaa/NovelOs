@@ -231,6 +231,8 @@ class Chapter(SQLModel, table=True):
     aigc: Optional[dict[str, Any]] = _json_dict_nullable()  # v0.9.1 朱雀 AIGC 检测结果（content_hash 判断是否过期）
     # v0.10 同人章节检查：{"ooc": {...,content_hash}, "overlap": {...,content_hash}}
     fanfic_meta: Optional[dict[str, Any]] = _json_dict_nullable()
+    # v0.12 E6：朱雀检测历史（最近的在最后，最多 20 条），每条同 aigc 结构 + text（检测时的正文快照）
+    aigc_history: list[dict[str, Any]] = _json_list()
     updated_at: datetime = Field(default_factory=utcnow)
 
 
@@ -441,3 +443,47 @@ class WanbenIteration(SQLModel, table=True):
     scores: Optional[dict[str, Any]] = _json_dict_nullable()
     status: str = "pending"  # pending（待采纳）/ adopted / discarded
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# ------------------------------------------------------------------ v0.12 E6 批量质检
+
+class BatchQaRun(SQLModel, table=True):
+    """一次批量质检：对章节区间做同一种操作（消痕/语感/审稿/AI 率/排版/章名），逐章产出结果，可暂停续跑、单章重试。"""
+    __tablename__ = "batch_qa_run"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    job_id: Optional[int] = Field(default=None, index=True)  # 最近一次执行它的任务
+    op: str = "humanize"  # humanize / polish / review / aigc / format / titles
+    from_no: int = 1
+    to_no: int = 1
+    options: Optional[dict[str, Any]] = _json_dict_nullable()
+    # queued / running / paused（作者暂停）/ done（全部处理过，可能含失败章）/ failed（任务异常）
+    status: str = "queued"
+    message: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    summary: Optional[dict[str, Any]] = _json_dict_nullable()
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    finished_at: Optional[datetime] = None
+
+
+class BatchQaItem(SQLModel, table=True):
+    """批量质检里的一章：改写类产出对比稿（pending，作者确认后才写回），检测类直接记结果（done）。"""
+    __tablename__ = "batch_qa_item"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(index=True)
+    book_id: int = Field(index=True)
+    chapter_id: int = Field(index=True)
+    number: int = 0
+    op: str = ""
+    # queued / running / pending（待确认）/ adopted / discarded / done（检测类完成）/ unchanged（没有可改的）/ failed / skipped
+    status: str = "queued"
+    base_content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    content: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    base_title: str = ""
+    title: str = ""
+    # {ai_before, ai_after, ai_delta, rounds:[...], words_before, words_after, review, hints, candidates, checks, warnings}
+    metrics: Optional[dict[str, Any]] = _json_dict_nullable()
+    error: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    attempts: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
