@@ -10,17 +10,14 @@ import { useHotkey } from '@/hooks/useHotkey'
 import { cn } from '@/lib/utils'
 
 export function AppShell() {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('novelos-sidebar') === '1')
+  // 侧栏默认展开，只在用户手动收起时收起（不按页面自动收起）
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('novelos-sidebar-v2') === '1')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [cmdOpen, setCmdOpen] = useState(false)
   const loc = useLocation()
-  // 写作页面默认收起主侧栏，给正文留出空间（不影响用户在其他页面的偏好）
-  const onWriting = /\/books\/\d+\/chapters/.test(loc.pathname)
-  const [writingExpanded, setWritingExpanded] = useState(false)
-  const effCollapsed = onWriting ? !writingExpanded : collapsed
-  const toggle = () => (onWriting ? setWritingExpanded((x) => !x) : setCollapsed((c) => !c))
+  const toggle = () => setCollapsed((c) => !c)
 
-  useEffect(() => { localStorage.setItem('novelos-sidebar', collapsed ? '1' : '0') }, [collapsed])
+  useEffect(() => { localStorage.setItem('novelos-sidebar-v2', collapsed ? '1' : '0') }, [collapsed])
   useEffect(() => { setMobileOpen(false) }, [loc.pathname])
   useHotkey('mod+k', () => setCmdOpen((o) => !o))
   useHotkey('mod+b', toggle)
@@ -28,7 +25,7 @@ export function AppShell() {
   return (
     <div className="flex h-[100dvh] overflow-hidden">
       <div className="hidden md:block">
-        <Sidebar collapsed={effCollapsed} onToggle={toggle} onSearch={() => setCmdOpen(true)} />
+        <Sidebar collapsed={collapsed} onToggle={toggle} onSearch={() => setCmdOpen(true)} />
       </div>
       {/* 移动端抽屉 */}
       <div className={cn('fixed inset-0 z-40 md:hidden', mobileOpen ? 'pointer-events-auto' : 'pointer-events-none')}>
