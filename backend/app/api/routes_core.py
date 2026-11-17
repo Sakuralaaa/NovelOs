@@ -280,7 +280,7 @@ async def detect_aigc(body: AigcDetectIn) -> dict[str, Any]:
         raise HTTPException(400, "要检测的文字不能为空")
     zhuque.require_configured()
     text, merge = body.text, body.is_merge
-    j = job_out(submit("aigc_detect", lambda ctx: zhuque.detect(text, merge, ctx.progress)))
+    j = job_out(submit("aigc_detect", lambda ctx: zhuque.detect_and_record(text, merge, ctx.progress)))  # v0.12：存历史报告
     return {**j, "job_id": j["id"]}
 
 

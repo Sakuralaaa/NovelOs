@@ -295,7 +295,8 @@ def content_hash(content: str) -> str:
     return hashlib.sha256((content or "").encode("utf-8")).hexdigest()[:16]
 
 
-def check_chapter(chapter_id: int, book_id: int | None = None, progress=None, is_merge: bool = True) -> dict[str, Any]:
+def check_chapter(chapter_id: int, book_id: int | None = None, progress=None, is_merge: bool = True,
+                  source: str = "manual") -> dict[str, Any]:
     """检测一章正文并存进 Chapter.aigc（默认 is_merge=true：相邻同类段合并；false 为逐段置信度）。"""
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
@@ -311,9 +312,71 @@ def check_chapter(chapter_id: int, book_id: int | None = None, progress=None, is
         if ch is None:
             raise NotFound("章节不存在")
         ch.aigc = aigc
+        append_history(ch, aigc, content, source)
         s.add(ch)
         s.commit()
     return {"chapter_id": chapter_id, "aigc": {**aigc, "stale": False}}
+
+
+# ------------------------------------------------------------------ v0.12 E6：检测历史与独立检测报告
+
+HISTORY_MAX = 20
+REPORTS_KEY = "aigc_detect_reports"
+REPORTS_MAX = 30
+
+
+def append_history(ch: Chapter, aigc: dict[str, Any], content: str, source: str = "manual") -> None:
+    """把一次检测结果压进 Chapter.aigc_history（带正文快照，报告导出时高亮用）。调用方负责提交。"""
+    entry = {**{k: v for k, v in aigc.items() if k != "stale"}, "text": content, "source": source}
+    ch.aigc_history = [*(ch.aigc_history or []), entry][-HISTORY_MAX:]
+
+
+def detect_and_record(text: str, is_merge: bool = True, progress=None) -> dict[str, Any]:
+    """独立检测页：检测后存进「历史报告」（最近 30 条），result 多 report_id。"""
+    r = detect(text, is_merge, progress)
+    rid = record_report(text, r)
+    return {**r, "report_id": rid}
+
+
+def record_report(text: str, result: dict[str, Any]) -> int:
+    with session_scope() as s:
+        rows = list(kv_get(s, REPORTS_KEY, []) or [])
+        rid = max([int(x.get("id") or 0) for x in rows] + [0]) + 1
+        title = re.sub(r"\s+", " ", text.strip())[:24]
+        rows.append({"id": rid, "title": title, "created_at": utcnow().isoformat().replace("+00:00", "Z"),
+                     "checked_at": utcnow().isoformat().replace("+00:00", "Z"), "text": text,
+                     "result": {k: v for k, v in result.items() if k != "report_id"}})
+        kv_set(s, REPORTS_KEY, rows[-REPORTS_MAX:])
+        return rid
+
+
+def list_reports() -> list[dict[str, Any]]:
+    with session_scope() as s:
+        rows = list(kv_get(s, REPORTS_KEY, []) or [])
+    out = []
+    for x in reversed(rows):
+        r = x.get("result") or {}
+        out.append({"id": x.get("id"), "title": x.get("title") or "", "created_at": x.get("created_at"), "chars": r.get("chars"),
+                    "softmax": r.get("softmax"), "level": r.get("level"), "labels_ratio": r.get("labels_ratio")})
+    return out
+
+
+def get_report(rid: int) -> dict[str, Any]:
+    with session_scope() as s:
+        rows = list(kv_get(s, REPORTS_KEY, []) or [])
+    for x in rows:
+        if int(x.get("id") or 0) == rid:
+            return x
+    raise NotFound("检测报告不存在")
+
+
+def delete_report(rid: int) -> None:
+    with session_scope() as s:
+        rows = list(kv_get(s, REPORTS_KEY, []) or [])
+        left = [x for x in rows if int(x.get("id") or 0) != rid]
+        if len(left) == len(rows):
+            raise NotFound("检测报告不存在")
+        kv_set(s, REPORTS_KEY, left)
 
 
 def maybe_auto_check(chapter_id: int) -> bool:
