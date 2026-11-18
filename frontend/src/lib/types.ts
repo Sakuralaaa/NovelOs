@@ -793,6 +793,8 @@ export interface WritingSettings {
   llm_timeout?: number
   /** v0.18.2 同一渠道失败重试次数 */
   llm_retries?: number
+  /** v0.18.3 同一本书粘在中转的同一个号上 */
+  sticky_session?: boolean
 }
 export interface BookWritingToggles { fix_mid_before_commit: boolean; auto_rereview: boolean }
 export interface BookWritingSettings {

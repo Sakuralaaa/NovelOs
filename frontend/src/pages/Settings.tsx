@@ -469,6 +469,10 @@ function WritingCard() {
               <div className="text-[13.5px] font-medium">失败重试次数</div>
               <div className="w-[240px]"><Select value={String(c.llm_retries ?? 2)} onChange={(v) => v != null && m.mutate({ llm_retries: Number(v) })} options={[0, 1, 2, 3, 5].map((n) => ({ value: String(n), label: n === 0 ? '不重试' : `${n} 次` }))} /></div>
             </div>
+            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">同一本书固定走同一个号</div>
+              <Switch checked={c.sticky_session ?? true} onCheckedChange={(v) => m.mutate({ sticky_session: v })} />
+            </label>
             {costRow}
           </div>
         )}

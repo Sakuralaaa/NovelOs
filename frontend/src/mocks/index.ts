@@ -26,7 +26,7 @@ const db = {
   routing: { planner: null, writer: null, reviewer: null, search: null, embedding: null, image: null, agent: null, image_mode: 'images' } as Routing,
   radarConfig: { enabled: true, daily_hour: 8, auto_report: true } as RadarConfig,
   reportConfig: { radar_report_top_n: 30, radar_report_auto_scopes: ['overall', 'board:male:read'] },
-  writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1, llm_timeout: 360, llm_retries: 2 },
+  writing: { auto_adopt_best: false, auto_commit: false, default_variants: 1, llm_timeout: 360, llm_retries: 2, sticky_session: true },
   zhuque: { zhuque_configured: true, zhuque_key_tail: '9fQ2', zhuque_base_url: 'https://ai-gateway.edgeone.link', zhuque_auto_check: false, zhuque_usage: { calls: 12, tokens: 38210 } },
   snapshots: [{ id: 1, taken_at: ago(60 * 5), source: 'mock', items_count: 60 }] as RadarSnapshot[],
   items: makeRankItems(),

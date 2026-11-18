@@ -365,10 +365,29 @@ def runtime_llm_settings() -> dict[str, Any]:
             val["llm_timeout"] = float(raw["llm_timeout"])
         if isinstance(raw.get("llm_retries"), int) and raw["llm_retries"] >= 0:
             val["llm_retries"] = int(raw["llm_retries"])
+        if isinstance(raw.get("sticky_session"), bool):
+            val["sticky_session"] = raw["sticky_session"]
     except Exception:  # noqa: BLE001  库没初始化（测试/脚本）时用启动配置
         val = {}
     _RUNTIME_CACHE.update(at=now, val=val)
     return val
+
+
+def sticky_key(meta: dict[str, Any] | None) -> str | None:
+    """v0.18.3 会话粘性：同一本书的调用带同一个 prompt_cache_key，中转按它把请求粘在同一个号上，前缀缓存才命中。"""
+    if not runtime_llm_settings().get("sticky_session", True):
+        return None
+    book_id = (meta or {}).get("book_id")
+    if not book_id:
+        from app.llm import usage as _usage
+        ctx = _usage.job_context()
+        book_id = ctx[1] if ctx else None
+    return f"novelos-book-{book_id}" if book_id else "novelos-global"
+
+
+def _drop_sticky(text: str) -> bool:
+    low = (text or "").lower()
+    return "prompt_cache_key" in low or "unrecognized" in low or "unknown parameter" in low or "extra_forbidden" in low or "extra inputs" in low
 
 
 def clear_runtime_llm_cache() -> None:
@@ -435,11 +454,17 @@ class LLMGateway:
 
     def _post_chat(
         self, t: Target, messages: list[dict[str, str]], temperature: float | None, max_tokens: int | None,
-        want_image: bool = False, timeout: float | None = None,
+        want_image: bool = False, timeout: float | None = None, cache_key: str | None = None,
     ) -> dict[str, Any]:
         path, body = proto.chat_request(t.api_format, t.model, messages, temperature, max_tokens, want_image)
+        if cache_key and t.api_format in ("openai", "responses") and not want_image:
+            body["prompt_cache_key"] = cache_key
         with httpx.Client(timeout=timeout or self._llm_timeout, transport=_keepalive_transport()) as c:
             r = c.post(proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body)
+            if r.status_code == 400 and "prompt_cache_key" in body and _drop_sticky(r.text):
+                # 不认识这个字段的上游：去掉再发一次
+                body.pop("prompt_cache_key", None)
+                r = c.post(proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body)
             if r.status_code == 400 and t.api_format in ("openai", "responses") and _needs_stream(r.text) and not want_image:
                 # 有的中转只支持流式（如「Non-stream chat request is currently not supported」），自动改用流式再拼回完整结果
                 return _post_stream(c, t, path, body)
@@ -462,7 +487,7 @@ class LLMGateway:
     ) -> str:
         started = time.time()
         try:
-            data = self._post_chat(t, messages, temperature, max_tokens)
+            data = self._post_chat(t, messages, temperature, max_tokens, cache_key=sticky_key(meta))
             content, usage, _ = proto.parse_chat(t.api_format, data)
         except Exception as e:
             trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output="",
@@ -555,8 +580,13 @@ class LLMGateway:
         started = time.time()
         body: dict[str, Any] = {"model": t.model, "messages": proto.openai_tool_messages(messages), "tools": tools,
                                 "tool_choice": "auto", "temperature": temperature}
+        if (ck := sticky_key(None)):
+            body["prompt_cache_key"] = ck
         with httpx.Client(timeout=self._llm_timeout, transport=_keepalive_transport()) as c:
             r = c.post(proto.url(t.base_url, "/chat/completions"), headers=proto.headers("openai", t.api_key), json=body)
+            if r.status_code == 400 and "prompt_cache_key" in body and _drop_sticky(r.text):
+                body.pop("prompt_cache_key", None)
+                r = c.post(proto.url(t.base_url, "/chat/completions"), headers=proto.headers("openai", t.api_key), json=body)
         if r.status_code >= 400:
             raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
         try:

@@ -90,6 +90,7 @@ class WritingSettingsIn(BaseModel):
     auto_rereview: bool | None = None  # 自动应用审稿补丁后重审一次（默认开）
     llm_timeout: int | None = Field(default=None, ge=60, le=1800)  # v0.18.2 单次模型调用等待上限（秒）
     llm_retries: int | None = Field(default=None, ge=0, le=5)  # v0.18.2 同一渠道失败重试次数
+    sticky_session: bool | None = None  # v0.18.3 同一本书带同一个 prompt_cache_key，让中转粘在同一个号上
 
 
 class BookWritingSettingsIn(BaseModel):
