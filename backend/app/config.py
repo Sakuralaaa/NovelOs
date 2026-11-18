@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     disable_scheduler: bool = False
 
     # LLM 网关
-    llm_timeout: float = 120.0
+    llm_timeout: float = 360.0  # v0.18.1 整章写作/审稿常要 90–150 秒，120 秒会被掐断后从头重试
     search_timeout: float = 600.0  # 联网搜索整体上限（多 agent 搜索可能几分钟不出字）
     llm_retries: int = 2  # 同一渠道失败重试次数，之后切到同角色其他渠道
     image_size: str = "1024x1536"

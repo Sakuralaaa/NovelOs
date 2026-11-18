@@ -411,12 +411,22 @@ def _evaluate(
     exclude_chapter_id: int | None,
 ) -> tuple[dict[str, Any], LintResult, int]:
     lint = lint_for(s, book.id or 0, content, number, exclude_chapter_id, habits=pack.habits)
+    key = (book.id or 0, number, _content_hash(content), _content_hash(plan))
+    hit = _EVAL_CACHE.get(key)
+    if hit is not None:  # v0.18.1 同一稿同一章纲不重复审（自愈、补丁复审、自动审批常对同一稿各审一遍）
+        return dict(hit[0]), lint, hit[1]
     # v0.9.4：数值一致性 lint 的问题进审稿结果（mid / continuity，带位置）
     review, dropped = run_review(get_gateway(), content, number, plan, pack.protagonist, pack.required_chars, meta,
                                  context=pack.state_text, cheat_terms=pack.cheat_terms,
                                  extra_issues=list(lint.numeric_issues or []) + _fanfic_issues(s, book, content, exclude_chapter_id),
                                  persona=reader_persona(book), ledger=_reader_ledger(s, book.id or 0, number))
+    _EVAL_CACHE[key] = (dict(review), dropped)
+    while len(_EVAL_CACHE) > 64:
+        _EVAL_CACHE.pop(next(iter(_EVAL_CACHE)))
     return review, lint, dropped
+
+
+_EVAL_CACHE: dict[tuple[int, int, str, str], tuple[dict[str, Any], int]] = {}
 
 
 def _reader_ledger(s: Session, book_id: int, number: int) -> str:
@@ -1628,7 +1638,24 @@ def rewrite_full(chapter_id: int, content: str, instruction: str, route: str | N
         meta={**meta, "text": content, "instruction": instruction, "scope": "chapter"},
         temperature=WRITER_TEMPERATURE, max_tokens=writer_max_tokens(words), route=route,
     )
-    return clean_prose(out)
+    new = clean_prose(out)
+    have = count_words(new)
+    if new.strip() and have < REWRITE_TOPUP_RATIO * words:  # v0.18.1 重写稿写短了也续写补齐，别整轮作废
+        more = get_gateway().chat(
+            "chapter_rewrite",
+            [{"role": "system", "content": pack.prefix}, {"role": "user", "content": user},
+             {"role": "assistant", "content": new},
+             {"role": "user", "content": TOPUP_NOTE.format(missing=max(words - have, 500))}],
+            meta={**meta, "text": content, "instruction": instruction, "scope": "chapter", "topup": True},
+            temperature=WRITER_TEMPERATURE, max_tokens=writer_max_tokens(words), route=route,
+        )
+        extra = clean_prose(more)
+        if extra.strip() and extra.strip()[:30] not in new:
+            new = new.rstrip() + "\n\n" + extra.strip()
+    return new
+
+
+REWRITE_TOPUP_RATIO = 0.9
 
 
 def target_words(chapter_id: int) -> int:

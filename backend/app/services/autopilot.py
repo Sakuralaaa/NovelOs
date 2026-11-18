@@ -541,6 +541,8 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
             else:
                 _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写没比原稿好（读者分 {sc2[1]}，综合分 {sc2[2]}），保留原稿")
         _save_review(chapter_id, review, {"rounds": rounds, "synced": bool(heal.get("synced"))})
+        if sc[0] and not improved:  # v0.18.1 已过审、只为开篇读者分打磨的，一轮没涨就收手，不再空转第二轮
+            break
     if sc[0]:
         return _commit(run_id, chapter_id, number, healed=improved)
     _save_review(chapter_id, review, {"rounds": rounds, "exhausted": True, "content_hash": writing._content_hash(content)})  # noqa: SLF001
