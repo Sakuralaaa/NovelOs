@@ -24,7 +24,7 @@ KIND_LABEL = {
     "outline_node": "改大纲", "bible_generate": "生成设定", "bible_propose": "AI 改设定", "card_suggest": "AI 改设定卡", "field_ai": "字段 AI",
     "character_soul": "灵魂五维", "idea_generate": "生成选题", "package": "包装", "cover": "封面", "agent_run": "Agent", "agent": "Agent",
     "followup": "追问", "generation_followup": "追问", "trend_report": "风向标日报", "teardown": "拆书", "image": "生图",
-    "writing_chapter": "写章", "writing_scene": "写场景", "chapter_state": "抽状态账本", "pairwise": "候选比较", "scene_plan": "排段落",
+    "writing_chapter": "写章", "writing_scene": "写场景", "chapter_state": "抽状态账本", "chapter_sync": "章纲衔接校正", "pairwise": "候选比较", "scene_plan": "排段落",
     "reader": "读者审读", "review": "审稿",
 }
 

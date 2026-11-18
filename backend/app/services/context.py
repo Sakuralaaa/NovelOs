@@ -225,6 +225,11 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
             parts.append("【更早章节索引（压缩）】\n" + idx)
     if recent:
         parts.append("【最近章节摘要】\n" + "\n".join(f"第{c.number}章 {c.title}：{chapter_brief(c)}" for c in recent))
+    from app.services.continuity import recent_usage, settled_block, usage_note
+
+    settled = settled_block(committed)  # v0.17.1 已结算的系统面板：同一笔不再结算
+    if settled:
+        parts.append(settled)
     tail = ""
     if committed and committed[-1].number == node.order - 1 and committed[-1].content:
         tail = chapter_tail(committed[-1].content)
@@ -289,6 +294,9 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
         notes.append(f"{'、'.join(leads)}是原著主角，本书里是重要配角：有戏份、有分量，但视点和高光留给{prot.name if prot else '主角'}。")
     if habits:
         notes.append(f"人物卡里的口头禅全章最多 {CATCHPHRASE_NOTE_MAX} 次，同一个习惯动作全章不超过 {HABIT_MAX} 次。")
+    un = usage_note(recent_usage(s, bid, node.order, committed))  # v0.17.1 跨章计数
+    if un:
+        notes.append(un)
     return ContextPack(
         prefix=prefix,
         suffix="\n\n".join(parts),

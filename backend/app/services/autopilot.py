@@ -508,6 +508,16 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
     sc = _score(review)
     target = writing.target_words(chapter_id)
     rounds = int(heal.get("rounds") or 0)
+    base_ins = wanben._issues_instruction(review, guide)  # noqa: SLF001
+    if rounds == 0 and not sc[0] and not heal.get("synced"):
+        # v0.17.1 先对照上一章实写校正章纲：没过审常常是章纲本身和前文重了（重做、重复结算），只改文字修不好
+        sync = _sync_for(book_id, chapter_id)
+        heal["synced"] = True
+        if sync.get("changed"):
+            _event(run_id, "heal", f"第{number}章章纲按上一章实写校正：{sync.get('reason') or '已改'}"[:200])
+            base_ins = SYNC_REWRITE_NOTE.format(reason=sync.get("reason") or "") + base_ins
+    elif heal.get("note"):
+        base_ins = str(heal["note"]) + base_ins
     improved = False
     def reader_low(rv: dict[str, Any]) -> bool:
         r = (rv.get("reader") or {}).get("score")
@@ -515,7 +525,7 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
 
     while rounds < HEAL_ROUNDS and (not sc[0] or reader_low(review)):
         rounds += 1
-        new = writing.rewrite_full(chapter_id, content, wanben._issues_instruction(review, guide))  # noqa: SLF001
+        new = writing.rewrite_full(chapter_id, content, base_ins if rounds == 1 else wanben._issues_instruction(review, guide))  # noqa: SLF001
         words = writing.count_words(new)
         if not new.strip() or new == content:
             _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写没给出新稿")
@@ -530,11 +540,61 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
                 content, review, sc, improved = new, rv2, sc2, True
             else:
                 _event(run_id, "heal", f"第{number}章第 {rounds} 轮重写没比原稿好（读者分 {sc2[1]}，综合分 {sc2[2]}），保留原稿")
-        _save_review(chapter_id, review, {"rounds": rounds})
+        _save_review(chapter_id, review, {"rounds": rounds, "synced": bool(heal.get("synced"))})
     if sc[0]:
         return _commit(run_id, chapter_id, number, healed=improved)
     _save_review(chapter_id, review, {"rounds": rounds, "exhausted": True, "content_hash": writing._content_hash(content)})  # noqa: SLF001
     return _needs_review(run_id, chapter_id, number, review)
+
+
+SYNC_REWRITE_NOTE = ("本章章纲已经对照上一章实际写出的结尾重新校正（{reason}）。按新细纲整章重写：开头从上一章结尾接，"
+                     "上一章已经发生、已经结算过的事不重做、不重报，篇幅和原稿相当。\n")
+
+
+def _sync_for(book_id: int, chapter_id: int) -> dict[str, Any]:
+    from app.services.continuity import sync_chapter_beats
+
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        node_id = ch.outline_node_id if ch is not None else None
+    if not node_id:
+        return {"changed": False}
+    try:
+        return sync_chapter_beats(book_id, int(node_id))
+    except Exception as e:  # noqa: BLE001
+        return {"changed": False, "reason": f"衔接校正没做成：{e}"[:200]}
+
+
+def replan_flag(book_id: int, chapter_id: int) -> dict[str, Any]:
+    """v0.17.1「待你看」的章：按上一章实写重新校正章纲，再自动整章重写（最多 HEAL_ROUNDS 轮）；过审就提交并划掉清单。"""
+    with session_scope() as s:
+        run = latest_run(s, book_id)
+        ch = s.get(Chapter, chapter_id)
+        if ch is None or ch.book_id != book_id:
+            raise NotFound("章节不存在")
+        if ch.status == "committed":
+            raise Conflict("这一章已经提交了")
+        number = ch.number
+        review = dict(ch.review or {})
+        review.pop("heal", None)
+        ch.review = review
+        s.add(ch)
+        s.commit()
+    run_id = (run.id or 0) if run is not None else 0
+    sync = _sync_for(book_id, chapter_id)
+    note = SYNC_REWRITE_NOTE.format(reason=sync.get("reason") or "") if sync.get("changed") else ""
+    if run_id:
+        _event(run_id, "heal", f"第{number}章重新规划：" + (str(sync.get("reason") or "章纲已校正") if sync.get("changed") else "章纲没改，按审稿问题重写"))
+    with session_scope() as s:
+        ch = s.get(Chapter, chapter_id)
+        assert ch is not None
+        ch.review = {**(ch.review or {}), "heal": {"synced": True, "note": note}}
+        s.add(ch)
+        s.commit()
+    res = heal_chapter(book_id, run_id, chapter_id)
+    if res == "committed" and run is not None:
+        resolve_flag(book_id, chapter_id)
+    return {"result": res, "sync": sync}
 
 
 def _save_review(chapter_id: int, review: dict[str, Any], heal: dict[str, Any]) -> None:

@@ -20,7 +20,7 @@ from app.config import LintThresholds
 from app.lint.banned_zh import BANNED_PATTERNS, DESCRIPTOR_WORDS, ENDING_SUMMARY_PATTERNS, SUMMARY_MARKERS, WEAK_ADVERBS
 from app.lint.platform import get_profile
 from app.lint.craft_zh import (
-    CATCHPHRASE_MAX, HABIT_MAX, CLICHE_SIMILES, CROWD_MARKERS, CROWD_REACTIONS, CROWD_SHOTS_MAX, DIALOGUE_TIC_MAX, DIALOGUE_TICS,
+    CATCHPHRASE_MAX, CATCHPHRASE_WINDOW, HABIT_MAX, HABIT_WINDOW, CLICHE_SIMILES, CROWD_MARKERS, CROWD_REACTIONS, CROWD_SHOTS_MAX, DIALOGUE_TIC_MAX, DIALOGUE_TICS,
     INTENSIFIER_MIN_ALLOW, INTENSIFIER_PER_K, INTENSIFIERS, MEASURE_RULES,
 )
 
@@ -403,8 +403,16 @@ def dialogue_tic_report(text: str, max_n: int = DIALOGUE_TIC_MAX) -> list[dict[s
     return out
 
 
-def catchphrase_report(text: str, catchphrases: dict[str, list[str]] | None, max_n: int = CATCHPHRASE_MAX) -> list[dict[str, Any]]:
-    """人物卡口头禅在本章出现的次数（全文计，口头禅也可能写进叙述的转述里）。超过 CATCHPHRASE_MAX 记 over。"""
+def window_allow(word: str, max_n: int, recent: dict[str, int] | None, window_max: int) -> int:
+    """v0.17.1 跨章计数：本章上限 = min(单章上限, 连续三章总上限 - 前两章已用次数)，不小于 0。"""
+    used = int((recent or {}).get(word, 0))
+    return max(0, min(max_n, window_max - used))
+
+
+def catchphrase_report(text: str, catchphrases: dict[str, list[str]] | None, max_n: int = CATCHPHRASE_MAX,
+                       recent: dict[str, int] | None = None) -> list[dict[str, Any]]:
+    """人物卡口头禅在本章出现的次数（全文计，口头禅也可能写进叙述的转述里）。超过 CATCHPHRASE_MAX 记 over。
+    v0.17.1：recent 是前两章用过的次数，连续三章合计不超过 CATCHPHRASE_WINDOW 次。"""
     out: list[dict[str, Any]] = []
     for who, phrases in (catchphrases or {}).items():
         for ph in phrases or []:
@@ -413,7 +421,9 @@ def catchphrase_report(text: str, catchphrases: dict[str, list[str]] | None, max
                 continue
             n = text.count(key)
             if n:
-                out.append({"who": who, "word": key, "count": n, "over": n > max_n})
+                allow = window_allow(key, max_n, recent, CATCHPHRASE_WINDOW) if recent is not None else max_n
+                out.append({"who": who, "word": key, "count": n, "over": n > allow, "allow": allow,
+                            "recent": int((recent or {}).get(key, 0))})
     return out
 
 
@@ -427,7 +437,23 @@ def _cjk_grams(text: str) -> set[str]:
     return out
 
 
-def habit_report(text: str, habits: dict[str, list[str]] | None, max_n: int = HABIT_MAX) -> list[dict[str, Any]]:
+def habit_quotes(text: str, habit: str) -> list[str]:
+    """一个习惯动作在正文里命中的句子（规则同 habit_report）。"""
+    sents = [m.group(0).strip() for m in _HABIT_SENT.finditer(text or "") if m.group(0).strip()]
+    key = re.sub(r"[，,。！？!?、…\s“”\"（）()]+", "", str(habit))
+    if len(key) < 2:
+        return []
+    if len(key) <= 6:
+        return [x for x in sents if key in x]
+    g = _cjk_grams(key)
+    chars = set(re.findall(r"[\u4e00-\u9fff]", key))
+    if not g or not chars:
+        return []
+    return [x for x in sents if len(g & _cjk_grams(x)) / len(g) >= 0.35 and len(chars & set(x)) / len(chars) >= 0.7]
+
+
+def habit_report(text: str, habits: dict[str, list[str]] | None, max_n: int = HABIT_MAX,
+                 recent: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """v0.17 人物卡习惯动作在本章出现的次数。短习惯（≤6 字）按原文计；长习惯按句子比对：
     句子里有这个习惯七成以上的字、三成五以上的二字词就算一次（“摩挲腕上那条旧疤”≈“摩挲着腕上旧疤”）。
     超过 max_n 记 over，quotes 是命中的句子。"""
@@ -448,8 +474,9 @@ def habit_report(text: str, habits: dict[str, list[str]] | None, max_n: int = HA
                 quotes = [x for x in sents if len(g & _cjk_grams(x)) / len(g) >= 0.35
                           and len(chars & set(x)) / len(chars) >= 0.7]
             if quotes:
-                out.append({"who": who, "word": str(h)[:30], "count": len(quotes), "over": len(quotes) > max_n,
-                            "allow": max_n, "quotes": quotes})
+                allow = window_allow(str(h)[:30], max_n, recent, HABIT_WINDOW) if recent is not None else max_n
+                out.append({"who": who, "word": str(h)[:30], "count": len(quotes), "over": len(quotes) > allow,
+                            "allow": allow, "quotes": quotes, "recent": int((recent or {}).get(str(h)[:30], 0))})
     return out
 
 
@@ -477,9 +504,10 @@ def craft_fix_targets(text: str, intens: list[dict[str, Any]], cliches: list[dic
         is_cp = "who" in d
         rx = re.compile(re.escape(d["word"])) if is_cp else dict(_TIC_RX)[d["word"]]
         pos = [m.start() for m in rx.finditer(text) if is_cp or _in_spans(m.start(), spans)]
-        for p in pos[cp_max if is_cp else tic_max:]:
+        for p in pos[int(d.get("allow", cp_max)) if is_cp else tic_max:]:
+            extra = f"，前两章已用 {d['recent']} 次" if is_cp and d.get("recent") else ""
             out.append({"kind": "口头禅超频", "word": d["word"], "quote": sentence_at(text, p).strip("“”「」\""),
-                        "hint": f"「{d['word']}」本章出现 {d['count']} 次，这句去掉它，用句式或动作体现人物腔调"})
+                        "hint": f"「{d['word']}」本章出现 {d['count']} 次{extra}，这句去掉它，用句式或动作体现人物腔调"})
     # 去重、只保留能在原文找到且够长的 quote
     uniq: dict[tuple[str, str], dict[str, str]] = {}
     for t in out:
@@ -590,6 +618,7 @@ def lint_chapter(
     platform: str | None = None,
     ledger: Sequence[dict[str, Any]] | None = None,
     habits: dict[str, list[str]] | None = None,
+    recent_usage: dict[str, int] | None = None,
 ) -> LintResult:
     """platform：v0.9 平台风格档（fanqie / qidian / generic），按档调阈值；不传按 generic（原有阈值）。
     ledger：v0.9.4 数值一致性对照用的设定/账本条目 [{entity, key, value, source}]（可省略，只查同章）。"""
@@ -623,14 +652,15 @@ def lint_chapter(
     measures = measure_errors(text)
     crowd = crowd_shot_paragraphs(text, exclude_names)
     tics = dialogue_tic_report(text, prof.dialogue_tic_max)
-    cps = catchphrase_report(text, catchphrases, prof.catchphrase_max)
+    cps = catchphrase_report(text, catchphrases, prof.catchphrase_max, recent_usage)
     targets = craft_fix_targets(text, intens, cliches, measures, tics, cps, prof.dialogue_tic_max, prof.catchphrase_max)
-    habs = habit_report(text, habits, getattr(prof, "habit_max", HABIT_MAX))
+    habs = habit_report(text, habits, getattr(prof, "habit_max", HABIT_MAX), recent_usage)
     for d in habs:
         if d["over"]:
             for q in d["quotes"][int(d["allow"]):][:4]:
                 targets.append({"kind": "习惯动作重复", "word": d["word"], "quote": q,
-                                "hint": f"{d['who']}的习惯动作「{d['word']}」本章 {d['count']} 次（上限 {d['allow']}），这一处删掉或换成推动局面的动作"})
+                                "hint": f"{d['who']}的习惯动作「{d['word']}」本章 {d['count']} 次（上限 {d['allow']}"
+                                        + (f"，前两章已用 {d['recent']} 次" if d.get("recent") else "") + "），这一处删掉或换成推动局面的动作"})
     from app.lint.numeric_zh import numeric_consistency
 
     numeric = numeric_consistency(text, exclude_names, ledger)

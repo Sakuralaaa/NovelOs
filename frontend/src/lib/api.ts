@@ -568,6 +568,7 @@ export const autoApi = {
   resolveFlag: (bookId: number, chapterId: number) => post<{ ok: boolean }>(`/books/${bookId}/autopilot/flags/${chapterId}/resolve`),
   /** v0.17 待你看的章放行：Job（autopilot_accept） */
   acceptFlag: (bookId: number, chapterId: number) => post<Job>(`/books/${bookId}/autopilot/flags/${chapterId}/accept`),
+  replanFlag: (bookId: number, chapterId: number) => post<Job>(`/books/${bookId}/autopilot/flags/${chapterId}/replan`),
   fromIdea: (ideaId: number, b?: Partial<AutoSettings>) => post<{ book: Book; run_id: number; job: Job }>(`/ideas/${ideaId}/autopilot`, b ?? {}),
 }
 

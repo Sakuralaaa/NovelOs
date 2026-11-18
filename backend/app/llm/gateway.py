@@ -77,6 +77,7 @@ TASK_ROLE: dict[str, str] = {
     "bible_propose": "planner",
     "outline_node": "planner",
     "outline_sync": "planner",
+    "chapter_sync": "planner",  # v0.17.1 写章前按上一章实写校正章纲
     "chapter_rewrite": "writer",
     "foreshadow_plan": "planner",
     "teardown": "planner",

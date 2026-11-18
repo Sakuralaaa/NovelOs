@@ -106,6 +106,10 @@ export function registerAutoMocks({ on, createJob, bookOf, now, ago, HttpErr }: 
     const id = bookOf(m[1]).id
     return createJob('autopilot_accept', id, 800, ['提交入账'], () => { const r = runs.get(id); if (r) r.flags = r.flags.filter((f) => f.chapter_id !== +m[2]); return { ok: true, chapter_id: +m[2] } })
   })
+  on('POST', '/books/:id/autopilot/flags/:cid/replan', (m) => {
+    const id = bookOf(m[1]).id
+    return createJob('autopilot_replan', id, 1500, ['章纲衔接校正', '整章重写'], () => { const r = runs.get(id); if (r) r.flags = r.flags.filter((f) => f.chapter_id !== +m[2]); return { result: 'committed' } })
+  })
   on('GET', '/settings/routing/backup', () => backup)
   on('PUT', '/settings/routing/backup', (_m, b) => Object.assign(backup, b))
   on('POST', '/fanfic/idea/rewrite', (_m, b) => ({

@@ -1,7 +1,7 @@
 ---
 stage: chapter_plan
 title: 章细纲（读者账本）与段落安排规则
-version: 0.17
+version: 0.17.1
 sources:
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - xiaofeng-928/chinese-longnovel-skill | MIT | adapted
@@ -36,6 +36,8 @@ sources:
 ## 节奏
 - 相邻两章的 hook_type 和章末画面换着来；爽点模式不连续三章相同。
 - 同一个信息只在一章里交代一次。
+- 本章开头接上一章 result；上一章已经完成的事不重做，已经结算的奖励不再结算（v0.17.1）。
+- result 写清本章停在哪个节点；后面章节的事件不提前写进本章的 result、hook_end。
 - 动笔前五问（答不出就改细纲）：主角这章要什么？谁在拦？哪一刻掉头？谁输了、谁看见？最后一拍停在哪？
 
 ## 段落安排（写正文前排）

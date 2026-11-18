@@ -115,8 +115,12 @@ def lint_for(s: Session, book_id: int, content: str, number: int, exclude_chapte
     if habits is None:  # v0.17 习惯动作计数：默认数出场人物（正文里出现了名字）的习惯
         habits = {c.name: list((c.data or {}).get("habits") or []) for c in cards
                   if c.type == "character" and (c.data or {}).get("habits") and c.name in content}
+    from app.services.continuity import recent_usage
+
+    prev = [c for c in common.written_chapters(s, book_id, before=number) if c.id != exclude_chapter_id]
     return lint_chapter(content, get_settings().lint, others, names, number, catchphrases=cps, platform=book_platform(s, book_id),
-                        ledger=numeric_ledger(s, book_id, number, cards), habits=habits)
+                        ledger=numeric_ledger(s, book_id, number, cards), habits=habits,
+                        recent_usage=recent_usage(s, book_id, number, prev))
 
 
 _CARD_NUM_KEYS = {"age": "年龄", "年龄": "年龄", "年纪": "年龄", "height": "身高", "身高": "身高", "weight": "体重", "体重": "体重",
@@ -606,6 +610,16 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None, instr
 
     node_id = cp.get("node_id") or ensure_next_chapter_node(book_id, ctx)
     cp["node_id"] = node_id
+    # v0.17.1 衔接校正：上一章已经写出来了，先对照它的真实结尾校正本章（和下一章）章纲，避免重做、重复结算
+    if not cp.get("synced") and not cp.get("scenes"):
+        ctx.progress(6, "章纲衔接校正")
+        try:
+            from app.services.continuity import sync_chapter_beats
+
+            cp["sync"] = sync_chapter_beats(book_id, node_id)
+        except Exception as e:  # noqa: BLE001  校正失败不挡写章
+            cp["sync"] = {"changed": False, "reason": f"衔接校正没做成：{e}"[:200]}
+        cp["synced"] = True
 
     with session_scope() as s:
         book = common.get_book(s, book_id)
@@ -727,7 +741,7 @@ def write_next(book_id: int, ctx: JobContext, variants: int | None = None, instr
         s.refresh(ch)
         chapter_id = ch.id or 0
     cp["chapter_id"] = chapter_id
-    cp["result"] = {"chapter_id": chapter_id, "number": number, "variants": n_var,
+    cp["result"] = {"chapter_id": chapter_id, "number": number, "variants": n_var, "sync": cp.get("sync"),
                     "context": pack.summary(), "scenes": len(scenes), "preflight": pack.preflight}
     cp.pop("variants_done", None)  # 版本已进章节，断点不再重复保存正文
     done.append("chapter")

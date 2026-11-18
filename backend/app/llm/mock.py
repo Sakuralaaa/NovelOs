@@ -845,6 +845,10 @@ def mock_outline_node(meta: dict[str, Any]) -> str:
     return _j({"title": str(meta.get("title") or "未命名"), "summary": f"{summ}（按“{note}”重写）".lstrip(), "change": f"按“{note}”重写了概要"})
 
 
+def mock_chapter_sync(meta: dict[str, Any]) -> str:
+    return _j({"ok": True, "reason": "（mock）衔接没问题"})
+
+
 def mock_outline_sync(meta: dict[str, Any]) -> str:
     terms = [str(t) for t in meta.get("terms") or []]
     repl = dict(meta.get("replacements") or {})
@@ -1250,6 +1254,7 @@ HANDLERS = {
     "bible_propose": mock_bible_propose,
     "outline_node": mock_outline_node,
     "outline_sync": mock_outline_sync,
+    "chapter_sync": mock_chapter_sync,
     "chapter_rewrite": mock_chapter_rewrite,
     "foreshadow_plan": mock_foreshadow_plan,
     "teardown": mock_teardown,

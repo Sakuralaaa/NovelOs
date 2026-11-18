@@ -102,3 +102,5 @@ DIALOGUE_TICS: list[tuple[str, str]] = [
 DIALOGUE_TIC_MAX = 2  # 同一个口癖一章对白里超过 2 次即提示
 CATCHPHRASE_MAX = 1   # 人物卡口头禅：每章最多 1 次（v0.17）
 HABIT_MAX = 2         # 人物卡习惯动作：同一个每章最多 2 次（v0.17）
+CATCHPHRASE_WINDOW = 2  # v0.17.1 口头禅：连续三章合计最多 2 次
+HABIT_WINDOW = 3        # v0.17.1 习惯动作：同一个连续三章合计最多 3 次

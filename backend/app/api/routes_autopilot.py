@@ -112,6 +112,23 @@ async def accept_flag(book_id: int, chapter_id: int, s: Session = Depends(get_se
     return job_out(submit("autopilot_accept", lambda ctx: ap.accept_flag(book_id, chapter_id), book_id=book_id))
 
 
+@router.post("/books/{book_id}/autopilot/flags/{chapter_id}/replan")
+async def replan_flag(book_id: int, chapter_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.17.1「待你看」的章：对照上一章实写重新校正章纲，再自动整章重写；过审就提交，之后点继续接着写。"""
+    from app.jobs.manager import submit
+    from app.models.tables import Chapter
+
+    _book(s, book_id)
+    ch = s.get(Chapter, chapter_id)
+    if ch is None or ch.book_id != book_id:
+        raise HTTPException(404, "章节不存在")
+    if ch.status == "committed":
+        raise HTTPException(409, "这一章已经提交了")
+    if ap.find_active(ap.KIND, ap._ref(book_id)):  # noqa: SLF001
+        raise HTTPException(409, "一键成书正在跑，先暂停")
+    return job_out(submit("autopilot_replan", lambda ctx: ap.replan_flag(book_id, chapter_id), book_id=book_id))
+
+
 @router.post("/ideas/{idea_id}/autopilot")
 async def idea_autopilot(idea_id: int, body: Optional[AutoSettingsIn] = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
     """选题一键成书：采纳建书 + 开始一键成书。"""

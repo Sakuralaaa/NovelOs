@@ -794,6 +794,12 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
 - `POST /api/fanfic/idea/rewrite` body `{source_id, direction, text, instruction, notes, protagonist}` → `{text}`（同步，任务 `fanfic_idea` 走 planner）。
 
 
+## v0.17.1 规划与实写对齐
+
+- `POST /api/books/{id}/autopilot/flags/{chapter_id}/replan` → Job（kind=autopilot_replan）。「待你看」的章：对照上一章实写校正章纲，再自动整章重写（最多 2 轮），过审就提交并划掉清单；一键成书正在跑时 409。
+- 写章 Job 结果多一个 `sync`：`{changed, chapters, reason}`，本次写章前的章纲衔接校正结果。
+- 新任务 `chapter_sync`（规划模型，「章纲衔接校正」），可在路由与提示词页覆盖。
+
 ## v0.17.0 读者驱动写作
 
 - `Style.baseline`：文风基准段落（建议 600–1000 字，上限 2000，超出 400）。`PUT /api/books/{id}/style` 可带 `baseline`，不传保持原样。为空时第 1 章提交后自动从第 1 章摘一段回填。写作时放在 system 末尾。

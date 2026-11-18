@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, Check, Coins, FileText, Flag, Pause, Play, Sparkles, Zap } from '@/components/icons'
+import { AlertTriangle, ArrowRight, Check, Coins, FileText, Flag, Pause, Play, RefreshCw, Sparkles, Zap } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
@@ -262,6 +262,13 @@ function FlagsCard({ bookId, r, onDone }: { bookId: number; r: AutoRun; onDone: 
     const job = await start(autoApi.acceptFlag(bookId, cid), { key: `autopilot-accept:${cid}`, label: '放行这一章', successMsg: '已放行，点继续接着写', onSuccess: finish, onError: finish })
     if (!job) setAccepting(null)
   }
+  const [replanning, setReplanning] = useState<number | null>(null)
+  const replan = async (cid: number) => {
+    setReplanning(cid)
+    const finish = () => { setReplanning(null); onDone() }
+    const job = await start(autoApi.replanFlag(bookId, cid), { key: `autopilot-replan:${cid}`, label: '重新规划这一章', successMsg: '已按前文重排章纲并重写', onSuccess: finish, onError: finish })
+    if (!job) setReplanning(null)
+  }
   const blocking = r.flags.filter((f) => f.blocking).length
   return (
     <Card>
@@ -277,6 +284,7 @@ function FlagsCard({ bookId, r, onDone }: { bookId: number; r: AutoRun; onDone: 
               {f.blocking ? (
                 <div className="flex shrink-0 gap-1.5">
                   <Link to={`/books/${bookId}/chapters/${f.chapter_id}`}><Button size="sm" variant="ghost" icon={<FileText className="h-3.5 w-3.5" />}>去改</Button></Link>
+                  <Button size="sm" variant="ghost" loading={replanning === f.chapter_id} disabled={r.status === 'running'} icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => void replan(f.chapter_id)}>重新规划</Button>
                   <Button size="sm" variant="secondary" loading={accepting === f.chapter_id} icon={<Check className="h-3.5 w-3.5" />} onClick={() => void accept(f.chapter_id)}>放行</Button>
                 </div>
               ) : (

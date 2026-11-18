@@ -77,6 +77,7 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   fanfic_expand: '扩充原著世界库',
   autopilot: '一键成书',
   autopilot_accept: '放行待看章节',
+  autopilot_replan: '重新规划待看章节',
   radar_refresh: '刷新热点榜单',
   radar_teardown: '拆解榜单书',
   radar_deep: '深度拆解',

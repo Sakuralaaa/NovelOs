@@ -40,6 +40,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "bible_propose": ("bible",),
     "outline_node": ("outline",),
     "outline_sync": ("outline",),
+    "chapter_sync": ("chapter_plan",),  # v0.17.1 写章前按上一章实写校正章纲
     "chapter_rewrite": ("writing",),
     "foreshadow_plan": ("outline",),
     "teardown": (),
