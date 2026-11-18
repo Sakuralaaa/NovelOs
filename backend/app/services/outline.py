@@ -30,6 +30,14 @@ HOOK_TYPES = ("危机突降", "悬念反转", "挑衅叫板", "倒计时", "信�
 STRANDS = ("quest", "fire", "constellation")
 EMOTIONS = ("up", "down", "flat")  # 本章读者情绪走向：扬 / 压 / 平
 FORESHADOW_TIERS = ("short", "mid", "long")  # 伏笔层级：10 章内 / 30 章内 / 50 章以上回收
+# v0.18 阻力类型：同一种阻力连着写，读者会觉得在原地打转；文书手续类阻力最容易写成“打工人受气”
+CONFLICT_TYPES = ("武力挑衅", "擂台比试", "猎杀探险", "阴谋暗算", "利益争夺", "规则刁难", "身份质疑", "情感关系", "外敌危机")
+PAPER_TYPES = ("规则刁难", "身份质疑")
+PAPER_RX = re.compile(r"报名表|签字|复核|审查|名额|档案|除名|手续|盖章|教务|举报|担保|批文|名册|退学|资格|评级复查|复查单|户籍|调房|申请")
+MAX_SAME_CONFLICT_RUN = 2    # 同一种阻力连续超过 2 章 → 原地打转
+PAPER_WINDOW, PAPER_MAX = 5, 1  # 任意连续 5 章里，文书手续类阻力最多 1 章
+PROMISE_FIRST_BY = 3         # 简介里第一个卖点场面最晚第 3 章兑现
+PROMISE_CORE_BY = 10         # 书名/简介的核心卖点最晚第 10 章第一次完整兑现
 
 # 节奏红线（经验值，未校准）
 MAX_SAME_PAYOFF_RUN = 2      # 同一爽点模式连续超过 2 章 → 审美疲劳
@@ -71,6 +79,7 @@ CHAPTER_SCHEMA = (
     '"outcome":"yes|no|yes-but|no-and","payoff":"","payoff_mechanism":"爽点机制一句话：谁输、怎么输、谁看见、主角得到什么",'
     '"payoff_type":"打脸|扮猪吃虎|越级反杀|打脸权威|反派翻车|甜蜜超预期|真相揭示|收获升级|危机化解|关系突破",'
     '"payoff_level":"small|combo|milestone","strand":["quest|fire|constellation"],"emotion":"up|down|flat",'
+    '"conflict_type":"武力挑衅|擂台比试|猎杀探险|阴谋暗算|利益争夺|规则刁难|身份质疑|情感关系|外敌危机",'
     '"expectation":"本章挂起或兑现的读者期待","info_gap":"读者知道而角色不知道的事（可空）","time":"本章故事内时间",'
     '"opening_hook":"第1–3章必填：正文前三行就出现的冲突或异常（写成画面）","cheat_beat":"每章必填：金手指本章怎么用、兑现了什么（可写“本章不用”，但每 3 章至少一次可见兑现且有收获）",'
     '"characters":[],"location":"","foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":"","tier":"short|mid|long"}],'
@@ -120,6 +129,7 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
         "payoff_level": _pick(str(raw.get("payoff_level") or "").lower(), PAYOFF_LEVELS),
         "hook_type": _pick(raw.get("hook_type"), HOOK_TYPES),
         "emotion": _pick(str(raw.get("emotion") or "").lower(), EMOTIONS),
+        "conflict_type": _pick(raw.get("conflict_type"), CONFLICT_TYPES),
     }
     for k, v in optional.items():
         if v:
@@ -258,6 +268,17 @@ def pacing_audit(chapters: list[dict[str, Any]], open_foreshadows: list[Any] | N
     for v, a, b in _runs(seq("hook_type")):
         if b - a + 1 > MAX_SAME_HOOK_RUN:
             issues.append(f"第{a}–{b}章连续 {b - a + 1} 章用「{v}」式章末钩子，换一种钩子类型")
+    ctypes = [(int(c["number"]), conflict_kind(c)) for c in chs]
+    for v, a, b in _runs(ctypes):
+        if b - a + 1 > MAX_SAME_CONFLICT_RUN:
+            issues.append(f"第{a}–{b}章连续 {b - a + 1} 章的阻力都是「{v}」，读者会觉得在原地打转：换一种阻力（真刀真枪的对手、比试、猎杀、抢东西、暗算）")
+    paper = [n for n, v in ctypes if v in PAPER_TYPES]
+    for i, n in enumerate(paper):
+        inside = [m for m in paper[i:] if m - n < PAPER_WINDOW]
+        if len(inside) > PAPER_MAX:
+            issues.append(f"第{inside[0]}–{inside[-1]}章有 {len(inside)} 章的阻力是报名、签字、复核、审查这类手续刁难，读起来像在办事处受气："
+                          f"连续 {PAPER_WINDOW} 章里最多留 1 章，其余换成对手当面出手、比试或抢资源，手续问题让主角用实力一次掀掉")
+            break
     for v, a, b in _runs([(n, o if o == "yes" else "") for n, o in seq("outcome")]):
         if b - a + 1 > MAX_YES_RUN:
             issues.append(f"第{a}–{b}章连续 {b - a + 1} 章结果都是 yes，主角太顺，至少一章改成 yes-but 或 no-and")
@@ -309,6 +330,76 @@ def pacing_audit(chapters: list[dict[str, Any]], open_foreshadows: list[Any] | N
     return issues
 
 
+def draft_audit(data: dict[str, Any]) -> list[str]:
+    """v0.18：大纲 JSON 写库前的开篇体检——阻力类型、手续刁难占比，以及卖点兑现表是否排进了章细纲。"""
+    chs: list[dict[str, Any]] = []
+    for a in data.get("arcs") or []:
+        for c in (a.get("chapters") or []) if isinstance(a, dict) else []:
+            if isinstance(c, dict):
+                chs.append({**c, "number": len(chs) + 1})
+    if not chs:
+        return []
+    issues = [x for x in pacing_audit(chs) if "阻力" in x or "手续" in x]
+    promises = normalize_promises((data.get("book") or {}).get("promises"))
+    if not promises:
+        issues.append(f"book.promises 没写：把简介和书名向读者承诺的卖点场面列出来，第一个最晚第 {PROMISE_FIRST_BY} 章兑现，核心卖点最晚第 {PROMISE_CORE_BY} 章第一次完整兑现，并排进对应章的 payoff")
+    return issues
+
+
+def conflict_kind(beats: dict[str, Any]) -> str:
+    """章细纲的阻力类型：模型标了就用标注；没标但阻力写的是报名、签字、复核这类手续，按「规则刁难」算。"""
+    v = str(beats.get("conflict_type") or "")
+    if v:
+        return v
+    return "规则刁难" if PAPER_RX.search(str(beats.get("conflict") or "")) else ""
+
+
+def normalize_promises(raw: Any, max_chapter: int = 0) -> list[dict[str, Any]]:
+    """v0.18 卖点兑现表：[{what, by}]。by 是最晚兑现章号；第一个最晚第 3 章，其余最晚第 10 章（核心卖点）或模型给的章号。"""
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(raw if isinstance(raw, list) else []):
+        if isinstance(p, str):
+            p = {"what": p}
+        if not isinstance(p, dict) or not str(p.get("what") or "").strip():
+            continue
+        try:
+            by = int(p.get("by") or 0)
+        except (TypeError, ValueError):
+            by = 0
+        cap = PROMISE_FIRST_BY if i == 0 else PROMISE_CORE_BY
+        by = min(by, cap) if by > 0 else cap
+        out.append({"what": str(p["what"]).strip()[:120], "by": max(1, by)})
+    return out[:6]
+
+
+def book_promises(s: Session, book_id: int) -> list[dict[str, Any]]:
+    root = s.exec(select(OutlineNode).where(OutlineNode.book_id == book_id, OutlineNode.level == "book")).first()
+    return list(((root.beats if root else None) or {}).get("promises") or [])
+
+
+def promises_text(promises: list[dict[str, Any]], number: int) -> str:
+    """给规划/审稿看的卖点兑现表，标出到第 number 章为止已经到期的。"""
+    lines = []
+    for p in promises:
+        by = int(p.get("by") or 0)
+        tag = "已到期，前文或本章必须已经兑现" if by and by <= number else f"最晚第{by}章兑现"
+        lines.append(f"- {p.get('what')}（{tag}）")
+    return "\n".join(lines)
+
+
+def reader_ledger(s: Session, book_id: int, number: int) -> str:
+    """v0.18 给读者审稿看的“前几章读到了什么”：卖点兑现表 + 最近几章的阻力与爽点。"""
+    parts = []
+    pt = promises_text(book_promises(s, book_id), number)
+    if pt:
+        parts.append("这本书简介向读者承诺的卖点：\n" + pt)
+    rows = [b for b in chapter_beats_list(s, book_id) if 0 < int(b.get("number") or 0) < number][-5:]
+    recent = [f"第{b['number']}章：阻力「{conflict_kind(b) or str(b.get('conflict') or '')[:30]}」，爽点「{str(b.get('payoff') or '')[:40]}」" for b in rows]
+    if recent:
+        parts.append("前几章（按章纲）：\n" + "\n".join(recent))
+    return "\n\n".join(parts)
+
+
 def foreshadow_age_label(f: Any, current: int) -> str:
     age = current - int(getattr(f, "last_ch", 0) or getattr(f, "planted_ch", 0) or 0)
     if age > FORESHADOW_ALERT_AGE:
@@ -332,6 +423,7 @@ def rhythm_ledger(beats_list: list[dict[str, Any]], before: int, n: int = 8) -> 
         bits = [x for x in (
             b.get("payoff_type") and f"爽点 {b['payoff_type']}" + (f"/{b['payoff_level']}" if b.get("payoff_level") else ""),
             b.get("hook_type") and f"钩子 {b['hook_type']}",
+            conflict_kind(b) and f"阻力 {conflict_kind(b)}",
             b.get("outcome") and f"结果 {b['outcome']}",
             b.get("strand") and f"线 {'+'.join(b['strand'])}",
             b.get("emotion") and f"情绪 {b['emotion']}",
@@ -400,6 +492,18 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
     data = gw.chat_json("outline", system_prompt("outline"), user, meta=meta)
     if not isinstance(data, dict) or not data.get("volumes"):
         raise ValueError("大纲结构不完整（缺少 volumes）")
+    issues = draft_audit(data)
+    if issues:  # v0.18：开篇节奏体检不过（阻力原地打转、卖点拖太久），让规划模型按问题改一次
+        ctx.progress(55, "开篇节奏体检不过，修正章细纲")
+        fix = user + "\n\n【你上一版的规划】\n" + json.dumps(data, ensure_ascii=False)[:24000] + \
+            "\n\n【程序体检发现的问题，这一版必须改掉】\n" + "\n".join(f"- {x}" for x in issues) + \
+            "\n\n只改有问题的章细纲（和受影响的弧概要），其余照旧；输出完整 JSON，结构同上一版。"
+        try:
+            data2 = gw.chat_json("outline", system_prompt("outline"), fix, meta=meta)
+            if isinstance(data2, dict) and data2.get("volumes") and data2.get("arcs"):
+                data = data2
+        except Exception:  # noqa: BLE001
+            pass
     ctx.progress(70, "写入大纲")
     with common_session() as s:
         book = common.get_book(s, book_id)
@@ -412,8 +516,9 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
         root_summary = str(bk.get("summary", ""))
         if bk.get("promise"):
             root_summary += f"\n长期追读承诺：{bk['promise']}"
+        promises = normalize_promises(bk.get("promises"))
         root = OutlineNode(book_id=book_id, level="book", order=1, title=str(bk.get("title") or book.title),
-                           summary=root_summary, status="expanded")
+                           summary=root_summary, status="expanded", beats={"promises": promises} if promises else None)
         s.add(root)
         s.flush()
         vols: list[OutlineNode] = []
@@ -461,6 +566,9 @@ def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:
         all_beats = chapter_beats_list(s, book.id or 0)
         ledger = rhythm_ledger(all_beats, next_no)
         audit = pacing_audit(all_beats[-15:], opens, next_no)
+        pt = promises_text(book_promises(s, book.id or 0), next_no + CHAPTERS_PER_ARC)
+        if pt and node.level in ("arc", "volume"):
+            audit = [*audit, "卖点兑现表（到期的必须排进章细纲的 payoff）：\n" + pt]
         meta = {**common.kit_meta(s, book), "level": node.level, "existing": len(kids),
                 "next_number": max_chapter_number(s, book.id or 0) + 1, "chapters_per_arc": CHAPTERS_PER_ARC,
                 "number": node.order}

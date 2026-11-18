@@ -17,7 +17,7 @@ from sqlmodel import Session
 from app.models.tables import Chapter, OutlineNode
 from app.services import common
 
-SYNC_FIELDS = ("title", "goal", "want", "conflict", "turn", "result", "outcome", "payoff", "payoff_mechanism",
+SYNC_FIELDS = ("title", "goal", "want", "conflict", "conflict_type", "turn", "result", "outcome", "payoff", "payoff_mechanism",
                "cheat_beat", "hook_end", "opening_hook", "expectation", "characters", "location")
 SETTLED_CHAPTERS = 5
 SETTLED_MAX = 14
@@ -128,6 +128,7 @@ def sync_chapter_beats(book_id: int, node_id: int, force: bool = False) -> dict[
     from app.db import session_scope
     from app.llm.gateway import get_gateway
     from app.services.context import chapter_brief, chapter_tail
+    from app.services import outline as _ol
     from app.services.scene_state import render_state
     from app.skills.loader import render, system_prompt
 
@@ -157,6 +158,8 @@ def sync_chapter_beats(book_id: int, node_id: int, force: bool = False) -> dict[
             number=number,
             plan=json.dumps(_brief_beats(node.beats or {}), ensure_ascii=False),
             next_plan=json.dumps(_brief_beats(nxt.beats or {}), ensure_ascii=False) if nxt else "（还没有）",
+            promises=_ol.promises_text(_ol.book_promises(s, book_id), number) or "（没列）",
+            rhythm=_ol.rhythm_ledger(_ol.chapter_beats_list(s, book_id), number, 4) or "（无）",
         )
         locked = bool(getattr(node, "locked", False))
         next_id = nxt.id if nxt is not None and not getattr(nxt, "locked", False) else None

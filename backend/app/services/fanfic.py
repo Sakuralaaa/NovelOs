@@ -1364,6 +1364,9 @@ def generate_oc(book_id: int, ctx: JobContext) -> dict[str, Any]:
                   brief=prot.get("brief") or "（无）", entry_event=prot.get("entry_event") or "（未定）", idea=idea[:600] or "（无）",
                   world=(w["summary"] + "；" + "；".join(w["rules"][:8])) or "（原著资料没有世界观）",
                   characters="\n".join(f"- {_char_line(c, 'strict')}" for c in cards["characters"][:10]) or "（无）")
+    if not prot.get("name"):
+        with session_scope() as s2:
+            user += common.name_note(s2, book_id)
     ctx.progress(20, "设计原创主角")
     out = get_gateway().chat_json("fanfic_oc", system_prompt("bible"), user, role="planner", meta=meta)
     if not isinstance(out, dict) or not str(out.get("name") or prot.get("name") or "").strip():

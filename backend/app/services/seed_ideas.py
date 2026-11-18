@@ -233,6 +233,8 @@ def organize(text: str, genre: str | None, gender: str | None, ctx: JobContext) 
     ctx.progress(15, "整理想法")
     user = render("idea_organize", gender_label=common.GENDER_LABEL.get(gender, gender), genre_hint=f"题材：{genre}。" if genre else "",
                   text=text, existing=_existing(gender)) + tropes.prompt_block(tl)
+    with session_scope() as s:
+        user += common.name_note(s)
     data = get_gateway().chat_json("idea_organize", system_prompt("idea_organize"), user,
                                    meta={"text": text, "gender": gender, "genre": genre, "banned_keywords": tropes.keywords(tl)})
     if isinstance(data, dict) and isinstance(data.get("idea"), dict):

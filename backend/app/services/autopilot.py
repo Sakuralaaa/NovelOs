@@ -544,7 +544,27 @@ def heal_chapter(book_id: int, run_id: int, chapter_id: int, golden: bool = Fals
     if sc[0]:
         return _commit(run_id, chapter_id, number, healed=improved)
     _save_review(chapter_id, review, {"rounds": rounds, "exhausted": True, "content_hash": writing._content_hash(content)})  # noqa: SLF001
+    if _full_auto(run_id):  # v0.18 全自动：修满轮数还没过，记进待看清单但不停，照最好的一版提交往下写
+        with session_scope() as s:
+            ch = s.get(Chapter, chapter_id)
+        if ch is not None:
+            _flag(run_id, ch, _review_reason(review), blocking=False)
+            _event(run_id, "heal", f"第{number}章修了 {HEAL_ROUNDS} 轮还没过审，全自动模式照最好的一版提交，记进待看清单")
+        return _commit(run_id, chapter_id, number, healed=improved)
     return _needs_review(run_id, chapter_id, number, review)
+
+
+def _full_auto(run_id: int) -> bool:
+    with session_scope() as s:
+        r = s.get(AutoRun, run_id)
+        return bool(r is not None and ((r.settings or {}).get("level") == "full"))
+
+
+def _review_reason(review: dict[str, Any]) -> str:
+    highs = [str(i.get("comment") or "") for i in review.get("issues") or [] if i.get("severity") == "high"]
+    reader = review.get("reader") or {}
+    return highs[0] if highs else (f"读者分 {reader['score']}：{reader.get('verdict') or ''}" if isinstance(reader.get("score"), int)
+                                   else "审稿没过")
 
 
 SYNC_REWRITE_NOTE = ("本章章纲已经对照上一章实际写出的结尾重新校正（{reason}）。按新细纲整章重写：开头从上一章结尾接，"
@@ -620,10 +640,7 @@ def _commit(run_id: int, chapter_id: int, number: int, healed: bool) -> str:
 
 
 def _needs_review(run_id: int, chapter_id: int, number: int, review: dict[str, Any]) -> str:
-    highs = [str(i.get("comment") or "") for i in review.get("issues") or [] if i.get("severity") == "high"]
-    reader = review.get("reader") or {}
-    reason = highs[0] if highs else (f"读者分 {reader['score']}：{reader.get('verdict') or ''}" if isinstance(reader.get("score"), int)
-                                     else "审稿没过")
+    reason = _review_reason(review)
     with session_scope() as s:
         ch = s.get(Chapter, chapter_id)
         assert ch is not None

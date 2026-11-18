@@ -187,3 +187,29 @@ def kit_meta(s: Session, book: Book) -> dict[str, Any]:
         "title": book.title, "genre": book.genre, "gender": book.gender, "premise": book.premise,
         "protagonist": p.name if p else None, "villain": villain, "ally": ally, "item": item, "location": loc,
     }
+
+
+# v0.18 起名撞车：模型很爱给主角起同一批名字，多本书主角同名读者一眼就腻
+OVERUSED_NAMES = ("林烬", "林渊", "林默", "林凡", "陈默", "叶凡", "萧炎", "楚风", "江叙", "沈渊", "顾渊", "苏晚", "苏清", "林晚")
+
+
+def used_protagonist_names(s: Session, exclude_book_id: int | None = None, limit: int = 30) -> list[str]:
+    names: list[str] = []
+    for b in s.exec(select(Book)).all():
+        if exclude_book_id and b.id == exclude_book_id:
+            continue
+        try:
+            p = protagonist(s, b.id or 0)
+        except Exception:  # noqa: BLE001
+            p = None
+        if p is not None and p.name and p.name not in names:
+            names.append(p.name)
+    return names[:limit]
+
+
+def name_note(s: Session, exclude_book_id: int | None = None) -> str:
+    used = [n for n in used_protagonist_names(s, exclude_book_id) if n not in OVERUSED_NAMES]
+    avoid = "、".join([*OVERUSED_NAMES, *used])
+    return (f"\n\n【起名】主角和主要配角的名字要有辨识度、贴合出身和地域，不要用网文里用滥的名字，也不要和本站别的书重名："
+            f"{avoid}。姓氏别总用林、陈、苏、沈、顾、叶、萧。"
+            "\n【长线】除非想法里写了，别默认用“父母（父亲）是隐藏的传奇、死因有黑幕”当长线，换成主角自己要争的东西。")

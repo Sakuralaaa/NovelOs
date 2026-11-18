@@ -1,7 +1,7 @@
 ---
 stage: chapter_plan
 title: 章细纲（读者账本）与段落安排规则
-version: 0.17.1
+version: 0.18.0
 sources:
   - xwcai999/opencreator-novel | Apache-2.0 | adapted
   - xiaofeng-928/chinese-longnovel-skill | MIT | adapted
@@ -25,6 +25,7 @@ sources:
 - result：结果，本章结束时主角得到了什么、失去了什么、局面变成什么样；outcome 用 yes / no / yes-but / no-and 标一下。
 - cheat_beat：金手指本章怎么用、怎么兑现。每章都写；可以写“本章不用”，但每 3 章至少一次可见的兑现，并且带来具体收获（数字、能力、物品、名次、对手的反应）。金手指只给好处，紧迫感来自对手和困境。
 - payoff_mechanism：爽点机制一句话：谁输、怎么输、谁看见、主角得到什么。和最近 5 章不能是同一种机制（同样是“当众说出对方秘密”就算重复）。
+- conflict_type：阻力类型（武力挑衅 / 擂台比试 / 猎杀探险 / 阴谋暗算 / 利益争夺 / 规则刁难 / 身份质疑 / 情感关系 / 外敌危机）。同一种不连续超过 2 章；规则刁难、身份质疑这类手续阻力任意连续 5 章最多 1 章（v0.18）。
 - hook_end：章末最后一拍：停在哪个事件进行中，或停在谁的哪一句话上（写要发生什么，台词原句留给写手）。
 - 其它：title、payoff（爽点一句话）、payoff_type、payoff_level（small / combo / milestone；milestone = 改变主角地位的大爽点）、characters[]、location、foreshadow[]（{action: plant/advance/resolve, id, desc}）、expectation（本章挂起或兑现的读者期待）。
 
@@ -37,7 +38,8 @@ sources:
 - 相邻两章的 hook_type 和章末画面换着来；爽点模式不连续三章相同。
 - 同一个信息只在一章里交代一次。
 - 本章开头接上一章 result；上一章已经完成的事不重做，已经结算的奖励不再结算（v0.17.1）。
-- result 写清本章停在哪个节点；后面章节的事件不提前写进本章的 result、hook_end。
+- result 写清本章停在哪个节点；后面章节的事件不提前写进本章的 result、hook_end。但每章自己的爽点必须在本章完整兑现，不能只铺垫不释放（v0.18）。
+- 卖点兑现表里到期的卖点，到期那章必须兑现（v0.18）。
 - 动笔前五问（答不出就改细纲）：主角这章要什么？谁在拦？哪一刻掉头？谁输了、谁看见？最后一拍停在哪？
 
 ## 段落安排（写正文前排）

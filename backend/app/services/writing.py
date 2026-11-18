@@ -345,7 +345,26 @@ def _write_variant(pack: ContextPack, meta: dict[str, Any], title: str, number: 
     content = clean_prose(out)
     if not content.strip():
         raise ValueError("模型没有写出正文")
+    have = count_words(content)
+    if have < TOPUP_RATIO * words:  # v0.18：整章写短了（常见于开篇），接着续写一次补齐，不另起炉灶
+        ctx.progress(pct, f"第{number}章 版本{variant + 1}：篇幅不够（{have}/{words} 字），续写补齐")
+        more = get_gateway().chat(
+            "writing_chapter",
+            [{"role": "system", "content": pack.prefix}, {"role": "user", "content": user},
+             {"role": "assistant", "content": content},
+             {"role": "user", "content": TOPUP_NOTE.format(missing=max(words - have, 500))}],
+            meta={**meta, "scenes": scenes, "variant": variant, "words": words, "topup": True},
+            temperature=WRITER_TEMPERATURE, max_tokens=writer_max_tokens(words),
+        )
+        extra = clean_prose(more)
+        if extra.strip() and extra.strip()[:30] not in content:
+            content = content.rstrip() + "\n\n" + extra.strip()
     return content
+
+
+TOPUP_RATIO = 0.75
+TOPUP_NOTE = ("篇幅不够，还差约 {missing} 字。从你最后一句之后接着写，把本章细纲里还没写到的段落写完，"
+              "写到本章结果和章末最后一拍为止；不重复前文，不重新开头，不写章节标题。只输出续写的正文。")
 
 
 def extract_chapter_state(book_id: int, pack: ContextPack, meta: dict[str, Any], number: int, title: str, content: str,
@@ -396,8 +415,17 @@ def _evaluate(
     review, dropped = run_review(get_gateway(), content, number, plan, pack.protagonist, pack.required_chars, meta,
                                  context=pack.state_text, cheat_terms=pack.cheat_terms,
                                  extra_issues=list(lint.numeric_issues or []) + _fanfic_issues(s, book, content, exclude_chapter_id),
-                                 persona=reader_persona(book))
+                                 persona=reader_persona(book), ledger=_reader_ledger(s, book.id or 0, number))
     return review, lint, dropped
+
+
+def _reader_ledger(s: Session, book_id: int, number: int) -> str:
+    try:
+        from app.services.outline import reader_ledger
+
+        return reader_ledger(s, book_id, number)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _fanfic_issues(s: Session, book: Book, content: str, chapter_id: int | None) -> list[dict[str, Any]]:

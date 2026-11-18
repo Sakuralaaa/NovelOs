@@ -116,7 +116,7 @@ def test_heal_and_retry(client: TestClient, monkeypatch: Any) -> None:
     monkeypatch.setattr(writing, "_evaluate", ev)
     b = client.post("/api/books", json={"title": "自愈", "genre": "都市", "gender": "male", "premise": "外卖员捡到神秘手机。"}).json()
     bid = b["id"]
-    r = client.post(f"/api/books/{bid}/autopilot/start", json={**SMALL, "target_words": 10_000, "batch_size": 4, "golden_chapters": 0})
+    r = client.post(f"/api/books/{bid}/autopilot/start", json={**SMALL, "target_words": 10_000, "batch_size": 4, "golden_chapters": 0, "level": "guided", "stop_on": []})
     assert r.status_code == 200
     o = _wait_run(client, bid, ("waiting", "done", "stopped"))
     run = o["run"]

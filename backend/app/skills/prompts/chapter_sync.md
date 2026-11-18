@@ -19,6 +19,12 @@ $prev_tail
 【前文已经结算/提示过的系统面板】
 $settled
 
+【简介向读者承诺的卖点】
+$promises
+
+【最近几章的阻力与爽点】
+$rhythm
+
 【第 $number 章现有章纲】
 $plan
 
@@ -29,10 +35,12 @@ $next_plan
 1. 本章开头的局面能不能直接接上上一章结尾（人在哪、谁在场、正在发生什么）？
 2. 本章要做的事，上一章是不是已经做完了（已经逃出来、已经赢了、已经揭穿、已经到场）？做完了的不许重做，本章往后推一步：处理它的后果、新的麻烦、下一个目标。
 3. 本章要结算的奖励、升级、道具，前文是不是已经结算过？同一笔不许再结算；本章换成新的收获，或者写“本章不结算”。
-4. 本章 result 和 hook_end 有没有把下一章要写的事提前写完？有就收住，留给下一章。
+4. 本章 result 和 hook_end 有没有把下一章要写的事提前写完？有就收住，留给下一章。但本章自己的爽点必须在本章兑现。
 5. hook_end 只写要发生什么，不写台词原句。
+6. 卖点表里已经到期、前文还没兑现的卖点，本章必须安排兑现（改 payoff、payoff_mechanism、result）。
+7. 本章的阻力如果和最近两章是同一种（尤其是报名、签字、复核、审查这类手续刁难），换成对手亲自下场、比试、猎杀或抢资源，手续问题让主角用实力一次掀掉。
 
 都没问题：{"ok":true,"reason":"一句话"}
 有问题：{"ok":false,"reason":"一句话说哪里接不上","chapter":{只给要改的字段},"next":{下一章要跟着改的字段，没有就给 {}}}
-可改的字段：title、goal、want、conflict、turn、result、outcome（yes|no|yes-but|no-and）、payoff、payoff_mechanism、cheat_beat、hook_end、opening_hook、expectation、characters、location。
+可改的字段：title、goal、want、conflict、conflict_type、turn、result、outcome（yes|no|yes-but|no-and）、payoff、payoff_mechanism、cheat_beat、hook_end、opening_hook、expectation、characters、location。
 保留原章纲的方向和人物，只改接不上、重复、提前写掉的部分。严格只输出 JSON。

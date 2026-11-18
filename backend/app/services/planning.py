@@ -308,11 +308,12 @@ def generate_ideas(params: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
         recent = s.exec(select(Idea).where(Idea.gender == gender).order_by(Idea.id.desc()).limit(30)).all()  # type: ignore[union-attr]
         existing = "\n".join(f"- 《{i.title}》{i.logline[:50]}" for i in recent) or "（无）"
         tl = tropes.global_tropes(s)
+        names = common.name_note(s)
     ctx.progress(20, "构思选题")
     data = get_gateway().chat_json(
         "ideation", system_prompt("ideation"),
         render("ideation", count=count, gender_label=common.GENDER_LABEL.get(gender, gender),
-               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text, existing=existing) + tropes.prompt_block(tl),
+               genre_hint=f"题材限定：{genre}。" if genre else "", trends=trend_text, existing=existing) + tropes.prompt_block(tl) + names,
         meta={"count": count, "gender": gender, "genre": genre, "trends": trends[:6] if params.get("from_trends") else []},
     )
     items = data.get("ideas") if isinstance(data, dict) else data
@@ -401,6 +402,7 @@ def generate_bible(book_id: int, ctx: JobContext, keep_existing: bool = False) -
         meta = common.kit_meta(s, book)
         user = render("bible", title=book.title, genre=book.genre,
                       gender_label=common.GENDER_LABEL.get(book.gender, book.gender), premise=book.premise or book.tagline)
+        user += common.name_note(s, book_id)
         if getattr(book, "fanfic", None) or keep_existing:
             have = common.cards(s, book_id, include_deprecated=True)
             if getattr(book, "fanfic", None):

@@ -817,3 +817,10 @@ Teardown { id, title, source: "rank_book"|"paste"|"txt", book_id_ext: string|nul
   - 完本批次 `WanbenBatch.stop_reason` 新增 `needs_review`。
 - 上下文预览（`GET /api/books/{id}/context-preview`）`blocks` 末尾新增固定块「上一章结尾原文」（写作时放在提示最后，不能关）。
 
+## v0.18.0 卖点兑现与阻力换型
+
+- 总纲节点（level=book）`beats.promises = [{what, by}]`：卖点兑现表，`by` 为最晚兑现章号（第一条 ≤3，其余 ≤10）。旧书没有时为空。
+- 章细纲 beats 新增可选 `conflict_type`：`武力挑衅|擂台比试|猎杀探险|阴谋暗算|利益争夺|规则刁难|身份质疑|情感关系|外敌危机`；章纲衔接校正可改它。
+- `POST /api/books/{id}/outline/generate` 结果的 `pacing_warnings` 新增阻力类型与手续刁难检查。
+- 审稿 `review.reader` 打分口径改变（参考卖点兑现表与前几章阻力），字段不变。
+- 一键成书 `level=full`：自愈修满轮数没过审时提交最好的一版，`flags[]` 里记 `blocking=false`，不再进入等待。

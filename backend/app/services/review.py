@@ -243,14 +243,14 @@ def reader_persona(book: Any) -> str:
 
 
 def run_reader(gw: LLMGateway, content: str, number: int, chapter_plan: str, context: str,
-               meta: dict[str, Any] | None = None, persona: str = "") -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+               meta: dict[str, Any] | None = None, persona: str = "", ledger: str = "") -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
     """番茄老读者视角：给追读意愿打分，标出想划走的句子，并回答三问（主角想要什么 / 在等什么 / 最后一句后想知道什么）。
     失败时返回 (None, [])，不影响主审稿。"""
     try:
         raw = gw.chat_json(
             "reader", system_prompt("reader"),
             render("reader", number=number, chapter_plan=chapter_plan, content=content, persona=persona or DEFAULT_PERSONA,
-                   context=context or "（无：这是开篇）"),
+                   context=context or "（无：这是开篇）", ledger=ledger or "（无）"),
             meta={**(meta or {}), "content": content, "number": number}, temperature=0.3,
         )
     except Exception:  # noqa: BLE001
@@ -288,6 +288,7 @@ def run_review(
     cheat_terms: list[str] | None = None,
     extra_issues: list[dict[str, Any]] | None = None,
     persona: str = "",
+    ledger: str = "",
 ) -> tuple[dict[str, Any], int]:
     """返回（Review dict, 被丢弃的无证据 issue 数）。context：人物当前状态 + 上一章结尾，供连贯性核对。
     extra_issues：v0.9.4 程序规则产出的问题（数值一致性 lint 等），quote 取自正文，与确定性检查一起计分。"""
@@ -300,7 +301,7 @@ def run_review(
         temperature=0.2,
     )
     llm_issues, dropped = validate_issues(raw, content, keep_src=True)
-    reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta, persona)
+    reader, reader_issues = run_reader(gw, content, number, chapter_plan, context, meta, persona, ledger)
     det = deterministic_issues(content, protagonist, required_chars, number, cheat_terms)
     for it in extra_issues or []:
         if isinstance(it, dict) and it.get("quote") and quote_in_text(str(it["quote"]), content):

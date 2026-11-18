@@ -182,3 +182,13 @@ export async function copyText(text: string): Promise<boolean> {
     return ok
   } catch { return false }
 }
+
+/** 章细纲节拍字段的中文名（界面不露内部键名） */
+export const BEAT_LABELS: Record<string, string> = {
+  number: '章号', title: '标题', goal: '本章问题', want: '主角想要', conflict: '阻力', conflict_type: '阻力类型', turn: '转折',
+  result: '结果', outcome: '结果走向', payoff: '爽点', payoff_mechanism: '爽点机制', payoff_type: '爽点模式', payoff_level: '爽点强度',
+  strand: '叙事线', emotion: '情绪走向', expectation: '读者期待', info_gap: '信息差', time: '故事时间', opening_hook: '开篇三行',
+  cheat_beat: '金手指', characters: '出场人物', location: '地点', foreshadow: '伏笔', hook_end: '章末一拍', hook_type: '钩子类型',
+  must_avoid: '本章避开', words: '字数', scenes: '段落安排', promises: '卖点兑现表',
+}
+export const beatLabel = (k: string) => BEAT_LABELS[k] ?? k

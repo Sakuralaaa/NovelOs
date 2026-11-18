@@ -20,7 +20,7 @@ import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { OutlineLevel, OutlineNode } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { BEAT_LABELS, beatLabel, cn } from '@/lib/utils'
 
 type TNode = OutlineNode & { children: TNode[] }
 const LEVEL: Record<OutlineLevel, { label: string; cls: string }> = {
@@ -115,7 +115,7 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
           </div>
           {n.summary && <p className={cn('mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground', isChapter ? 'line-clamp-1' : 'line-clamp-2')}>{n.summary}</p>}
           {isChapter && n.beats && Object.keys(n.beats).length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(n.beats).slice(0, 4).map(([k, v]) => <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{k}：{typeof v === 'string' ? v : JSON.stringify(v)}</span>)}</div>
+            <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(n.beats).slice(0, 4).map(([k, v]) => <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{beatLabel(k)}：{typeof v === 'string' ? v : JSON.stringify(v)}</span>)}</div>
           )}
           {job && <JobInline job={job} className="mt-2 max-w-md" />}
         </div>
@@ -236,7 +236,7 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
             <div className="space-y-1.5">
               {f.beats.map((b, i) => (
                 <div key={i} className="flex gap-1.5">
-                  <Input className="w-[110px] shrink-0" value={b.k} placeholder="如：章尾钩子" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} />
+                  {BEAT_LABELS[b.k] ? <span className="flex w-[110px] shrink-0 items-center text-[13px] text-muted-foreground">{BEAT_LABELS[b.k]}</span> : <Input className="w-[110px] shrink-0" value={b.k} placeholder="如：章尾钩子" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} />}
                   <Input value={b.v} className={cn(b.json && 'font-mono text-xs')} onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
                   <Button size="icon" variant="ghost" onClick={() => setF({ ...f, beats: f.beats.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></Button>
                 </div>
