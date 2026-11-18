@@ -260,6 +260,9 @@ def writing_put(body: WritingSettingsIn, s: Session = Depends(get_session)) -> d
     cur = writing_settings(s)
     cur.update({k: v for k, v in body.model_dump().items() if v is not None})
     kv_set(s, WRITING_SETTINGS_KEY, cur)
+    s.commit()
+    from app.llm.gateway import clear_runtime_llm_cache
+    clear_runtime_llm_cache()
     return writing_settings(s)
 
 

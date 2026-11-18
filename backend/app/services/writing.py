@@ -81,7 +81,10 @@ def planned_foreshadow_gaps(beats: dict[str, Any], cs: ChangeSet) -> list[str]:
 
 
 def writing_settings(s: Session) -> dict[str, Any]:
-    return {**DEFAULT_WRITING_SETTINGS, **(kv_get(s, WRITING_SETTINGS_KEY, {}) or {})}
+    from app.config import get_settings
+    cfg = get_settings()
+    base = {**DEFAULT_WRITING_SETTINGS, "llm_timeout": int(cfg.llm_timeout), "llm_retries": int(cfg.llm_retries)}
+    return {**base, **(kv_get(s, WRITING_SETTINGS_KEY, {}) or {})}
 
 
 def book_writing_key(book_id: int) -> str:

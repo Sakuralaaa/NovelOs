@@ -346,7 +346,43 @@ def route_target(s: Session, route: str) -> Target:
     return Target(c.id or 0, c.name, c.base_url, decrypt(c.api_key_enc), r[1], c.api_format or "openai")
 
 
+
+_RUNTIME_CACHE: dict[str, Any] = {"at": 0.0, "val": {}}
+
+
+def runtime_llm_settings() -> dict[str, Any]:
+    """设置页「写作偏好」里的模型等待上限 / 重试次数（存库，30 秒缓存）；没设就用启动配置。"""
+    import time as _t
+    now = _t.monotonic()
+    if now - _RUNTIME_CACHE["at"] < 30:
+        return _RUNTIME_CACHE["val"]
+    val: dict[str, Any] = {}
+    try:
+        from app.db import kv_get, session_scope
+        with session_scope() as s:
+            raw = kv_get(s, "writing_settings", {}) or {}
+        if isinstance(raw.get("llm_timeout"), (int, float)) and raw["llm_timeout"] > 0:
+            val["llm_timeout"] = float(raw["llm_timeout"])
+        if isinstance(raw.get("llm_retries"), int) and raw["llm_retries"] >= 0:
+            val["llm_retries"] = int(raw["llm_retries"])
+    except Exception:  # noqa: BLE001  库没初始化（测试/脚本）时用启动配置
+        val = {}
+    _RUNTIME_CACHE.update(at=now, val=val)
+    return val
+
+
+def clear_runtime_llm_cache() -> None:
+    _RUNTIME_CACHE["at"] = 0.0
+
 class LLMGateway:
+    @property
+    def _llm_timeout(self) -> float:
+        return float(runtime_llm_settings().get("llm_timeout", self.settings.llm_timeout))
+
+    @property
+    def _llm_retries(self) -> int:
+        return int(runtime_llm_settings().get("llm_retries", self.settings.llm_retries))
+
     def __init__(self) -> None:
         self.settings = get_settings()
 
@@ -383,7 +419,7 @@ class LLMGateway:
         errors: list[str] = []
         started = time.time()
         for t in targets:
-            for attempt in range(self.settings.llm_retries + 1):
+            for attempt in range(self._llm_retries + 1):
                 try:
                     return self._chat_once(t, role, task, messages, temperature, max_tokens, meta)
                 except Exception as e:  # noqa: BLE001
@@ -402,7 +438,7 @@ class LLMGateway:
         want_image: bool = False, timeout: float | None = None,
     ) -> dict[str, Any]:
         path, body = proto.chat_request(t.api_format, t.model, messages, temperature, max_tokens, want_image)
-        with httpx.Client(timeout=timeout or self.settings.llm_timeout, transport=_keepalive_transport()) as c:
+        with httpx.Client(timeout=timeout or self._llm_timeout, transport=_keepalive_transport()) as c:
             r = c.post(proto.url(t.base_url, path), headers=proto.headers(t.api_format, t.api_key), json=body)
             if r.status_code == 400 and t.api_format in ("openai", "responses") and _needs_stream(r.text) and not want_image:
                 # 有的中转只支持流式（如「Non-stream chat request is currently not supported」），自动改用流式再拼回完整结果
@@ -502,7 +538,7 @@ class LLMGateway:
             raise LLMError(str(e)) from e
         errors: list[str] = []
         for t in targets:
-            for attempt in range(self.settings.llm_retries + 1):
+            for attempt in range(self._llm_retries + 1):
                 try:
                     if t.api_format == "openai":
                         return self._tools_once(t, messages, tools, temperature)
@@ -519,7 +555,7 @@ class LLMGateway:
         started = time.time()
         body: dict[str, Any] = {"model": t.model, "messages": proto.openai_tool_messages(messages), "tools": tools,
                                 "tool_choice": "auto", "temperature": temperature}
-        with httpx.Client(timeout=self.settings.llm_timeout, transport=_keepalive_transport()) as c:
+        with httpx.Client(timeout=self._llm_timeout, transport=_keepalive_transport()) as c:
             r = c.post(proto.url(t.base_url, "/chat/completions"), headers=proto.headers("openai", t.api_key), json=body)
         if r.status_code >= 400:
             raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
@@ -600,7 +636,7 @@ class LLMGateway:
         非流式请求在这段静默里容易被中间层掐断，所以：流式 + 只收 content + 长空闲超时 + TCP keepalive；
         中途断开但已收到足够正文时直接用已收到的部分。
         """
-        limit = max(self.settings.search_timeout, self.settings.llm_timeout)
+        limit = max(self.settings.search_timeout, self._llm_timeout)
         if t.api_format != "openai":
             data = self._post_chat(t, messages, None, None, timeout=limit)
             text, usage, _ = proto.parse_chat(t.api_format, data)
@@ -677,7 +713,7 @@ class LLMGateway:
         errors: list[str] = []
         started = time.time()
         for t in targets[:1]:
-            for attempt in range(self.settings.llm_retries + 1):
+            for attempt in range(self._llm_retries + 1):
                 try:
                     if mode == "chat" or t.api_format in ("anthropic", "gemini"):
                         imgs = self._images_via_chat(t, prompt, n)
@@ -699,7 +735,7 @@ class LLMGateway:
 
     def _images_once(self, t: Target, prompt: str, n: int) -> list[bytes]:
         body = {"model": t.model, "prompt": prompt, "n": n, "size": self.settings.image_size}
-        with httpx.Client(timeout=max(self.settings.llm_timeout, 300), follow_redirects=True) as c:
+        with httpx.Client(timeout=max(self._llm_timeout, 300), follow_redirects=True) as c:
             r = c.post(proto.url(t.base_url, "/images/generations"), headers=proto.headers("openai", t.api_key), json=body)
             if r.status_code >= 400:
                 raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
@@ -723,7 +759,7 @@ class LLMGateway:
         with httpx.Client(timeout=60, follow_redirects=True) as dl:
             for _ in range(max(1, n)):
                 data = self._post_chat(t, [{"role": "user", "content": ask}], None, None, want_image=True,
-                                       timeout=max(self.settings.llm_timeout, 300))
+                                       timeout=max(self._llm_timeout, 300))
                 _, usage, imgs = proto.parse_chat(t.api_format, data)
                 _record_usage(t, "image", "cover", usage)
                 for im in imgs:

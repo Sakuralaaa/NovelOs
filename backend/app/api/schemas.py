@@ -88,6 +88,8 @@ class WritingSettingsIn(BaseModel):
     # v0.9.4
     fix_mid_before_commit: bool | None = None  # 提交前自动修 continuity/retention 类 mid 问题（默认开）
     auto_rereview: bool | None = None  # 自动应用审稿补丁后重审一次（默认开）
+    llm_timeout: int | None = Field(default=None, ge=60, le=1800)  # v0.18.2 单次模型调用等待上限（秒）
+    llm_retries: int | None = Field(default=None, ge=0, le=5)  # v0.18.2 同一渠道失败重试次数
 
 
 class BookWritingSettingsIn(BaseModel):

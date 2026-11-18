@@ -789,6 +789,10 @@ export interface ReviewPatch {
 export interface WritingSettings {
   fix_mid_before_commit?: boolean
   auto_rereview?: boolean
+  /** v0.18.2 单次模型调用等待上限（秒） */
+  llm_timeout?: number
+  /** v0.18.2 同一渠道失败重试次数 */
+  llm_retries?: number
 }
 export interface BookWritingToggles { fix_mid_before_commit: boolean; auto_rereview: boolean }
 export interface BookWritingSettings {

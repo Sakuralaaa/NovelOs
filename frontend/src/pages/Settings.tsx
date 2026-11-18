@@ -461,6 +461,14 @@ function WritingCard() {
               </div>
               <Switch checked={c.auto_rereview ?? true} onCheckedChange={(v) => m.mutate({ auto_rereview: v })} />
             </label>
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">模型等待上限</div>
+              <div className="w-[240px]"><Select value={String(c.llm_timeout ?? 360)} onChange={(v) => v && m.mutate({ llm_timeout: Number(v) })} options={[120, 180, 240, 360, 600, 900, 1800].map((n) => ({ value: String(n), label: n >= 600 ? `${n / 60} 分钟` : `${n} 秒` }))} /></div>
+            </div>
+            <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
+              <div className="text-[13.5px] font-medium">失败重试次数</div>
+              <div className="w-[240px]"><Select value={String(c.llm_retries ?? 2)} onChange={(v) => v != null && m.mutate({ llm_retries: Number(v) })} options={[0, 1, 2, 3, 5].map((n) => ({ value: String(n), label: n === 0 ? '不重试' : `${n} 次` }))} /></div>
+            </div>
             {costRow}
           </div>
         )}
