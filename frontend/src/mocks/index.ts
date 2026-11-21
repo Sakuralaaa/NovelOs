@@ -267,6 +267,7 @@ on('POST', '/auth/login', (_m: any, body: any) => { if (body?.password !== 'nove
 on('POST', '/auth/logout', () => { sessionStorage.setItem('mock-auth', '0'); return { ok: true } })
 on('POST', '/auth/password', () => ({ ok: true }))
 const mockKeys: any[] = []
+on('GET', '/mcp-info', () => ({ url: `${location.origin}/api/mcp`, tools: [{ name: 'guide', description: 'NovelOS 使用说明与推荐流程' }, { name: 'list_books', description: '列出所有作品' }, { name: 'chapter_brief', description: '写某章前取上下文' }, { name: 'save_chapter', description: '把你写好的正文存为第 N 章' }, { name: 'call_model', description: '用作者配置的模型生成文本' }, { name: 'api', description: '调用任意 NovelOS 接口' }] }))
 on('GET', '/auth/keys', () => ({ keys: mockKeys, env_key_enabled: false }))
 on('POST', '/auth/keys', (_m: any, b: any) => { const id = String(Math.floor(1e7 + Math.random() * 9e7)); const token = `nvk_${id}_demo${Math.random().toString(36).slice(2)}`; const k = { id, name: b?.name || '未命名', preview: `nvk_${id}_…${token.slice(-4)}`, created_at: Math.floor(Date.now() / 1000), last_used_at: null }; mockKeys.push(k); return { ...k, token } })
 on('DELETE', '/auth/keys/:id', (m: any) => { const i = mockKeys.findIndex((k) => k.id === m[1]); if (i >= 0) mockKeys.splice(i, 1); return { ok: true } })

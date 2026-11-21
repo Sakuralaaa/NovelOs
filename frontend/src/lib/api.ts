@@ -93,6 +93,8 @@ export const api = {
   apiKeys: () => get<{ keys: ApiKey[]; env_key_enabled: boolean }>('/auth/keys'),
   createApiKey: (name: string) => post<ApiKey & { token: string }>('/auth/keys', { name }),
   revokeApiKey: (id: string) => del<{ ok: boolean }>(`/auth/keys/${id}`),
+  /** v0.19 Agent 接入（MCP） */
+  mcpInfo: () => get<{ url: string; tools: { name: string; description: string }[] }>('/mcp-info'),
 
   jobs: (bookId?: number) => get<Job[]>(`/jobs${qs({ book_id: bookId })}`),
   job: (id: number) => get<Job>(`/jobs/${id}`),

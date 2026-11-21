@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.api import routes_agent, routes_auth, routes_books, routes_core, routes_dev, routes_fanfic, routes_v093
 from app.api import routes_bookcheck
+from app.api import routes_mcp
 from app.apikeys import ApiKeyStore, token_from_headers
 from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
     from app.api import routes_autopilot  # v0.16 一键成书
 
     app.include_router(routes_autopilot.router)
+    app.include_router(routes_mcp.router)  # v0.19 Agent 接入（MCP）
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 

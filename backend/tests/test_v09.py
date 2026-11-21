@@ -460,6 +460,6 @@ def test_context_includes_next_two_outlines(client: TestClient) -> None:
 def test_version_090(client: TestClient) -> None:
     from pathlib import Path
 
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18."))  # v0.9.1 起版本号由 test_v091 精确校验
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18.", "0.19."))  # v0.9.1 起版本号由 test_v091 精确校验
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.0" in (root / "CHANGELOG.md").read_text(encoding="utf-8")

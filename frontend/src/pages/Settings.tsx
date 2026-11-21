@@ -70,6 +70,7 @@ export default function SettingsPage() {
         <TropesCard />
         <RadarCard />
         <AccountCard />
+        <AgentCard />
         <ApiKeysCard />
         <Appearance />
       </div>
@@ -764,6 +765,59 @@ function AccountCard() {
 }
 
 const fmtTime = (t: number | null) => (t ? new Date(t * 1000).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '从未使用')
+
+/** v0.19 Agent 接入：外部 agent 通过 MCP 接管 NovelOS */
+function AgentCard() {
+  const qc = useQueryClient()
+  const info = useQuery({ queryKey: ['mcp-info'], queryFn: api.mcpInfo })
+  const [token, setToken] = useState('')
+  const [tab, setTab] = useState<'antigravity' | 'claude' | 'json'>('antigravity')
+  const create = useMutation({
+    mutationFn: () => api.createApiKey('Agent 接入'),
+    meta: { errorTitle: '生成失败' },
+    onSuccess: (k) => { setToken(k.token); qc.invalidateQueries({ queryKey: qk.apiKeys }); toast.success('已生成专用密钥并填进配置，只显示这一次') },
+  })
+  const url = info.data?.url ?? `${location.origin}/api/mcp`
+  const key = token || 'nvk_你的密钥'
+  const snippets = {
+    antigravity: JSON.stringify({ mcpServers: { novelos: { serverUrl: url, headers: { Authorization: `Bearer ${key}` } } } }, null, 2),
+    claude: `claude mcp add --transport http novelos ${url} --header "Authorization: Bearer ${key}"`,
+    json: JSON.stringify({ mcpServers: { novelos: { type: 'http', url, headers: { Authorization: `Bearer ${key}` } } } }, null, 2),
+  }
+  const copy = async (t: string) => {
+    try { await navigator.clipboard.writeText(t); toast.success('已复制') } catch { toast.info('请长按选中后手动复制') }
+  }
+  const tabs: { k: typeof tab; label: string }[] = [{ k: 'antigravity', label: '反重力' }, { k: 'claude', label: 'Claude Code' }, { k: 'json', label: '通用配置' }]
+  return (
+    <Card>
+      <CardHeader divider title="Agent 接入" icon={<Plug className="h-4 w-4" />} />
+      <CardBody className="space-y-4 pt-5">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 font-mono text-[13px]">{url}</div>
+          <Button size="sm" variant="ghost" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(url)}>复制地址</Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {tabs.map((x) => (
+            <Button key={x.k} size="sm" variant={tab === x.k ? 'primary' : 'ghost'} onClick={() => setTab(x.k)}>{x.label}</Button>
+          ))}
+          <div className="flex-1" />
+          <Button size="sm" variant="ghost" loading={create.isPending} icon={<KeyRound className="h-3.5 w-3.5" />} onClick={() => create.mutate()}>生成专用密钥并填入</Button>
+        </div>
+        <div className="relative">
+          <pre className="max-h-[240px] overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted px-3 py-2.5 font-mono text-[12.5px]">{snippets[tab]}</pre>
+          <Button size="sm" variant="ghost" className="absolute right-1.5 top-1.5" aria-label="复制配置" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(snippets[tab])} />
+        </div>
+        {info.data && (
+          <div className="flex flex-wrap gap-1.5">
+            {info.data.tools.map((t) => (
+              <span key={t.name} title={t.description} className="rounded-md border border-border px-2 py-0.5 text-[12px] text-muted-foreground">{t.description.split(/[（。：(]/)[0]}</span>
+            ))}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
 
 function ApiKeysCard() {
   const qc = useQueryClient()
