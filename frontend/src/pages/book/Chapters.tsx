@@ -90,7 +90,6 @@ export default function Chapters() {
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span className="num">{fmtNum(c.words)} 字</span>
-                  {c.review && <span className="num">· {c.review.scores.overall} 分</span>}
                   {!!c.variants?.length && <span className="rounded bg-primary-soft px-1 text-primary">{c.variants.length} 版</span>}
                 </div>
               </div>
@@ -489,7 +488,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
             <SaveIndicator state={saveState} at={savedAt} />
           </div>
           <div className="-mx-2 flex w-[calc(100%+1rem)] min-w-0 overflow-x-auto overscroll-x-contain px-2 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:flex-1 sm:px-0 [&::-webkit-scrollbar]:hidden">
-            <div className="ml-auto flex shrink-0 items-center gap-1 py-0.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1 py-0.5 pr-1">
               <Tip content="写下一章（AI 按大纲写新章节）">
                 <span className="inline-flex shrink-0"><WriteNextButton bookId={bookId} size="sm" label="写作" buttonClassName={`h-10 min-w-10 ${FINE}:h-8 ${FINE}:min-w-0`} /></span>
               </Tip>
@@ -511,7 +510,7 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                   size="sm" variant="ghost" className={TB} loading={!!thickenJob} disabled={busy || hasVariants || !!diff} icon={<Sparkles className="h-3.5 w-3.5" />} onRun={() => runRewrite('thicken')}>增厚</CostButton></span>
               </Tip>
               <ToolSep />
-              <Tip content="审稿：打分、挑问题、给补丁">
+              <Tip content="审稿：按需挑问题、给建议与补丁（不动正文）">
                 <span className="inline-flex shrink-0"><CostButton target={{ kind: 'review', bookId, chapterId: id }} label="审稿"
                   size="sm" variant="ghost" className={TB} loading={!!reviewJob} disabled={busy || hasVariants} icon={<RotateCw className="h-3.5 w-3.5" />} onRun={runReview}>审稿</CostButton></span>
               </Tip>
@@ -611,20 +610,15 @@ function ChapterWorkspace({ id, bookId, chapters }: { id: number; bookId: number
                     <Button size="sm" variant="primary" loading={adopt.isPending} disabled={!curVariant} onClick={() => curVariant && adopt.mutate(curVariant.id)}>采纳此版</Button>
                   </div>
                   <div className="mt-3 grid gap-2" style={{ gridTemplateColumns: `repeat(${variants.length}, minmax(0,1fr))` }}>
-                    {variants.map((v, i) => {
-                      const best = Math.max(...variants.map((x) => x.review_overall ?? 0)) === (v.review_overall ?? -1)
-                      return (
-                        <button key={v.id} onClick={() => { setVariantId(v.id); setFocusQuote(null) }}
-                          className={cn('relative rounded-lg px-3 py-2 text-left transition', v.id === variantId ? 'bg-surface shadow-card ring-2 ring-primary/50' : 'bg-surface/50 hairline hover:bg-surface')}>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[13px] font-semibold">版本 {String.fromCharCode(65 + i)}</span>
-                            {best && <span className="rounded bg-success-soft px-1.5 text-[10.5px] font-medium text-success">最高分</span>}
-                          </div>
-                          <div className="num mt-1 flex items-baseline gap-0.5"><span className="text-[20px] font-semibold leading-none">{v.review_overall ?? '—'}</span><span className="text-xs text-muted-foreground">分</span></div>
-                          <div className="num mt-1 truncate text-[11.5px] text-muted-foreground">{fmtNum(v.words)} 字{v.lint ? ` · AI味 ${Math.round(v.lint.ai_score)}` : ''}</div>
-                        </button>
-                      )
-                    })}
+                    {variants.map((v, i) => (
+                      <button key={v.id} onClick={() => { setVariantId(v.id); setFocusQuote(null) }}
+                        className={cn('relative rounded-lg px-3 py-2 text-left transition', v.id === variantId ? 'bg-surface shadow-card ring-2 ring-primary/50' : 'bg-surface/50 hairline hover:bg-surface')}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px] font-semibold">版本 {String.fromCharCode(65 + i)}</span>
+                        </div>
+                        <div className="num mt-1 truncate text-[12px] text-muted-foreground">{fmtNum(v.words)} 字</div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}

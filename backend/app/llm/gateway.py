@@ -13,6 +13,7 @@ import logging
 import re
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -215,7 +216,10 @@ def _needs_stream(text: str) -> bool:
     return "stream" in t and any(k in t for k in ("not support", "only support", "must be true", "required", "不支持"))
 
 
-def _post_stream(c: httpx.Client, t: Target, path: str, body: dict[str, Any]) -> dict[str, Any]:
+def _post_stream(
+    c: httpx.Client, t: Target, path: str, body: dict[str, Any],
+    on_delta: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     body = {**body, "stream": True}
     if t.api_format == "openai":
         body["stream_options"] = {"include_usage": True}
@@ -238,14 +242,18 @@ def _post_stream(c: httpx.Client, t: Target, path: str, body: dict[str, Any]) ->
             if t.api_format == "openai":
                 for ch in ev.get("choices") or []:
                     d = (ch.get("delta") or {}).get("content")
-                    if isinstance(d, str):
+                    if isinstance(d, str) and d:
                         texts.append(d)
+                        if on_delta:
+                            on_delta(d)
                 if ev.get("usage"):
                     usage = ev["usage"]
             else:
                 typ = ev.get("type", "")
-                if typ == "response.output_text.delta" and isinstance(ev.get("delta"), str):
+                if typ == "response.output_text.delta" and isinstance(ev.get("delta"), str) and ev["delta"]:
                     texts.append(ev["delta"])
+                    if on_delta:
+                        on_delta(ev["delta"])
                 elif typ == "response.completed":
                     usage = (ev.get("response") or {}).get("usage") or usage
     text = "".join(texts)
@@ -488,6 +496,105 @@ class LLMGateway:
         started = time.time()
         try:
             data = self._post_chat(t, messages, temperature, max_tokens, cache_key=sticky_key(meta))
+            content, usage, _ = proto.parse_chat(t.api_format, data)
+        except Exception as e:
+            trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output="",
+                         started=started, error=_friendly(e), temperature=temperature)
+            raise
+        _record_usage(t, role, task, usage)
+        trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output=content,
+                     started=started, usage=usage, temperature=temperature,
+                     error=None if content.strip() else "模型返回空内容")
+        usage_log.record(task=task, route=role, model=f"{t.name}/{t.model}", messages=messages, output=content,
+                         ms=int((time.time() - started) * 1000), usage=usage)
+        if not content.strip():
+            raise LLMError("模型返回空内容")
+        archive.record(task=task, route=role, model=f"{t.name}/{t.model}", raw_model=t.model, channel_id=t.channel_id,
+                       messages=messages, output=content, ms=int((time.time() - started) * 1000), usage=usage, meta=meta)
+        return content
+
+    def chat_stream(
+        self,
+        task: str,
+        messages: list[dict[str, str]],
+        on_delta: Callable[[str], None] | None = None,
+        meta: dict[str, Any] | None = None,
+        role: str | None = None,
+        temperature: float = 0.8,
+        max_tokens: int | None = None,
+        route: str | None = None,
+    ) -> str:
+        """v0.20 流式对话：OpenAI Chat / Responses 走真实 SSE 边写边显示，其他格式或 mock 平滑回退。"""
+        role = role or TASK_ROLE.get(task, "planner")
+        with session_scope() as s:
+            targets = [route_target(s, route)] if route else resolve_targets(s, role)
+        if not targets:
+            started = time.time()
+            out = mock.complete(task, messages, meta or {})
+            if on_delta:
+                step = 24
+                for i in range(0, len(out), step):
+                    on_delta(out[i : i + step])
+            trace.record(task=task, role=role, model="mock", channel="mock", messages=messages, output=out,
+                         started=started, temperature=temperature)
+            usage_log.record(task=task, route=role, model="mock", messages=messages, output=out,
+                             ms=int((time.time() - started) * 1000))
+            archive.record(task=task, route=role, model="mock", messages=messages, output=out,
+                           ms=int((time.time() - started) * 1000), meta=meta)
+            return out
+        try:
+            archive.check_budget()
+        except archive.BudgetExceeded as e:
+            archive.record(task=task, route=role, model=f"{targets[0].name}/{targets[0].model}", messages=messages,
+                           status="failed", error=str(e), meta=meta)
+            raise LLMError(str(e)) from e
+        errors: list[str] = []
+        started = time.time()
+        for t in targets:
+            for attempt in range(self._llm_retries + 1):
+                emitted = False
+                def _emit(chunk: str) -> None:
+                    nonlocal emitted
+                    emitted = True
+                    if on_delta:
+                        on_delta(chunk)
+                try:
+                    if t.api_format in ("openai", "responses"):
+                        return self._chat_stream_once(t, role, task, messages, temperature, max_tokens, meta, _emit)
+                    out = self._chat_once(t, role, task, messages, temperature, max_tokens, meta)
+                    _emit(out)
+                    return out
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"{t.name}/{t.model}：{_friendly(e)}")
+                    log.warning("LLM 流式调用失败 %s", errors[-1])
+                    if emitted or _not_retryable(e):
+                        break
+                    time.sleep(min(2.0, 0.5 * (attempt + 1)))
+        err = "所有渠道均失败：" + "；".join(dict.fromkeys(errors[-4:]))
+        archive.record(task=task, route=role, model=f"{targets[-1].name}/{targets[-1].model}", messages=messages,
+                       status="failed", error=err, ms=int((time.time() - started) * 1000), meta=meta)
+        raise LLMError(err)
+
+    def _chat_stream_once(
+        self, t: Target, role: str, task: str, messages: list[dict[str, str]],
+        temperature: float, max_tokens: int | None, meta: dict[str, Any] | None,
+        on_delta: Callable[[str], None] | None,
+    ) -> str:
+        started = time.time()
+        path, body = proto.chat_request(t.api_format, t.model, messages, temperature, max_tokens, False)
+        ck = sticky_key(meta)
+        if ck:
+            body["prompt_cache_key"] = ck
+        try:
+            with httpx.Client(timeout=self._llm_timeout, transport=_keepalive_transport()) as c:
+                try:
+                    data = _post_stream(c, t, path, body, on_delta=on_delta)
+                except LLMError as e:
+                    if "prompt_cache_key" in body and _drop_sticky(str(e)):
+                        body.pop("prompt_cache_key", None)
+                        data = _post_stream(c, t, path, body, on_delta=on_delta)
+                    else:
+                        raise
             content, usage, _ = proto.parse_chat(t.api_format, data)
         except Exception as e:
             trace.record(task=task, role=role, model=t.model, channel=t.name, messages=messages, output="",

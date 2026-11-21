@@ -15,6 +15,50 @@ export interface Job {
   updated_at: string
 }
 
+export interface AgentActivity {
+  id: number
+  book_id: number | null
+  tool: string
+  summary: string
+  detail: Record<string, any> | null
+  ok: boolean
+  created_at: string
+}
+
+export interface SkillItem {
+  id: number
+  slug: string
+  name: string
+  description: string
+  stage: string
+  source: 'builtin' | 'github' | 'custom'
+  source_url: string
+  license: string
+  enabled: boolean
+  is_default: boolean
+  chars: number
+  ref_count: number
+  body?: string
+  references?: { name: string; content: string }[]
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface BookSkillsResp {
+  book_id: number
+  customized: boolean
+  selected_ids: number[]
+  writing_chars: number
+  items: SkillItem[]
+}
+
+export type WriteStreamEvent =
+  | { type: 'status'; progress?: number; message?: string }
+  | { type: 'start'; number: number; title: string; target_words: number }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; chapter_id: number; number: number; title: string; words: number; committed: boolean; status: string }
+  | { type: 'error'; detail: string }
+
 export interface Channel {
   id: number
   name: string

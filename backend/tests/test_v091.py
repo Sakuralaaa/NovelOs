@@ -553,6 +553,7 @@ def test_polish_voice_warns_on_changed_numbers(client: TestClient, monkeypatch: 
     assert any("数字" in w and "三千" in w for w in res["warnings"]) and any("苏晚" in w for w in res["warnings"])
 
 
+@pytest.mark.skip(reason="v0.20 已移除站内书内 Agent，改由外部 MCP Agent 接管")
 def test_agent_polish_voice_tool(client: TestClient) -> None:
     from app.services import agent_tools
 
@@ -574,7 +575,7 @@ def test_agent_polish_voice_tool(client: TestClient) -> None:
 # ================================================================== 7. 版本号
 
 def test_version_091(client: TestClient) -> None:
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18.", "0.19."))
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18.", "0.19.", "0.20."))
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.1" in (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "## v0.9.1" in (root / "docs" / "API_CONTRACT.md").read_text(encoding="utf-8")

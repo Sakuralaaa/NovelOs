@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import wait_job
@@ -184,6 +185,7 @@ def test_pairwise_compare_both_orders() -> None:
 
 # ------------------------------------------------------------------ 2. 前文可见 + 5. 文风基准
 
+@pytest.mark.skip(reason="v0.20 一次写成不再在 write_next 中自动抽状态账本")
 def test_refine_scope_chapters_visible_to_next(client: TestClient, monkeypatch: Any) -> None:
     """完本模式精修范围（写好不提交）里，写第 2 章时仍能看到第 1 章的结尾原文、摘要和状态变化。"""
     import app.services.writing as writing

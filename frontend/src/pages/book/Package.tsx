@@ -153,7 +153,6 @@ export default function PackagePage() {
                     <button key={t.title} onClick={() => !cur && setTitle.mutate(t.title)} className={cn('flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-left transition hairline', cur ? 'bg-primary-soft ring-1 ring-primary/40' : 'hover:bg-subtle')}>
                       <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded-full border', cur ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>{cur && <Check className="h-3 w-3" />}</span>
                       <span className="min-w-0 flex-1 truncate font-medium">{t.title}</span>
-                      <div className="flex w-24 shrink-0 items-center gap-2"><div className="h-1.5 flex-1 rounded-full bg-muted"><div className="h-full rounded-full bg-primary/70" style={{ width: `${t.score}%` }} /></div><span className="num w-6 text-right text-xs text-muted-foreground">{t.score}</span></div>
                     </button>
                   )
                 })}

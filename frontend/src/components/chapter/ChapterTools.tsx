@@ -86,7 +86,6 @@ function TitlesSheet({ open, onClose, chapterId, current, onPick }: { open: bool
         {res?.titles.map((t) => (
           <button key={t.title} type="button" onClick={() => { onPick(t.title); toast.success(`章名改为「${t.title}」`) }}
             className={cn('flex w-full min-w-0 items-start gap-3 rounded-xl border bg-surface px-3.5 py-3 text-left transition hover:border-primary/50', t.title === current && 'border-primary')}>
-            <span className="num flex h-8 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-[13px] font-semibold text-primary">{t.score}</span>
             <span className="min-w-0 flex-1">
               <span className="block text-[14.5px] font-semibold">{t.title}</span>
               {t.reason && <span className="mt-0.5 block text-[12.5px] text-muted-foreground">{t.reason}</span>}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Check, ClipboardPaste, Feather, Info, Save, Sparkles } from '@/components/icons'
@@ -134,9 +135,77 @@ export default function StylePage() {
               </CardBody>
             </Card>
           )}
+          <BookSkillsCard bookId={id} />
         </div>
       </div>
     </div>
+  )
+}
+
+function BookSkillsCard({ bookId }: { bookId: number }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: qk.bookSkills(bookId), queryFn: () => api.bookSkills(bookId) })
+  const save = useMutation({
+    mutationFn: (ids: number[]) => api.saveBookSkills(bookId, ids),
+    meta: { errorTitle: '更新本书技能失败' },
+    onSuccess: (d) => { qc.setQueryData(qk.bookSkills(bookId), d); toast.success('本书技能已更新') },
+  })
+  const data = q.data
+  if (!data) return null
+  const sel = new Set(data.selected_ids)
+  const writingItems = data.items.filter((x) => x.enabled && (x.stage === 'writing' || x.stage === 'general'))
+  const toggle = (sid: number) => {
+    const next = new Set(sel)
+    if (next.has(sid)) next.delete(sid)
+    else next.add(sid)
+    save.mutate([...next])
+  }
+  const heavy = data.writing_chars > 2500
+  return (
+    <Card>
+      <CardHeader
+        title="本书写作技能"
+        desc="手动写作和外接 Agent 写章时共用"
+        icon={<Sparkles className="h-4 w-4" />}
+        action={<Link to="/skills"><Button size="sm" variant="ghost">管理技能库</Button></Link>}
+      />
+      <CardBody className="space-y-2.5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">当前写作技能合计</span>
+          <span className={cn('num font-medium', heavy ? 'text-warning' : 'text-foreground/80')}>
+            {data.writing_chars.toLocaleString()} 字{heavy ? '（偏长，建议精简防规则打架）' : ''}
+          </span>
+        </div>
+        <div className="space-y-1.5">
+          {writingItems.map((sk) => {
+            const on = sel.has(sk.id)
+            return (
+              <button
+                key={sk.id}
+                type="button"
+                disabled={save.isPending}
+                onClick={() => toggle(sk.id)}
+                className={cn(
+                  'flex w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition',
+                  on ? 'border-primary bg-primary-soft/50' : 'border-border hover:bg-subtle/60',
+                )}
+              >
+                <span className={cn('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px]', on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40')}>
+                  {on && <Check className="h-3 w-3" />}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px] font-medium">{sk.name}</span>
+                    <Badge tone="outline" className="text-[10.5px]">{sk.chars.toLocaleString()} 字</Badge>
+                  </div>
+                  {sk.description && <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{sk.description}</div>}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </CardBody>
+    </Card>
   )
 }
 

@@ -4,7 +4,6 @@ import { Menu } from '@/components/icons'
 import { Sidebar } from './Sidebar'
 import { JobTray } from './JobTray'
 import { CommandPalette } from './CommandPalette'
-import { AgentDrawer } from '@/components/agent/AgentDrawer'
 import { Logo } from '@/components/common/States'
 import { useHotkey } from '@/hooks/useHotkey'
 import { cn } from '@/lib/utils'
@@ -44,7 +43,6 @@ export function AppShell() {
         </main>
       </div>
       <JobTray />
-      <AgentDrawer />
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
     </div>
   )

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, ArrowRight, ArrowUpRight, Check, Eye, RefreshCw, StopSquare, Undo2, X } from '@/components/icons'
+import { AlertTriangle, ArrowUpRight, Check, Eye, RefreshCw, StopSquare, Undo2, X } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
@@ -18,7 +18,7 @@ import { useJobs } from '@/lib/jobs'
 import { diffParas, type DiffRow } from '@/lib/textAnalysis'
 import type { IterMethod, WanbenIteration } from '@/lib/types'
 import { cn, fmtNum, fmtTime } from '@/lib/utils'
-import { Delta, parseRanges } from './bits'
+import { parseRanges } from './bits'
 
 const METHODS: { value: IterMethod; label: string }[] = [{ value: 'auto', label: '自动' }, { value: 'patch', label: '定点修' }, { value: 'rewrite', label: '整章重写' }]
 const METHOD_LABEL: Record<string, string> = { patch: '定点修', rewrite: '整章重写', auto: '自动', humanize: '去 AI 味', polish: '语感重塑', format: '排版' }
@@ -87,7 +87,7 @@ export function IterateCard({ bookId, maxChapter, className }: { bookId: number;
             <Button variant="primary" className="h-10" loading={!!active} disabled={!nChapters} onClick={() => void run()}>发起迭代</Button>
           </div>
         </div>
-        <p className="text-[12px] leading-relaxed text-muted-foreground">「自动」：有作者要求、严重问题 ≥ 3 条或读者分不达标时整章重写，否则定点修。没有自动终止门槛，分数变化只做参考，满意了再采纳。</p>
+        <p className="text-[12px] leading-relaxed text-muted-foreground">「自动」：有作者要求或严重问题 ≥ 3 条时整章重写，否则定点修。只生成新版本不覆盖正文，对比满意后再采纳。</p>
         {active && <JobInline job={active} />}
 
         <div className="border-t pt-4">
@@ -145,24 +145,11 @@ function useIterActions(bookId: number, onAdopted?: (iterId: number, chapterId: 
   return { adopt, discard, undo }
 }
 
-const pct = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100))
-
-function ScorePair({ label, before, after, delta }: { label: string; before: number | null | undefined; after: number | null | undefined; delta: number | null | undefined }) {
-  return (
-    <span className="num inline-flex items-center gap-1 whitespace-nowrap text-[12px]">
-      <span className="text-muted-foreground">{label}</span>
-      <span>{before ?? '—'}</span><ArrowRight className="h-3 w-3 text-muted-foreground" /><span className="font-semibold">{after ?? '—'}</span>
-      <Delta v={delta} className="ml-0.5" />
-    </span>
-  )
-}
-
 function IterRow({ it, bookId, onOpen, canUndo, onAdopted, onUndone }: {
   it: WanbenIteration; bookId: number; onOpen: () => void; canUndo: boolean; onAdopted: (cid: number) => void; onUndone: () => void
 }) {
   const { adopt, discard, undo } = useIterActions(bookId, (_i, cid) => onAdopted(cid))
   const st = IT_STATUS[it.status] ?? IT_STATUS.pending
-  const sc = it.scores
   return (
     <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 bg-surface px-3.5 py-2.5', it.status === 'discarded' && 'opacity-60')}>
       <div className="min-w-0 flex-1 basis-[220px]">
@@ -173,13 +160,6 @@ function IterRow({ it, bookId, onOpen, canUndo, onAdopted, onUndone }: {
           {it.stale && it.status === 'pending' && <Badge tone="warning" title="这一版的底稿不是当前正文（基于上一轮版本，或生成后正文又改过）；采纳会覆盖当前正文，旧正文进历史可撤回"><AlertTriangle className="h-3 w-3" />底稿非当前正文</Badge>}
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-          {ITER_METHODS.includes(it.method) ? <>
-            <ScorePair label="审稿" before={sc?.before.overall} after={sc?.after.overall} delta={sc?.delta.overall} />
-            <ScorePair label="读者" before={sc?.before.reader} after={sc?.after.reader} delta={sc?.delta.reader} />
-          </> : <>
-            {sc?.before.ai != null && <ScorePair label="AI 味" before={sc.before.ai} after={sc.after.ai} delta={sc.delta.ai != null ? -sc.delta.ai : null} />}
-            {sc?.before.aigc != null && <ScorePair label="AI 率" before={pct(sc.before.aigc)} after={pct(sc.after.aigc)} delta={sc.delta.aigc != null ? -Math.round(sc.delta.aigc * 100) : null} />}
-          </>}
           <span className="num text-[12px] text-muted-foreground">{fmtNum(it.words)} 字 · {fmtTime(it.created_at)}</span>
         </div>
       </div>
@@ -208,7 +188,7 @@ function CompareSheet({ bookId, id, onClose, onAdopted }: { bookId: number; id: 
   return (
     <Sheet open={!!id} onOpenChange={(o) => !o && onClose()} width={960}
       title={it ? `第 ${it.number} 章 · 第 ${it.round} 轮（${METHOD_LABEL[it.method] ?? it.method}）` : '版本对比'}
-      desc={it?.scores ? `审稿 ${it.scores.before.overall ?? '—'} → ${it.scores.after.overall ?? '—'} · 读者 ${it.scores.before.reader ?? '—'} → ${it.scores.after.reader ?? '—'}` : undefined}
+      desc={it ? `${fmtNum(it.words)} 字 · 改动 ${changed} 段` : undefined}
       footer={it?.status === 'pending' ? <>
         <Button variant="ghost" icon={<X className="h-4 w-4" />} loading={discard.isPending} onClick={() => discard.mutate(it.id, { onSuccess: onClose })}>弃用</Button>
         <Button variant="primary" icon={<Check className="h-4 w-4" />} loading={adopt.isPending} onClick={() => adopt.mutate(it.id, { onSuccess: onClose })}>采纳这一版</Button>

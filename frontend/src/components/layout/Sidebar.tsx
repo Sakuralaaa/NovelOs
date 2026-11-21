@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { NavLink, useLocation, useMatch } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, BookOpen, ChevronDown, BookOpenCheck, Feather, FileText, History, House, Layers, LayoutDashboard, Zap, Lightbulb, ListTree, LogOut, Moon, Package,
-  FlagCheckered, Notebook, StackSimple, PanelLeftClose, PanelLeftOpen, Radar, Scissors, Search, Settings, ShieldCheck, Stethoscope, Sun, Waypoints,
+  BookOpen, ChevronDown, BookOpenCheck, Feather, FileText, House, Layers, LayoutDashboard, Zap, Lightbulb, ListTree, LogOut, Moon, Package,
+  FlagCheckered, Notebook, StackSimple, PanelLeftClose, PanelLeftOpen, Radar, Scissors, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Sun, Waypoints,
 } from '@/components/icons'
 import { Logo } from '@/components/common/States'
 import { Kbd } from '@/components/ui/misc'
@@ -17,41 +17,76 @@ import { cn } from '@/lib/utils'
 
 type SubItem = { to: string; label: string; end?: boolean; match?: RegExp }
 type MainItem = { to: string; label: string; icon: typeof House; end?: boolean; children?: SubItem[] }
+type MainGroup = { label?: string; items: MainItem[] }
 
-const MAIN: MainItem[] = [
-  { to: '/', label: '首页', icon: House, end: true },
-  { to: '/radar', label: '热点雷达', icon: Radar },
-  { to: '/teardown', label: '拆书', icon: Scissors, children: [
-    { to: '/teardown', label: '新建拆书', end: true },
-    { to: '/teardown/history', label: '拆书历史', match: /^\/teardown\/(history|\d+)/ },
-  ] },
-  { to: '/fanfic', label: '同人', icon: BookOpenCheck, children: [
-    { to: '/fanfic/new', label: '建同人书' },
-    { to: '/fanfic/sources', label: '原著资料' },
-    { to: '/fanfic/search', label: '联网取材' },
-    { to: '/fanfic/import', label: '导入原著' },
-  ] },
-  { to: '/ideas', label: '选题', icon: Lightbulb },
-  { to: '/books', label: '我的书', icon: BookOpen },
-  { to: '/aigc', label: 'AI 率检测', icon: ShieldCheck },
-  { to: '/history', label: '生成档案', icon: History },
+const MAIN_GROUPS: MainGroup[] = [
+  {
+    items: [
+      { to: '/', label: '首页', icon: House, end: true },
+      { to: '/books', label: '书架', icon: BookOpen },
+    ],
+  },
+  {
+    label: '开新书',
+    items: [
+      { to: '/ideas', label: '选题', icon: Lightbulb },
+      { to: '/radar', label: '热点雷达', icon: Radar },
+      { to: '/teardown', label: '拆书', icon: Scissors, children: [
+        { to: '/teardown', label: '新建拆书', end: true },
+        { to: '/teardown/history', label: '拆书历史', match: /^\/teardown\/(history|\d+)/ },
+      ] },
+      { to: '/fanfic', label: '同人', icon: BookOpenCheck, children: [
+        { to: '/fanfic/new', label: '建同人书' },
+        { to: '/fanfic/sources', label: '原著资料' },
+        { to: '/fanfic/search', label: '联网取材' },
+        { to: '/fanfic/import', label: '导入原著' },
+      ] },
+    ],
+  },
+  {
+    label: '工具',
+    items: [
+      { to: '/skills', label: '技能库', icon: Sparkles },
+      { to: '/aigc', label: 'AI 率检测', icon: ShieldCheck },
+    ],
+  },
 ]
 
-export const BOOK_NAV = [
-  { to: '', label: '概览', icon: LayoutDashboard, end: true },
-  { to: 'auto', label: '一键成书', icon: Zap },
-  { to: 'bible', label: '设定库', icon: Layers },
-  { to: 'style', label: '文风', icon: Feather },
-  { to: 'outline', label: '大纲', icon: ListTree },
-  { to: 'chapters', label: '章节', icon: FileText },
-  { to: 'foreshadows', label: '伏笔', icon: Waypoints },
-  { to: 'wanben', label: '完本', icon: FlagCheckered },
-  { to: 'batch', label: '批量处理', icon: StackSimple },
-  { to: 'notes', label: '笔记', icon: Notebook },
-  { to: 'check', label: '体检', icon: Stethoscope },
-  { to: 'package', label: '包装发布', icon: Package },
-  { to: 'agent', label: 'Agent', icon: Bot },
+type BookNavItem = { to: string; label: string; icon: typeof House; end?: boolean }
+export const BOOK_GROUPS: { label: string; items: BookNavItem[] }[] = [
+  {
+    label: '',
+    items: [{ to: '', label: '概览', icon: LayoutDashboard, end: true }],
+  },
+  {
+    label: '筹备',
+    items: [
+      { to: 'bible', label: '设定库', icon: Layers },
+      { to: 'outline', label: '大纲', icon: ListTree },
+      { to: 'foreshadows', label: '伏笔', icon: Waypoints },
+      { to: 'style', label: '文风与技能', icon: Feather },
+    ],
+  },
+  {
+    label: '写作',
+    items: [
+      { to: 'chapters', label: '章节', icon: FileText },
+      { to: 'notes', label: '笔记', icon: Notebook },
+      { to: 'batch', label: '批量处理', icon: StackSimple },
+      { to: 'auto', label: '一键成书', icon: Zap },
+    ],
+  },
+  {
+    label: '收尾',
+    items: [
+      { to: 'check', label: '体检', icon: Stethoscope },
+      { to: 'wanben', label: '完本', icon: FlagCheckered },
+      { to: 'package', label: '包装导出', icon: Package },
+    ],
+  },
 ]
+
+export const BOOK_NAV = BOOK_GROUPS.flatMap((g) => g.items)
 
 export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collapsed: boolean; onToggle: () => void; onSearch: () => void; onNavigate?: () => void }) {
   const m = useMatch('/books/:bookId/*')
@@ -82,9 +117,67 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
   const icon = (active: boolean) => cn('h-[17px] w-[17px] shrink-0 transition-colors', active ? 'text-primary' : 'text-foreground/50 group-hover:text-foreground/80')
 
   const Section = ({ label }: { label: string }) =>
-    collapsed ? <div className="mx-auto my-3 h-px w-6 bg-border" /> : <div className="mb-1 mt-5 px-3 text-[11.5px] font-medium text-muted-foreground/80">{label}</div>
+    collapsed ? <div className="mx-auto my-2.5 h-px w-6 bg-border" /> : <div className="mb-1 mt-4 px-3 text-[11px] font-medium text-muted-foreground/75">{label}</div>
 
   const footBtn = 'focus-ring flex h-9 w-9 items-center justify-center rounded-lg text-foreground/55 transition-colors hover:bg-foreground/[0.05] hover:text-foreground'
+
+  const renderMainItem = (n: MainItem) => {
+    if (n.children) {
+      const under = loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')
+      const subActive = (c: SubItem) => (c.match ? c.match.test(loc.pathname) : c.end ? loc.pathname === c.to : loc.pathname === c.to || loc.pathname.startsWith(c.to + '/'))
+      if (collapsed) {
+        return (
+          <Tip key={n.to} content={n.label} side="right">
+            <div>
+              <NavLink to={n.children[0].to} onClick={onNavigate} className={item(under)} aria-label={n.label}>
+                <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
+              </NavLink>
+            </div>
+          </Tip>
+        )
+      }
+      const isOpen = under || openGroups.includes(n.to)
+      return (
+        <div key={n.to}>
+          <NavLink to={n.children[0].to} onClick={onNavigate} className={item(false)}>
+            <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
+            <span className={cn('flex-1', under && 'font-medium text-foreground')}>{n.label}</span>
+            <button type="button" aria-label={isOpen ? '收起' : '展开'}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!under) setOpenGroups((g) => g.includes(n.to) ? g.filter((x) => x !== n.to) : [...g, n.to]) }}
+              className="-mr-1 flex h-6 w-6 items-center justify-center rounded-md hover:bg-foreground/[0.06]">
+              <ChevronDown className={cn('h-3.5 w-3.5 text-foreground/40 transition-transform', !isOpen && '-rotate-90')} />
+            </button>
+          </NavLink>
+          {isOpen && (
+            <div className="my-0.5 ml-[21px] space-y-0.5 border-l pl-2.5">
+              {n.children.map((c) => {
+                const a = subActive(c)
+                return (
+                  <NavLink key={c.to} to={c.to} onClick={onNavigate}
+                    className={cn('focus-ring flex h-8 items-center rounded-lg px-2.5 text-[13px] transition-colors',
+                      a ? 'bg-foreground/[0.06] font-medium text-primary dark:bg-foreground/[0.08]' : 'text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground')}>
+                    {c.label}
+                  </NavLink>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
+    return (
+      <Tip key={n.to} content={collapsed ? n.label : null} side="right">
+        <div>
+          <NavLink to={n.to} end={n.end} onClick={onNavigate} className={({ isActive }) => item(n.to === '/books' ? loc.pathname === '/books' : isActive)}>
+            {({ isActive }) => {
+              const a = n.to === '/books' ? loc.pathname === '/books' : isActive
+              return <><n.icon className={icon(a)} weight={a ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>
+            }}
+          </NavLink>
+        </div>
+      </Tip>
+    )
+  }
 
   return (
     <aside className={cn('flex h-full flex-col border-r bg-surface/60 transition-[width] duration-200 dark:bg-background', collapsed ? 'w-[64px]' : 'w-[240px]')}>
@@ -114,86 +207,38 @@ export function Sidebar({ collapsed, onToggle, onSearch, onNavigate }: { collaps
         </Tip>
       </div>
 
-      <nav className={cn('flex-1 overflow-y-auto px-3 pb-3 pt-3', collapsed && 'px-0')}>
-        <div className="space-y-0.5">
-          {MAIN.map((n) => {
-            if (n.children) {
-              const under = loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')
-              const subActive = (c: SubItem) => (c.match ? c.match.test(loc.pathname) : c.end ? loc.pathname === c.to : loc.pathname === c.to || loc.pathname.startsWith(c.to + '/'))
-              if (collapsed) {
-                return (
-                  <Tip key={n.to} content={n.label} side="right">
-                    <div>
-                      <NavLink to={n.children[0].to} onClick={onNavigate} className={item(under)} aria-label={n.label}>
-                        <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
-                      </NavLink>
-                    </div>
-                  </Tip>
-                )
-              }
-              const isOpen = under || openGroups.includes(n.to)
-              return (
-                <div key={n.to}>
-                  <NavLink to={n.children[0].to} onClick={onNavigate} className={item(false)}>
-                    <n.icon className={icon(under)} weight={under ? 'duotone' : 'regular'} />
-                    <span className={cn('flex-1', under && 'font-medium text-foreground')}>{n.label}</span>
-                    <button type="button" aria-label={isOpen ? '收起' : '展开'}
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!under) setOpenGroups((g) => g.includes(n.to) ? g.filter((x) => x !== n.to) : [...g, n.to]) }}
-                      className="-mr-1 flex h-6 w-6 items-center justify-center rounded-md hover:bg-foreground/[0.06]">
-                      <ChevronDown className={cn('h-3.5 w-3.5 text-foreground/40 transition-transform', !isOpen && '-rotate-90')} />
-                    </button>
-                  </NavLink>
-                  {isOpen && (
-                    <div className="my-0.5 ml-[21px] space-y-0.5 border-l pl-2.5">
-                      {n.children.map((c) => {
-                        const a = subActive(c)
-                        return (
-                          <NavLink key={c.to} to={c.to} onClick={onNavigate}
-                            className={cn('focus-ring flex h-8 items-center rounded-lg px-2.5 text-[13px] transition-colors',
-                              a ? 'bg-foreground/[0.06] font-medium text-primary dark:bg-foreground/[0.08]' : 'text-foreground/60 hover:bg-foreground/[0.04] hover:text-foreground')}>
-                            {c.label}
-                          </NavLink>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )
-            }
-            return (
-              <Tip key={n.to} content={collapsed ? n.label : null} side="right">
-                <div>
-                  <NavLink to={n.to} end={n.end} onClick={onNavigate} className={({ isActive }) => item(n.to === '/books' ? loc.pathname === '/books' : isActive)}>
-                    {({ isActive }) => {
-                      const a = n.to === '/books' ? loc.pathname === '/books' : isActive
-                      return <><n.icon className={icon(a)} weight={a ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>
-                    }}
-                  </NavLink>
-                </div>
-              </Tip>
-            )
-          })}
-        </div>
+      <nav className={cn('flex-1 overflow-y-auto px-3 pb-3 pt-2', collapsed && 'px-0')}>
+        {MAIN_GROUPS.map((g, gi) => (
+          <div key={gi}>
+            {g.label && <Section label={g.label} />}
+            <div className="space-y-0.5">{g.items.map(renderMainItem)}</div>
+          </div>
+        ))}
 
         {bookId > 0 && (
           <>
             {collapsed ? <Section label="" /> : (
-              <div className="mb-1 mt-5 px-3">
-                <div className="text-[11.5px] font-medium text-muted-foreground/80">当前作品</div>
+              <div className="mb-1 mt-5 border-t pt-3 px-3">
+                <div className="text-[11px] font-medium text-muted-foreground/80">当前作品</div>
                 <div className="mt-0.5 truncate text-[13px] font-semibold" title={book?.title}>{book?.title || '…'}</div>
               </div>
             )}
-            <div className="space-y-0.5">
-              {BOOK_NAV.map((n) => (
-                <Tip key={n.to} content={collapsed ? n.label : null} side="right">
-                  <div>
-                    <NavLink to={`/books/${bookId}${n.to ? `/${n.to}` : ''}`} end={n.end} onClick={onNavigate} className={({ isActive }) => item(isActive)}>
-                      {({ isActive }) => <><n.icon className={icon(isActive)} weight={isActive ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>}
-                    </NavLink>
-                  </div>
-                </Tip>
-              ))}
-            </div>
+            {BOOK_GROUPS.map((g, gi) => (
+              <div key={gi}>
+                {g.label && !collapsed && <div className="mb-0.5 mt-2.5 px-3 text-[10.5px] font-medium text-muted-foreground/65">{g.label}</div>}
+                <div className="space-y-0.5">
+                  {g.items.map((n) => (
+                    <Tip key={n.to} content={collapsed ? n.label : null} side="right">
+                      <div>
+                        <NavLink to={`/books/${bookId}${n.to ? `/${n.to}` : ''}`} end={n.end} onClick={onNavigate} className={({ isActive }) => item(isActive)}>
+                          {({ isActive }) => <><n.icon className={icon(isActive)} weight={isActive ? 'duotone' : 'regular'} />{!collapsed && <span>{n.label}</span>}</>}
+                        </NavLink>
+                      </div>
+                    </Tip>
+                  ))}
+                </div>
+              </div>
+            ))}
           </>
         )}
       </nav>

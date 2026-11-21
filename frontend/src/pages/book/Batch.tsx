@@ -128,7 +128,6 @@ function ResultCard({ r, bookId }: { r: BatchResult; bookId: number }) {
           {!!s.failed && <Badge tone="danger">失败 {s.failed}</Badge>}
           {s.ai_before != null && <Badge tone="outline">AI 味 {s.ai_before} → {s.ai_after}</Badge>}
           {s.aigc_before != null && <Badge tone="outline">AI 率 {pct(s.aigc_before)} → {pct(s.aigc_after)}</Badge>}
-          {s.avg_overall != null && <Badge tone="outline">平均审稿分 {s.avg_overall}</Badge>}
           {s.avg_aigc != null && <Badge tone="outline">平均 AI 率 {pct(s.avg_aigc)}</Badge>}
           {!!s.pending && <Badge tone="primary">待采纳 {s.pending}</Badge>}
         </div>
@@ -139,7 +138,6 @@ function ResultCard({ r, bookId }: { r: BatchResult; bookId: number }) {
                 <span className="num font-medium">第 {row.number} 章</span>
                 {row.status === 'failed' && <span className="min-w-0 flex-1 truncate text-danger">{row.error}</span>}
                 {row.status === 'unchanged' && <span className="text-muted-foreground">没有需要改的</span>}
-                {row.overall != null && <span className="num">审稿 {row.overall}</span>}
                 {row.aigc != null && <span className="num">AI 率 {pct(row.aigc)}</span>}
                 {row.ai_before != null && <span className="num text-muted-foreground">AI 味 {row.ai_before} → {row.ai_after}</span>}
                 {row.aigc_before != null && <span className="num text-muted-foreground">AI 率 {pct(row.aigc_before)} → {pct(row.aigc_after)}</span>}

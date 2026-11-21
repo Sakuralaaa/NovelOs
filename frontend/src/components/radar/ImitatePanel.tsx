@@ -475,7 +475,6 @@ function IdeaCard({ idea, onOpen }: { idea: Idea; onOpen: () => void }) {
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {warns.length ? <Badge tone="warning" title={warns.join('\n')}><AlertTriangle className="h-3 w-3" />{warns.length} 条提醒</Badge> : <Badge tone="success"><ShieldCheck className="h-3 w-3" />自检通过</Badge>}
             {similar > 0 && <Badge tone="danger">{similar} 项偏像</Badge>}
-            {idea.scores?.overall ? <Badge tone="outline" className="num">综合 {idea.scores.overall}</Badge> : null}
           </div>
           {warns.length > 0 && <p className="mt-1.5 line-clamp-1 text-[12px] text-warning">{warns[0]}</p>}
         </div>

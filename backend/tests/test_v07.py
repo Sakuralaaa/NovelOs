@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.services import imitate
@@ -273,6 +274,7 @@ def test_imitate_job_failure_and_partial(client: TestClient, monkeypatch) -> Non
 
 # ------------------------------------------------------------------ Agent 提案工具
 
+@pytest.mark.skip(reason="v0.20 已移除站内书内 Agent，改由外部 MCP Agent 接管")
 def test_agent_tool_imitate_proposal(client: TestClient) -> None:
     from app.services import agent_tools
 

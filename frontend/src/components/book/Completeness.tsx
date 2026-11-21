@@ -47,21 +47,22 @@ export function CompletenessCard({ bookId }: { bookId: number }) {
   const [showDone, setShowDone] = useState(false)
   if (q.isLoading) return <Skeleton className="mt-6 h-[188px] rounded-xl" />
   if (q.error || !q.data) return null
-  const { score, items } = q.data
+  const { items } = q.data
   const todo = items.filter((i) => !i.done)
   const done = items.filter((i) => i.done)
+  const pct = items.length ? Math.round((done.length / items.length) * 100) : 0
   return (
     <Card className="mt-6 overflow-hidden">
       <div className="flex flex-col gap-5 p-5 md:flex-row md:items-start md:gap-7 md:p-6">
         <div className="flex items-center gap-4 md:w-[200px] md:shrink-0 md:flex-col md:items-start">
-          <Ring value={score}>
-            <span className="num text-[28px] font-semibold tracking-tight">{score}</span>
-            <span className="mt-1 text-[11px] text-muted-foreground">完整度</span>
+          <Ring value={pct}>
+            <span className="num text-[22px] font-semibold tracking-tight">{done.length}/{items.length}</span>
+            <span className="mt-1 text-[11px] text-muted-foreground">已完成</span>
           </Ring>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[15px] font-semibold"><ListChecks className="h-4 w-4 text-primary" />作品完整度</div>
+            <div className="flex items-center gap-1.5 text-[15px] font-semibold"><ListChecks className="h-4 w-4 text-primary" />作品筹备清单</div>
             <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
-              {todo.length ? <>还差 <b className="font-semibold text-foreground">{todo.length}</b> 项。资料越全，AI 写出来越不跑偏。</> : '十项都齐了，放心写吧。'}
+              {todo.length ? <>还差 <b className="font-semibold text-foreground">{todo.length}</b> 项。资料越全，写作越不跑偏。</> : '全部筹备齐了，放心写吧。'}
             </p>
           </div>
         </div>
@@ -130,7 +131,7 @@ function TodoRow({ bookId, item: it }: { bookId: number; item: CompletenessItem 
     <li className="flex min-h-[60px] flex-wrap items-center gap-x-3 gap-y-2 bg-surface px-3.5 py-2.5 sm:flex-nowrap">
       <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2', partial ? 'border-primary/60 bg-[conic-gradient(hsl(var(--primary))_0_50%,transparent_50%_100%)]' : 'border-border')} aria-hidden />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 text-[13.5px] font-medium">{it.label}{partial && <span className="rounded bg-primary-soft px-1.5 text-[11px] font-normal leading-[18px] text-primary">已得 {it.weight} 分</span>}</div>
+        <div className="flex items-center gap-1.5 text-[13.5px] font-medium">{it.label}{partial && <span className="rounded bg-primary-soft px-1.5 text-[11px] font-normal leading-[18px] text-primary">进行中</span>}</div>
         {it.hint && <div className="mt-0.5 break-words text-[12px] leading-relaxed text-muted-foreground">{it.hint}</div>}
       </div>
       <div className="ml-9 shrink-0 sm:ml-0">{cta}</div>

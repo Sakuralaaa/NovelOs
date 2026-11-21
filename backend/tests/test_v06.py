@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import LintThresholds
@@ -198,6 +199,7 @@ def test_prompts_mention_new_rules() -> None:
 
 # ------------------------------------------------------------------ 集成：mock 全流程里账本逐场传递、第 1 章金手指进节拍
 
+@pytest.mark.skip(reason="v0.20 一次写成不再在 write_next 中自动跑状态账本抽取，改为外接 Agent 提交直写或按需触发")
 def test_mock_pipeline_passes_state_between_chapters(client: TestClient, monkeypatch: Any) -> None:
     """v0.17：整章一次写；状态账本由另一次调用从正文抽，交给下一章开头；上一章结尾原文放在写作提示最后。"""
     import app.services.writing as writing

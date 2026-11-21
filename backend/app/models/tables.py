@@ -556,3 +556,49 @@ class AutoDecision(SQLModel, table=True):
     custom: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
     created_at: datetime = Field(default_factory=utcnow)
     answered_at: Optional[datetime] = None
+
+
+# ------------------------------------------------------------------ v0.20 外部 Agent 动态记录
+
+class AgentActivity(SQLModel, table=True):
+    """外部 Agent（MCP）写操作日志：展示在作品概览页，方便作者回看 Agent 做了什么。"""
+    __tablename__ = "agent_activity"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: Optional[int] = Field(default=None, index=True)
+    tool: str = ""
+    summary: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    detail: Optional[dict[str, Any]] = _json_dict_nullable()
+    ok: bool = True
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+# ------------------------------------------------------------------ v0.20 可插拔技能库
+
+class Skill(SQLModel, table=True):
+    """写作/规划/拆书/审稿方法论技能：支持内置、GitHub 导入（兼容 SKILL.md）、自建；手动写作与外接 Agent 共用。"""
+    __tablename__ = "skill"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slug: str = Field(index=True, unique=True)
+    name: str
+    description: str = ""
+    stage: str = Field(default="writing", index=True)  # ideation/bible/outline/chapter_plan/writing/review/humanize/package/teardown/general
+    body: str = Field(default="", sa_column=Column(Text, nullable=False, default=""))
+    references: list[dict[str, Any]] = _json_list()  # [{name, content}]
+    source: str = "custom"  # builtin / github / custom
+    source_url: str = ""
+    license: str = ""
+    enabled: bool = True
+    is_default: bool = False  # 新书未单独勾选时默认生效的技能
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class BookSkill(SQLModel, table=True):
+    """作品选用的技能映射表。"""
+    __tablename__ = "book_skill"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    book_id: int = Field(index=True)
+    skill_id: int = Field(index=True)
+    order: int = 0
+
+

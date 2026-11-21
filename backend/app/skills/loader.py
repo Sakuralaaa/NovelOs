@@ -43,8 +43,8 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "chapter_sync": ("chapter_plan",),  # v0.17.1 写章前按上一章实写校正章纲
     "chapter_rewrite": ("writing",),
     "foreshadow_plan": ("outline",),
-    "teardown": (),
-    "teardown_deep": (),
+    "teardown": ("teardown",),
+    "teardown_deep": ("teardown",),
     "reskin": ("ideation",),
     "idea_seed": ("ideation",),
     "idea_organize": ("ideation",),
@@ -55,7 +55,7 @@ TASK_SKILLS: dict[str, tuple[str, ...]] = {
     "polish_voice": ("humanize", "writing"),
     "field_ai": ("bible",),
     "character_soul": ("bible",),
-    "teardown_project": (),
+    "teardown_project": ("teardown",),
 }
 
 
@@ -220,14 +220,75 @@ def platform_filter(body: str, platform: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", _PLATFORM_BLOCK.sub(keep, body)).strip()
 
 
-def system_prompt(task: str, extra: str = "", platform: str | None = None) -> str:
+def _db_stage_skills_text(stage: str, platform: str | None, book_id: int | None = None) -> str | None:
+    """v0.20：优先从可插拔技能库读取指定环节（stage）生效的技能文本。
+    若存在旧版磁盘覆盖文件（/api/prompts/rules/<stage>）或技能库尚未初始化，返回 None 回退到磁盘规则。"""
+    if stage in STAGES and override_text("rules", stage) is not None:
+        return None
+    try:
+        from sqlmodel import select
+        from app.db import session_scope
+        from app.models.tables import Skill
+        from app.services.skills_store import active_skills_for_book, render_skills_text
+
+        with session_scope() as s:
+            if s.exec(select(Skill.id).limit(1)).first() is None:
+                return None
+            if book_id is not None:
+                rows = active_skills_for_book(s, book_id, stage)
+            else:
+                rows = list(s.exec(
+                    select(Skill).where(Skill.enabled == True, Skill.is_default == True, Skill.stage == stage)  # noqa: E712
+                    .order_by(Skill.id)
+                ).all())
+            return render_skills_text(rows, platform=platform)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _db_slug_text(slug: str, platform: str | None) -> str | None:
+    """从技能库按 slug 读取单条内置规则（如 builtin-rule-duanju）；若未初始化则返回 None 回退磁盘。"""
+    try:
+        from sqlmodel import select
+        from app.db import session_scope
+        from app.models.tables import Skill
+        from app.services.skills_store import render_skills_text
+
+        with session_scope() as s:
+            if s.exec(select(Skill.id).limit(1)).first() is None:
+                return None
+            sk = s.exec(select(Skill).where(Skill.slug == slug)).first()
+            if sk is None:
+                return None
+            if not sk.enabled:
+                return ""
+            return render_skills_text([sk], platform=platform)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def system_prompt(task: str, extra: str = "", platform: str | None = None, book_id: int | None = None) -> str:
     parts = [PROSE_BASE if task in PROSE_TASKS else SYSTEM_BASE]
     stages = TASK_SKILLS.get(task, ())
     for stage in stages:
-        parts.append(platform_filter(load_pack(stage).body, platform))
+        db_txt = _db_stage_skills_text(stage, platform, book_id=book_id)
+        if db_txt is not None:
+            txt = db_txt
+        elif stage in STAGES:
+            txt = platform_filter(load_pack(stage).body, platform)
+        else:
+            txt = ""
+        if txt:
+            parts.append(txt)
     pack = PLATFORM_PACKS.get(platform or "")
     if pack and any(st in PLATFORM_PACK_STAGES for st in stages):  # v0.11 短剧分镜档：叠加专属规则包
-        parts.append(platform_filter(load_pack(pack).body, platform))
+        if override_text("rules", pack) is not None:
+            ptxt = platform_filter(load_pack(pack).body, platform)
+        else:
+            db_ptxt = _db_slug_text(f"builtin-rule-{pack}", platform)
+            ptxt = db_ptxt if db_ptxt is not None else platform_filter(load_pack(pack).body, platform)
+        if ptxt:
+            parts.append(ptxt)
     if extra:
         parts.append(extra)
     return "\n\n".join(parts)

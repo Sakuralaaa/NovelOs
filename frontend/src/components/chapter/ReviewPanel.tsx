@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as CB from '@radix-ui/react-checkbox'
-import { ArrowRight, Check, CheckCircle2, CornerDownRight, Flag, RotateCcw, RotateCw, Scales, Wand2, Wrench, XCircle } from '@/components/icons'
+import { Check, CheckCircle2, CornerDownRight, Flag, RotateCcw, RotateCw, Scales, Wand2, Wrench, XCircle } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ScoreRing } from '@/components/ui/misc'
 import { EmptyState } from '@/components/common/States'
-import type { PatchLogEntry, PreCommitFix, RereviewInfo, Review, ReviewIssue, ReviewPatch } from '@/lib/types'
+import type { PatchLogEntry, PreCommitFix, Review, ReviewIssue, ReviewPatch } from '@/lib/types'
 import { cn, fmtDateTime } from '@/lib/utils'
-import { RadarChart } from './RadarChart'
 
 const DIMS: [keyof Review['scores'], string][] = [['hook', '追读钩子'], ['pacing', '节奏'], ['payoff', '爽点兑现'], ['character', '人物'], ['coherence', '连贯'], ['continuity', '连续性'], ['semantics', '语义'], ['retention', '追读欲']]
 const DIM_LABEL: Record<string, string> = Object.fromEntries(DIMS.map(([k, l]) => [k, l]))
@@ -37,37 +35,26 @@ export function ReviewPanel({ review, onQuote, onReview, reviewing, activeQuote,
           </div>
         </div>
       )}
-      <div className="flex items-center gap-4">
-        <ScoreRing value={review.scores.overall} size={64} stroke={6} label="总分" />
+      <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          {review.passed
-            ? <div className="flex items-center gap-1.5 text-[14px] font-semibold text-success"><CheckCircle2 className="h-4 w-4" />审稿通过</div>
-            : <div className="flex items-center gap-1.5 text-[14px] font-semibold text-danger"><XCircle className="h-4 w-4" />未通过，建议修改</div>}
-          <p className="mt-0.5 text-xs text-muted-foreground">{review.issues.length} 条意见 · 点击引文定位到正文</p>
+          {review.issues.some((i) => i.severity === 'high')
+            ? <div className="flex items-center gap-1.5 text-[14px] font-semibold text-warning"><XCircle className="h-4 w-4" />有重点问题建议关注</div>
+            : <div className="flex items-center gap-1.5 text-[14px] font-semibold text-success"><CheckCircle2 className="h-4 w-4" />暂无严重问题</div>}
+          <p className="mt-0.5 text-xs text-muted-foreground">{review.issues.length} 条意见 · 只给建议不动正文 · 点击引文定位</p>
         </div>
         <Button size="icon-sm" variant="ghost" onClick={onReview} disabled={reviewing} aria-label="重新审稿"><RotateCw className={cn('h-3.5 w-3.5', reviewing && 'animate-spin')} /></Button>
       </div>
-      {review.rereview && <RereviewCard rr={review.rereview} />}
       {review.pre_commit_fix && <PreCommitFixCard fix={review.pre_commit_fix} issues={review.issues} onQuote={onQuote} onUndo={onUndo} undoLabel={undoLabel} undoDisabled={undoDisabled} />}
-      {review.reader && (
+      {review.reader && review.reader.verdict && (
         <div className="rounded-lg bg-subtle p-3 hairline">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-medium text-muted-foreground">番茄老读者</span>
-            {review.reader.score != null && (
-              <span className={cn('text-[15px] font-semibold', review.reader.score >= 7 ? 'text-success' : review.reader.score >= 6 ? 'text-warning' : 'text-danger')}>
-                {review.reader.score}/10
-              </span>
-            )}
-            <span className="text-[11px] text-muted-foreground">{review.reader.score != null && review.reader.score < 6 ? '大概率划走' : '会点下一章'}</span>
-          </div>
-          {review.reader.verdict && <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/80">{review.reader.verdict}</p>}
+          <div className="text-xs font-medium text-muted-foreground">读者视角反馈</div>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/80">{review.reader.verdict}</p>
         </div>
       )}
       {!!review.patches?.length && (
         <PatchList patches={review.patches} issues={review.issues} onQuote={onQuote} onApply={onApplyPatches} applying={!!applyingPatches} disabled={patchDisabled} />
       )}
       {!!review.patch_log?.length && <PatchLog log={review.patch_log} />}
-      <RadarChart size={232} data={DIMS.filter(([k]) => review.scores[k] !== undefined).map(([k, l]) => ({ label: l, value: review.scores[k] ?? 0 }))} />
       <div>
         <div className="mb-2 flex items-center gap-1">
           {(['all', 'high', 'mid', 'low'] as const).map((s) => (
@@ -198,36 +185,6 @@ function NumericRelatedLine({ issue }: { issue: ReviewIssue }) {
       {fromLedger
         ? rel.value && <div className="mt-0.5 break-words font-serif text-foreground/85">{rel.value}</div>
         : rel.quote && <div className="mt-0.5 line-clamp-2 break-words border-l-2 border-primary/40 pl-2 font-serif text-foreground/80">{rel.quote}</div>}
-    </div>
-  )
-}
-
-/** v0.9.4：补丁后复审：首审 vs 复审总分 */
-function RereviewCard({ rr }: { rr: RereviewInfo }) {
-  const delta = Math.round((rr.after_overall - rr.before_overall) * 10) / 10
-  return (
-    <div className="rounded-lg p-3 hairline">
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <h4 className="text-[13px] font-semibold">补丁后复审</h4>
-        <span className="num text-[11px] text-muted-foreground">{fmtDateTime(rr.at)}</span>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <div className="flex-1 rounded-md bg-subtle px-2 py-1.5 text-center">
-          <div className="text-[11px] text-muted-foreground">首审</div>
-          <div className="num text-[17px] font-semibold">{rr.before_overall}</div>
-        </div>
-        <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <div className={cn('flex-1 rounded-md px-2 py-1.5 text-center', rr.passed ? 'bg-success-soft' : 'bg-danger-soft')}>
-          <div className="text-[11px] text-muted-foreground">复审</div>
-          <div className={cn('num text-[17px] font-semibold', rr.passed ? 'text-success' : 'text-danger')}>{rr.after_overall}</div>
-        </div>
-        <span className={cn('num w-12 shrink-0 text-right text-[12.5px] font-medium', delta > 0 ? 'text-success' : delta < 0 ? 'text-danger' : 'text-muted-foreground')}>{delta > 0 ? `+${delta}` : delta}</span>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[12px] text-muted-foreground">
-        <span className={rr.passed ? 'text-success' : 'text-danger'}>{rr.passed ? '复审通过' : '复审未通过'}</span>
-        <span>剩余严重问题 <b className={cn('num font-medium', rr.high_left ? 'text-danger' : 'text-foreground')}>{rr.high_left}</b></span>
-        <span>已解决 <b className="num font-medium text-foreground">{rr.dropped_issues}</b> 条</span>
-      </div>
     </div>
   )
 }

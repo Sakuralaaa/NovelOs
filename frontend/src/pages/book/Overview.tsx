@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   AlertTriangle, ArrowRight, BookOpenCheck, Check, CircleDashed, Download, FileText, FlagCheckered, Stethoscope, Layers, Lightbulb, ListTree, Package, Pencil, PenLine, RotateCcw, Waypoints, Wand2, X,
@@ -25,7 +25,6 @@ import { AdoptCard } from '@/components/book/ImportBook'
 import { FanficInfoCard } from '@/components/fanfic/FanficInfoCard'
 import { AttachFanficDialog } from '@/components/fanfic/AttachFanficDialog'
 import { HomogeneityButton } from '@/components/check/Homogeneity'
-import { BookWritingSettings } from '@/components/book/BookWritingSettings'
 import { useBook, useJobsList } from '@/hooks/queries'
 import { useBookId } from '@/hooks/useBookId'
 import { api, qk } from '@/lib/api'
@@ -39,6 +38,7 @@ export default function BookOverview() {
   const id = useBookId()
   const { data: book, isLoading, error, refetch } = useBook(id)
   const { data: jobs } = useJobsList(id)
+  const { data: activity } = useQuery({ queryKey: qk.agentActivity(id), queryFn: () => api.bookAgentActivity(id, 15), enabled: id > 0 })
   const [sel, setSel] = useState<number | null>(null)
   const [edit, setEdit] = useState(false)
   const [attach, setAttach] = useState(false)
@@ -119,7 +119,23 @@ export default function BookOverview() {
       </div>
 
       <UsageCard bookId={id} />
-      <div className="mt-6"><BookWritingSettings bookId={id} /></div>
+
+      {!!activity?.length && (
+        <Card className="mt-6">
+          <CardHeader title="外部 Agent 动态" desc="通过 MCP 写入本书的最近操作" />
+          <CardBody className="px-3">
+            <div className="divide-y divide-border/60">
+              {activity.slice(0, 10).map((a) => (
+                <div key={a.id} className="flex items-center gap-3 px-2 py-2.5">
+                  <Badge tone="outline" className="shrink-0 font-mono text-[11px]">{a.tool}</Badge>
+                  <div className="min-w-0 flex-1 truncate text-[13px]">{a.summary}</div>
+                  <span className="shrink-0 text-xs text-muted-foreground">{fmtTime(a.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       <Card className="mt-6">
         <CardHeader title="本书任务" />
@@ -191,7 +207,7 @@ function StageAction({ book, stage, isCurrent, onDone }: { book: Book; stage: nu
       secondary: <Link to={`/books/${id}/outline`}><Button>打开大纲</Button></Link>,
     },
     {
-      title: '下一步：写正文', desc: '每章自动经过：细纲 → 写作 → 一致性检查 → 审稿 → 人味修整。写完你可以再改。',
+      title: '下一步：写正文', desc: '默认一次写成、边写边显示并直接入账；写完可按需审稿、局部改写或人味修整。',
       job: writeJob,
       main: <WriteNextButton bookId={id} />,
       secondary: <><BatchWriteButton bookId={id} /><Link to={`/books/${id}/chapters`}><Button variant="ghost">打开章节</Button></Link></>,

@@ -623,6 +623,50 @@ async def write_next(book_id: int, body: WriteNextIn | None = Body(default=None)
                           book_id=book_id, lock_book=True))
 
 
+@router.post("/books/{book_id}/chapters/write-stream")
+async def write_stream(book_id: int, body: WriteNextIn | None = Body(default=None), s: Session = Depends(get_session)) -> Response:
+    """v0.20 流式写下一章（SSE）：边写边显示正文，一次调用完成并按设置直接入账。"""
+    import asyncio
+    import json as _json
+    from fastapi.responses import StreamingResponse
+    from app.jobs.manager import book_lock
+
+    _book(s, book_id)
+    lock = book_lock(book_id)
+    if not lock.acquire(blocking=False):
+        raise HTTPException(409, "这本书当前已有写作或规划任务正在运行，请稍候再试")
+    instruction = body.instruction if body else ""
+    q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def _push(item: dict[str, Any] | None) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, item)
+        except RuntimeError:
+            pass
+
+    def _run() -> None:
+        try:
+            writing.write_next_stream(book_id, instruction=instruction, on_event=_push)
+        except Exception as e:  # noqa: BLE001
+            _push({"type": "error", "detail": str(e)})
+        finally:
+            lock.release()
+            _push(None)
+
+    loop.run_in_executor(None, _run)
+
+    async def gen():  # type: ignore[no-untyped-def]
+        while True:
+            item = await q.get()
+            if item is None:
+                return
+            ev_type = item.get("type", "message")
+            yield f"event: {ev_type}\ndata: {_json.dumps(item, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.post("/books/{book_id}/chapters/write-batch")
 async def write_batch(book_id: int, body: WriteBatchIn | None = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
     _book(s, book_id)

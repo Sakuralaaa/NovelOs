@@ -13,7 +13,7 @@ import { api, wanbenApi, wqk } from '@/lib/api'
 import { useActiveJob, useJobs } from '@/lib/jobs'
 import type { RefineChapter } from '@/lib/types'
 import { cn, fmtNum } from '@/lib/utils'
-import { ChStatus, compactNums, parseRanges } from './bits'
+import { ChStatus, parseRanges } from './bits'
 
 const SCOPE_LABEL: Record<string, string> = { first_n: '前 N 章', all: '全书', custom: '自选区间', none: '不精修' }
 
@@ -48,7 +48,6 @@ export const RefineCard = forwardRef<HTMLDivElement, { bookId: number; className
               <div>
                 <div className="num mb-1.5 flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted-foreground">
                   <span>已写 {r.written} · 已审批 {r.approved} · 未写 {r.unwritten}</span>
-                  {r.reader_below_threshold.length > 0 && <span className="font-medium text-danger">读者分低于 {r.reader_threshold}：第 {compactNums(r.reader_below_threshold)} 章</span>}
                 </div>
                 <Progress value={(r.approved / Math.max(1, r.total)) * 100} tone={r.all_approved ? 'success' : 'primary'} />
               </div>
@@ -59,7 +58,7 @@ export const RefineCard = forwardRef<HTMLDivElement, { bookId: number; className
               <p className="flex items-center justify-center gap-1.5 py-6 text-[13px] text-success"><CheckCircle2 className="h-4 w-4" />精修章都审批过了</p>
             ) : (
               <div className="divide-y overflow-hidden rounded-xl hairline md:max-h-[560px] md:overflow-y-auto">
-                {rows.map((c) => <RefineRow key={c.number} bookId={bookId} c={c} th={r.reader_threshold} onRemove={() => edit.mutate({ action: 'remove', ranges: [[c.number, c.number]] })} removing={edit.isPending} />)}
+                {rows.map((c) => <RefineRow key={c.number} bookId={bookId} c={c} onRemove={() => edit.mutate({ action: 'remove', ranges: [[c.number, c.number]] })} removing={edit.isPending} />)}
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
@@ -75,7 +74,7 @@ export const RefineCard = forwardRef<HTMLDivElement, { bookId: number; className
 })
 RefineCard.displayName = 'RefineCard'
 
-function RefineRow({ bookId, c, th, onRemove, removing }: { bookId: number; c: RefineChapter; th: number; onRemove: () => void; removing: boolean }) {
+function RefineRow({ bookId, c, onRemove, removing }: { bookId: number; c: RefineChapter; onRemove: () => void; removing: boolean }) {
   const qc = useQueryClient()
   const { start } = useJobs()
   const key = `commit:${c.chapter_id ?? 0}`
@@ -85,17 +84,14 @@ function RefineRow({ bookId, c, th, onRemove, removing }: { bookId: number; c: R
     onSuccess: () => qc.invalidateQueries({ queryKey: ['wanben', bookId] }),
   })
   return (
-    <div className={cn('flex items-center gap-2.5 bg-surface px-3 py-2.5 sm:px-3.5', c.reader_below_threshold && 'bg-danger-soft/30')}>
+    <div className="flex items-center gap-2.5 bg-surface px-3 py-2.5 sm:px-3.5">
       <span className="num w-9 shrink-0 text-[12.5px] font-semibold text-muted-foreground">第{c.number}</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px] font-medium">{c.title || (c.status === 'unwritten' ? '（未写）' : `第${c.number}章`)}</div>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <ChStatus status={c.status} />
-          {c.reader_score != null && (
-            <span title={`读者分阈值 ${th}`} className={cn('num inline-flex h-[22px] items-center rounded-full px-2 text-[12px] font-semibold', c.reader_below_threshold ? 'bg-danger text-white' : 'bg-success-soft text-success')}>读者 {c.reader_score}</span>
-          )}
           {c.iterations_pending > 0 && <Badge tone="primary">{c.iterations_pending} 版待选</Badge>}
-          <span className="num text-[11.5px] text-muted-foreground">{c.words ? `${fmtNum(c.words)} 字` : ''}{c.review_overall != null ? ` · 审稿 ${c.review_overall}` : ''}</span>
+          <span className="num text-[11.5px] text-muted-foreground">{c.words ? `${fmtNum(c.words)} 字` : ''}</span>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">

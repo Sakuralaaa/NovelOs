@@ -15,7 +15,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from app.models.tables import Book, Card, Fact, OutlineNode
+from app.models.tables import Book, Card, Fact, Note, OutlineNode
 from app.services import common
 from app.services.outline import (
     FORESHADOW_ALERT_AGE, FORESHADOW_WARN_AGE, chapter_beats_list, foreshadow_age_label, rhythm_ledger,
@@ -153,13 +153,29 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
                 extra = f"（{'；'.join(parts)}）" if parts else ""
             fixed.append(f"[{c.type}] {c.name}：{c.summary}{extra}")
     fixed.append(style_block(s, bid))
-    from app.skills.loader import PLATFORMS  # v0.11：含可选档 duanju（短剧分镜）
+    from app.models.tables import Skill
+    from app.skills.loader import PLATFORM_PACKS, PLATFORMS, PROSE_BASE, load_pack, override_text, platform_filter  # v0.11：含可选档 duanju（短剧分镜）
+    from app.services.skills_store import active_skills_for_book, render_skills_text
 
     platform = book.platform_style if getattr(book, "platform_style", None) in PLATFORMS else "fanqie"
     base = baseline_block(s, bid)
     if base:
         fixed.append(base)
-    prefix = system_prompt("writing_chapter", "\n".join(fixed), platform=platform)
+    # v0.20：优先读取本书选用的可插拔写作技能；仅当存在旧版磁盘覆盖或技能库为空时回退到旧内置规则
+    has_skill_db = s.exec(select(Skill.id).limit(1)).first() is not None
+    if override_text("rules", "writing") is not None or not has_skill_db:
+        prefix = system_prompt("writing_chapter", "\n".join(fixed), platform=platform)
+    else:
+        active_sk = active_skills_for_book(s, bid, "writing")
+        skills_txt = render_skills_text(active_sk, platform=platform) if active_sk else ""
+        parts_pre = [PROSE_BASE]
+        if skills_txt:
+            parts_pre.append(skills_txt)
+        plat_pack = PLATFORM_PACKS.get(platform or "")
+        if plat_pack and not any(sk.slug == f"builtin-rule-{plat_pack}" for sk in active_sk):
+            parts_pre.append(platform_filter(load_pack(plat_pack).body, platform))
+        parts_pre.append("\n".join(fixed))
+        prefix = "\n\n".join(p for p in parts_pre if p)
 
     # ---------- 动态后缀 ----------
     rel = relevant_cards(all_cards, beats, prot)
@@ -256,6 +272,21 @@ def build_context_pack(s: Session, book: Book, node: OutlineNode, instruction: s
     guide = guidance_lines(s, bid, node.order)
     if guide:
         parts.append("【作者导向】\n" + "\n".join(f"- {g}" for g in guide))
+    pinned_notes = list(s.exec(
+        select(Note).where(Note.book_id == bid, Note.pinned == True).order_by(Note.updated_at.desc()).limit(8)  # noqa: E712  # type: ignore[attr-defined]
+    ))
+    if pinned_notes:
+        pn_lines: list[str] = []
+        pn_used = 0
+        for pn in pinned_notes:
+            body_txt = re.sub(r"\s+", " ", (pn.content or "").strip())[:240]
+            line = f"- {pn.title or '未命名'}：{body_txt}" if body_txt else f"- {pn.title}"
+            if pn_used + len(line) > 1200 and pn_lines:
+                break
+            pn_lines.append(line)
+            pn_used += len(line)
+        if pn_lines:
+            parts.append("【作者置顶笔记（长期约束，必须遵守）】\n" + "\n".join(pn_lines))
     if instruction.strip():
         parts.append("【作者对本章的额外要求】\n" + instruction.strip())
     rb = refs_block(s, bid, _plan_text(beats), node.title or "", node.summary or "", instruction, chapter_number=node.order)

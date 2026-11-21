@@ -1,5 +1,26 @@
 # 更新日志
 
+## v0.20.0 资产库 + 可插拔技能库 + 一次写成 + MCP 全流程升级
+
+- **外接 Agent（MCP）主力化与 8 大卡点修复**：
+  - 修复 `chapter_brief` 丢失上一章结尾原文（`prev_tail`）与视点提醒（`cast_notes`）、重复注入规则的问题；无章细纲节点时也能降级返回前情上下文；检测上一章是否有进行中的后台提交防连写竞态。
+  - `save_chapter` / `commit_chapter` 支持 Agent 直接传入 `summary`、`state_changes`、`new_entities`、`foreshadow_updates`、`end_state` 实现**同步毫秒级入账**（零额外模型调用、绝不静默改稿、零模型渠道下不再被 mock 假摘要污染）。
+  - 新增 `patch_chapter`（按原句定点局部替换，无需重传整章，自动留历史可撤回）。
+  - `save_card` 与 `save_outline_node` 支持 `items: [...]` 一次批量建卡/建树（支持 `ref` / `parent_ref`）；`search_bible` / `get_outline` / `list_chapters` 支持分页与章号区间过滤。
+  - 工具集保持精简高信号，新增聚合入口覆盖伏笔 CRUD、写作笔记、热点雷达/拆书/选题、同人原著世界库、技能库与按需体检/审稿；`api_index` 支持 `with_schema=true` 查看请求体字段；补齐 `DELETE /api/mcp` 与 `Mcp-Session-Id` 兼容。
+  - 新增外部 Agent 动态日志（`/api/books/{id}/agent-activity`）并展示在作品概览页；前端开启窗口聚焦自动刷新，外接 Agent 改动切回浏览器即见。
+  - 长篇人机协同增强：作者置顶笔记自动注入 `chapter_brief`；前章提交后被修改时自动附带失步提醒；`save_outline_node` 支持卷前情回顾快捷字段与 `beats` 常见别名归一化；新增 `facts` 工具直查/修正事实底账；`get_book_info` 一次返回续写进度与置顶笔记；`save_chapter` / `patch_chapter` 附带零耗时防穿帮自检（弃用设定卡、禁用套路、超期伏笔）。
+- **可插拔技能库**：
+  - 新增 `/skills` 技能管理页与 `/api/skills` 接口：原有 11 套内置规则包拆成可改/可重置技能，另精选内置 5 套网文方法论技能；支持新建、编辑、复制、启停、按书勾选绑定与从 GitHub 导入（兼容 `SKILL.md` 与 `references/*.md`）。
+  - 手动写作与外接 Agent（`chapter_brief`）共用同一套技能库，并在作品「文风与技能」页显示当前写作技能总字数，避免规则叠加打架。
+- **一次写成 + 流式边写边显**：
+  - 新增 `POST /api/books/{id}/chapters/write-stream`（SSE）与流式网关，默认单稿一次调用写完整章、边写边显、写完直接可入账。
+  - 去掉默认拆场景、自动双稿比较、自动审稿、自动自愈重写与提交前自动改写；审稿、人味修整、描写增厚保留为章节页按需工具。
+- **砍掉书内 Agent、全站去机械打分与侧栏瘦身**：
+  - 移除站内 Agent 页面与路由，旧地址 `/books/:id/agent` 自动跳作品概览。
+  - 去掉选题分、审稿总分/雷达图/读者分、体检分、完整度「已得 X 分」、AI 味仪表盘分值等机械打分展示，保留定性意见、原句引文与硬事实统计（旧库数据不动）。
+  - 侧栏按「主区 / 开新书 / 工具（含技能库）」与书内「概览 / 筹备 / 写作 / 收尾」清晰分组，生成档案入口收进设置页。
+
 ## v0.19.0 Agent 接入
 
 - 新增 MCP 接口 `/api/mcp`（Streamable HTTP），用「设置 → API 密钥」的 nvk_ 密钥鉴权。反重力、Claude Code、Cursor 等外部 agent 接上后可以接管 NovelOS：

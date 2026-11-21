@@ -11,7 +11,6 @@ import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
-import { RadarChart } from '@/components/chapter/RadarChart'
 import { Tile } from '@/components/wanben/bits'
 import { useKindJob } from '@/hooks/useKindJob'
 import { checkApi, wqk } from '@/lib/api'
@@ -20,11 +19,9 @@ import type { AdaptDim, AdaptReport } from '@/lib/types'
 import { cn, fmtDateTime, fmtNum } from '@/lib/utils'
 
 const DIMS: AdaptDim[] = ['persona', 'conflict', 'reversal', 'shootability', 'dialogue', 'episodes']
-const SHORT: Record<AdaptDim, string> = { persona: '人设', conflict: '冲突', reversal: '反转', shootability: '可拍性', dialogue: '对白', episodes: '可切集' }
 const pct = (v: number) => `${Math.round(v * 100)}%`
-const tone10 = (v: number) => (v >= 7 ? 'bg-success' : v >= 5 ? 'bg-primary' : v >= 3 ? 'bg-warning' : 'bg-danger')
 
-/** 短剧可改编度：章号范围发起；六维分数（雷达 + 条形）、每章可切集数、建议、历史 */
+/** 短剧可改编度：章号范围发起；六维定性评语、每章可切集数、改编建议与历史 */
 export function AdaptPanel({ bookId, maxChapter }: { bookId: number; maxChapter: number }) {
   const qc = useQueryClient()
   const { start } = useJobs()
@@ -39,7 +36,7 @@ export function AdaptPanel({ bookId, maxChapter }: { bookId: number; maxChapter:
   const sa = Number(a) || undefined, sb = Number(b) || undefined
   const bad = !!(sa && sb && sa > sb)
   const run = () => start(checkApi.startAdapt(bookId, { start: sa, end: sb, llm }), {
-    key, label: '短剧可改编度', successMsg: (j) => `可改编度 ${j.result?.score ?? ''} / 10`,
+    key, label: '短剧可改编度', successMsg: () => '短剧可改编度审读完成',
     onSuccess: () => { setJobId(undefined); qc.invalidateQueries({ queryKey: ['adaptability', bookId] }) },
   })
   const r = rep.data?.report
@@ -70,7 +67,7 @@ export function AdaptPanel({ bookId, maxChapter }: { bookId: number; maxChapter:
               <span className="flex items-center gap-1 text-[12px] text-muted-foreground"><Clock className="h-3.5 w-3.5" />历史</span>
               <div className="w-full min-w-0 sm:w-[340px]">
                 <Select value={String(jobId ?? hist.data.items[0].job_id)} onChange={(v) => setJobId(v && Number(v) !== hist.data!.items[0].job_id ? Number(v) : undefined)}
-                  options={hist.data.items.map((h, i) => ({ value: String(h.job_id), label: `${fmtDateTime(h.updated_at)} · ${h.score ?? '—'} 分${h.range ? ` · 第${h.range.start}–${h.range.end}章` : ''}${i === 0 ? '（最新）' : ''}` }))} />
+                  options={hist.data.items.map((h, i) => ({ value: String(h.job_id), label: `${fmtDateTime(h.updated_at)}${h.range ? ` · 第${h.range.start}–${h.range.end}章` : ''}${i === 0 ? '（最新）' : ''}` }))} />
               </div>
             </div>
           )}
@@ -88,34 +85,25 @@ function AdaptView({ bookId, r }: { bookId: number; r: AdaptReport }) {
   return (
     <>
       <Card className="overflow-hidden">
-        <div className="grid gap-5 p-4 sm:p-5 md:grid-cols-[260px_minmax(0,1fr)]">
-          <div className="flex flex-col items-center">
-            <RadarChart size={250} data={DIMS.map((d) => ({ label: SHORT[d], value: (r.dimensions[d]?.score ?? 0) * 10 }))} />
+        <div className="space-y-4 p-4 sm:p-5">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            <Tile label="每章可切" value={`${r.episodes_per_chapter} 集`} sub={`共约 ${r.episodes_total} 集`} />
+            <Tile label="审读范围" value={`${r.range.chapters} 章`} sub={`第${r.range.start}–${r.range.end}章`} />
+            <Tile label="改编建议" value={`${r.suggestions.length} 条`} sub="见下方明细" />
           </div>
-          <div className="min-w-0 space-y-3">
-            <div className="grid grid-cols-3 gap-2.5">
-              <Tile label="可改编度" value={<>{r.score}<span className="text-[13px] font-normal text-muted-foreground"> /10</span></>} tone={r.score >= 7 ? 'success' : r.score < 5 ? 'warning' : undefined} />
-              <Tile label="每章可切" value={`${r.episodes_per_chapter} 集`} sub={`共约 ${r.episodes_total} 集`} />
-              <Tile label="范围" value={`${r.range.chapters} 章`} sub={`第${r.range.start}–${r.range.end}章`} />
-            </div>
-            <div className="space-y-2">
-              {DIMS.map((d) => {
-                const x = r.dimensions[d]
-                if (!x) return null
-                return (
-                  <div key={d}>
-                    <div className="flex items-baseline justify-between gap-2 text-[12.5px]">
-                      <span className="font-medium">{x.label}</span>
-                      <span className="num text-muted-foreground"><span className="font-semibold text-foreground">{x.score}</span>{x.llm_score != null ? ` · 规则 ${x.rule_score} / 模型 ${x.llm_score}` : ''}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 rounded-full bg-muted"><div className={cn('h-full rounded-full transition-[width] duration-500', tone10(x.score))} style={{ width: `${x.score * 10}%` }} /></div>
-                    {x.comment && <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{x.comment}</p>}
-                  </div>
-                )
-              })}
-            </div>
-            {!!r.persona_tags.length && <div className="flex flex-wrap gap-1.5">{r.persona_tags.map((t) => <Badge key={t} tone="primary">{t}</Badge>)}</div>}
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            {DIMS.map((d) => {
+              const x = r.dimensions[d]
+              if (!x) return null
+              return (
+                <div key={d} className="rounded-xl bg-subtle/50 px-3.5 py-2.5">
+                  <div className="text-[12.5px] font-medium">{x.label}</div>
+                  {x.comment && <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">{x.comment}</p>}
+                </div>
+              )
+            })}
           </div>
+          {!!r.persona_tags.length && <div className="flex flex-wrap gap-1.5">{r.persona_tags.map((t) => <Badge key={t} tone="primary">{t}</Badge>)}</div>}
         </div>
         {!!r.suggestions.length && (
           <div className="space-y-1.5 border-t bg-subtle/40 p-4 sm:p-5">

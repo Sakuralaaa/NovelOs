@@ -191,17 +191,13 @@ function Ok({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   )
 }
 
-function ChapterCheckCard({ bookId, c, th }: { bookId: number; c: BatchChapterCheck; th: number }) {
+function ChapterCheckCard({ bookId, c }: { bookId: number; c: BatchChapterCheck; th?: number }) {
   return (
     <div className={cn('rounded-xl bg-surface p-3.5 hairline', !c.passed && 'ring-1 ring-danger/25')}>
       <div className="flex flex-wrap items-center gap-2">
         <Link to={`/books/${bookId}/chapters/${c.chapter_id}`} className="min-w-0 truncate text-[13.5px] font-semibold hover:text-primary">第{c.number}章 {c.title}</Link>
         {c.in_refine && <Badge tone="primary">精修</Badge>}
         <Badge tone={c.status === 'committed' ? 'success' : 'warning'}>{c.status === 'committed' ? '已提交' : '待处理'}</Badge>
-        <span className="ml-auto flex items-center gap-2 text-[12px]">
-          {c.review_overall != null && <span className="num text-muted-foreground">审稿 {c.review_overall}</span>}
-          {c.reader_score != null && <span title={`读者分阈值 ${th}`} className={cn('num rounded-full px-2 py-0.5 font-semibold', c.reader_below_threshold ? 'bg-danger-soft text-danger' : 'bg-success-soft text-success')}>读者 {c.reader_score}</span>}
-        </span>
       </div>
       <div className="mt-2.5 grid gap-2.5 text-[12.5px] leading-relaxed sm:grid-cols-2">
         <div className="rounded-lg bg-subtle/80 px-3 py-2">

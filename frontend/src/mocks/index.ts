@@ -2263,3 +2263,88 @@ on('POST', '/spark/sessions/:id/adopt', (m) => {
   db.ideas.unshift(idea); x.idea_id = idea.id
   return { idea_id: idea.id }
 })
+
+// v0.20 技能库 & 外部 Agent 动态 mock
+const mockSkills: any[] = [
+  { id: 9101, slug: 'builtin-rule-writing', name: '正文写作核心规则', description: 'NovelOS 内置「正文写作」核心规则包，可自由修改或重置。', stage: 'writing', source: 'builtin', source_url: 'builtin/rules/writing.md', license: 'Apache-2.0', enabled: true, is_default: true, body: '# 正文写作规则\n短段快节奏，三百字内见冲突，章末留钩子。', references: [], chars: 32, ref_count: 0, created_at: ago(300), updated_at: ago(300) },
+  { id: 9102, slug: 'curated-golden-opening', name: '黄金三章开篇技法', description: '前三行入局、主角当场行动、金手指露苗头与首次小胜结算。', stage: 'writing', source: 'builtin', source_url: 'curated/webnovel-golden-opening', license: 'MIT', enabled: true, is_default: false, body: '# 黄金三章开篇技法\n第 1 章前三行入局，第 3 章完成首次收益结算。', references: [], chars: 36, ref_count: 0, created_at: ago(300), updated_at: ago(300) },
+]
+const mockBookSkills = new Map<number, { custom: boolean; ids: number[] }>()
+const mockSkillStages = [
+  { key: 'writing', label: '正文写作' }, { key: 'outline', label: '大纲规划' }, { key: 'chapter_plan', label: '章细纲' },
+  { key: 'bible', label: '设定库' }, { key: 'ideation', label: '选题立项' }, { key: 'review', label: '审稿把关' },
+  { key: 'humanize', label: '去 AI 味' }, { key: 'teardown', label: '拆书分析' }, { key: 'package', label: '包装简介' },
+  { key: 'trend_report', label: '风向标' }, { key: 'general', label: '通用方法' },
+]
+on('GET', '/skills', (_m, _b, u) => {
+  const st = u.searchParams.get('stage')
+  const q = (u.searchParams.get('q') ?? '').toLowerCase()
+  const items = mockSkills.filter((x) => (!st || x.stage === st) && (!q || `${x.name} ${x.description} ${x.body}`.toLowerCase().includes(q)))
+  return { stages: mockSkillStages, items }
+})
+on('GET', '/skills/:id', (m) => must(mockSkills.find((x) => x.id === +m[1]), '技能'))
+on('POST', '/skills', (_m, b) => {
+  const sk = { id: nid(), slug: `custom-${Date.now()}`, name: b?.name || '新建技能', description: b?.description || '', stage: b?.stage || 'writing', source: 'custom', source_url: '', license: 'custom', enabled: b?.enabled ?? true, is_default: !!b?.is_default, body: b?.body || '', references: b?.references || [], chars: (b?.body || '').length, ref_count: 0, created_at: now(), updated_at: now() }
+  mockSkills.push(sk); return sk
+})
+on('PUT', '/skills/:id', (m, b) => {
+  const sk = must(mockSkills.find((x) => x.id === +m[1]), '技能')
+  Object.assign(sk, b ?? {}, { updated_at: now() }); sk.chars = (sk.body || '').length; return sk
+})
+on('POST', '/skills/:id/duplicate', (m) => {
+  const src = must(mockSkills.find((x) => x.id === +m[1]), '技能')
+  const copy = { ...src, id: nid(), slug: `${src.slug}-copy`, name: `${src.name} (副本)`, source: 'custom', is_default: false, created_at: now(), updated_at: now() }
+  mockSkills.push(copy); return copy
+})
+on('POST', '/skills/:id/reset', (m) => must(mockSkills.find((x) => x.id === +m[1]), '技能'))
+on('DELETE', '/skills/:id', (m) => {
+  const i = mockSkills.findIndex((x) => x.id === +m[1]); if (i >= 0) mockSkills.splice(i, 1); return { ok: true }
+})
+on('POST', '/skills/import-github', (_m, b) => {
+  const sk = { id: nid(), slug: `gh-${Date.now()}`, name: 'GitHub 导入技能', description: '模拟导入', stage: b?.stage || 'writing', source: 'github', source_url: b?.url || '', license: 'MIT', enabled: true, is_default: false, body: '# 导入的技能\n示例正文', references: [], chars: 14, ref_count: 0, created_at: now(), updated_at: now() }
+  mockSkills.push(sk); return sk
+})
+on('GET', '/books/:id/skills', (m) => {
+  const bid = bookOf(m[1]).id
+  const rec = mockBookSkills.get(bid)
+  const ids = rec ? rec.ids : mockSkills.filter((x) => x.enabled && x.is_default).map((x) => x.id)
+  const active = mockSkills.filter((x) => ids.includes(x.id) && x.enabled && (x.stage === 'writing' || x.stage === 'general'))
+  return { book_id: bid, customized: !!rec?.custom, selected_ids: ids, writing_chars: active.reduce((a, x) => a + x.chars, 0), items: mockSkills }
+})
+on('PUT', '/books/:id/skills', (m, b) => {
+  const bid = bookOf(m[1]).id
+  const ids: number[] = Array.isArray(b?.skill_ids) ? b.skill_ids : []
+  mockBookSkills.set(bid, { custom: true, ids })
+  const active = mockSkills.filter((x) => ids.includes(x.id) && x.enabled && (x.stage === 'writing' || x.stage === 'general'))
+  return { book_id: bid, customized: true, selected_ids: ids, writing_chars: active.reduce((a, x) => a + x.chars, 0), items: mockSkills }
+})
+on('GET', '/books/:id/agent-activity', (m) => [
+  { id: 1, book_id: +m[1], tool: 'save_chapter', summary: '保存第 6 章（含摘要与状态入账）', ok: true, duration_ms: 42, created_at: ago(8) },
+  { id: 2, book_id: +m[1], tool: 'chapter_brief', summary: '读取第 7 章写作简报', ok: true, duration_ms: 19, created_at: ago(2) },
+])
+on('POST', '/books/:id/chapters/write-stream', (m) => {
+  const bid = bookOf(m[1]).id
+  const chs = db.chapters.filter((c) => c.book_id === bid)
+  const num = (chs.reduce((mx, c) => Math.max(mx, c.number), 0) || 0) + 1
+  const title = `第${num}章 模拟流式新章`
+  const content = buildChapterText(num - 1)
+  const id = nid()
+  const ch: Chapter = {
+    id, book_id: bid, number: num, title, content, words: countWords(content),
+    status: 'committed', review: null, lint: mkLint(content), updated_at: now(),
+  }
+  db.chapters.push(ch)
+  recalc(bid)
+  const enc = new TextEncoder()
+  const stream = new ReadableStream({
+    start(ctrl) {
+      const send = (ev: string, data: any) => ctrl.enqueue(enc.encode(`event: ${ev}\ndata: ${JSON.stringify({ type: ev, ...data })}\n\n`))
+      send('start', { number: num, title, target_words: 2200 })
+      const step = 40
+      for (let i = 0; i < content.length; i += step) send('delta', { text: content.slice(i, i + step) })
+      send('done', { chapter_id: id, number: num, title, words: ch.words, committed: true, status: 'committed' })
+      ctrl.close()
+    },
+  })
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+})

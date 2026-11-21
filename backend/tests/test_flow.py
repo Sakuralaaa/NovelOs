@@ -101,18 +101,14 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     # 写 3 章（第 1 章单独，后 2 章批量）
     j = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next").json(), timeout=120)
     r = j["result"]
-    assert r["committed"] is True and r["rewrite_round"] == 1  # mock 初稿故意留了问题 → 走一轮定点重写
+    assert r["committed"] is True and r["rewrite_round"] == 0  # v0.20 一次写成直接入账，不自动跑审稿与重写
     ch1 = client.get(f"/api/chapters/{r['chapter_id']}").json()
     assert ch1["status"] == "committed" and ch1["number"] == 1 and ch1["words"] > 1000
-    assert "嘴角勾起一抹" not in ch1["content"]  # 定点重写去掉了模板表情
-    assert ch1["review"]["passed"] and all(i["quote"] for i in ch1["review"]["issues"])
     lint = ch1["lint"]
     for k in ("avg_sentence_len", "short_sentence_ratio", "bare_dialogue_ratio", "summary_ratio", "ai_score"):
         assert isinstance(lint[k], (int, float))
     assert lint["avg_sentence_len"] > 10
-    # v0.17 开篇第 1 章写 2 版，成对比较选优，落选版留在章节版本里
-    assert len(ch1["variants"]) == 2 and r.get("pairwise") and ch1["review"].get("pairwise")
-    assert sum(1 for v in ch1["variants"] if v.get("picked")) == 1
+    assert len(ch1["variants"]) == 1
     assert "林" in ch1["content"] or ch1["content"]
 
     j = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-batch", json={"count": 2}).json(), timeout=180)
@@ -122,19 +118,13 @@ def test_full_mock_pipeline(client: TestClient) -> None:
     assert all("content" not in c for c in chapters)
     assert all(c["status"] == "committed" for c in chapters)
 
-    # 底账：伏笔、事实、新实体
+    # 底账：伏笔（按细纲兜底登记）与章节进度
     fos = client.get(f"/api/books/{bid}/foreshadows").json()
-    assert len(fos) >= 2 and all(f["planted_ch"] in (1, 2) for f in fos)
-    facts = client.get(f"/api/books/{bid}/facts").json()
-    assert any(f["from_chapter"] == 3 for f in facts)
-    closed = [f for f in facts if f["to_chapter"] is not None]
-    assert closed, "同一实体同一状态的旧事实应被关闭"
-    assert any(c["name"] == "斗笠客" for c in client.get(f"/api/books/{bid}/cards").json())
+    assert len(fos) >= 1
     b = client.get(f"/api/books/{bid}").json()
     assert b["status"] == "writing" and b["stats"]["chapters"] == 3 and b["stats"]["foreshadow_open"] >= 1
     written = [n for n in client.get(f"/api/books/{bid}/outline").json() if n["level"] == "chapter" and n["status"] == "written"]
     assert len(written) == 3 and all(n["chapter_id"] for n in written)
-    assert all(3 <= len(n["beats"]["scenes"]) <= 6 for n in written)
 
     # 第 4 章：多版本（2），默认不自动采纳 → 草稿等作者挑
     j = wait_job(client, client.post(f"/api/books/{bid}/chapters/write-next", json={"variants": 2}).json(), timeout=180)
@@ -244,7 +234,7 @@ def test_channels_routing_and_masking(client: TestClient) -> None:
 def test_writing_settings_auto_adopt(client: TestClient) -> None:
     w = client.get("/api/settings/writing").json()
     assert w == {"auto_adopt_best": False, "auto_commit": True, "default_variants": 1,
-                 "fix_mid_before_commit": True, "auto_rereview": True,  # v0.9.4 新开关
+                 "fix_mid_before_commit": False, "auto_rereview": False,  # v0.20 一次写成默认不自动修补/重审
                  "llm_timeout": 360, "llm_retries": 2, "sticky_session": True}  # v0.18.2/v0.18.3
     w = client.put("/api/settings/writing", json={"auto_adopt_best": True}).json()
     assert w["auto_adopt_best"] is True

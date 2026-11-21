@@ -234,6 +234,7 @@ def _set_review(chapter_id: int, issues: list[dict[str, Any]], patches: list[dic
         s.commit()
 
 
+@pytest.mark.skip(reason="v0.20 一次写成默认关闭提交前自动改稿与补丁后自动复审")
 def test_pre_commit_fix_and_switches(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import writing
 
@@ -307,6 +308,7 @@ def test_global_switch_off_skips_fix(client: TestClient) -> None:
 
 # ================================================================== 3. 补丁后自动重审
 
+@pytest.mark.skip(reason="v0.20 一次写成不再自动应用审稿补丁与复审")
 def test_rereview_after_patches_flags_high(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import review as review_svc
     from app.services import writing
@@ -395,6 +397,7 @@ def test_checkpoint_helpers_and_recover() -> None:
     assert manager.load_checkpoint(a.id or 0) is None
 
 
+@pytest.mark.skip(reason="v0.20 一次写成不再有 scene_plan / 多场景断点")
 def test_write_next_resume_from_last_scene(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.db import session_scope
     from app.jobs import manager
@@ -449,6 +452,7 @@ def test_write_next_resume_from_last_scene(client: TestClient, monkeypatch: pyte
         wait_job(client, client.post(f"/api/chapters/{res['chapter_id']}/commit").json())
 
 
+@pytest.mark.skip(reason="v0.20 一次写成不再在建章后跑自动审稿补丁与精修")
 def test_resume_after_chapter_created(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """断点在建章之后（精修阶段失败）：续跑不重写正文，直接从精修接着做。"""
     from app.services import writing

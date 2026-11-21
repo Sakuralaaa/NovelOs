@@ -12,7 +12,6 @@ import { Field, Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
-import { ScoreRing } from '@/components/ui/misc'
 import { ErrorState } from '@/components/common/States'
 import { JobInline } from '@/components/common/JobInline'
 import { BookCover } from '@/components/radar/BookCover'
@@ -179,7 +178,6 @@ function IdeaMini({ idea: i, onOpen, busy, label = '打开' }: { idea: Idea; onO
           <div className="break-words text-[15.5px] font-bold leading-snug tracking-tight">{i.title}</div>
           {i.genre && <div className="mt-0.5 text-[12px] text-muted-foreground">{i.genre}</div>}
         </div>
-        {i.scores?.overall ? <ScoreRing value={i.scores.overall} size={44} label="综合" /> : null}
       </div>
       {i.logline && <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-primary">{i.logline}</p>}
       {!!i.selling_points?.length && (

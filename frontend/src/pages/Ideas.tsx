@@ -2,14 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowRight, ClipboardPaste, Feather, Layers3, Plus, ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw, RefreshCw } from '@/components/icons'
+import { ArrowRight, ClipboardPaste, Feather, Layers3, Plus, ArrowUpRight, BookPlus, Quote, Sparkles, Trash2, Wand2, AlertCircle, Flag, Pencil, RotateCcw } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Field, Input } from '@/components/ui/input'
-import { ScoreRing } from '@/components/ui/misc'
 import { Segmented } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { EmptyState, ErrorState, PageHeader } from '@/components/common/States'
@@ -98,7 +97,6 @@ export default function Ideas() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[15px] font-semibold">选题卡 {ideas.data?.length ? <span className="ml-1 text-muted-foreground">{ideas.data.length}</span> : null}</h2>
           <div className="flex items-center gap-1">
-            <RescoreAll count={(ideas.data ?? []).filter((x) => !x.chosen).length} />
             <ClearIdeas count={(ideas.data ?? []).filter((x) => !x.chosen).length} />
           </div>
         </div>
@@ -151,7 +149,6 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
           <Link to={`/ideas/${i.id}`} className="block break-words text-[16px] font-semibold leading-snug tracking-tight hover:text-primary">{i.title}</Link>
           <div className="mt-1 truncate text-xs text-muted-foreground">{i.genre}{i.source?.kind === 'reskin' && <span className="ml-1.5 text-primary/80">· 仿《{i.source.ref_title}》</span>}</div>
         </div>
-        <ScoreRing value={i.scores.overall} size={50} label="综合" />
       </div>
       <p className="mt-3 break-words text-[13.5px] leading-relaxed text-foreground/85">{i.logline}</p>
       {i.selling_points.length > 0 && (
@@ -180,14 +177,6 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
           {i.endgame && <div className={cn('flex gap-2 font-medium', i.arc?.length && 'mt-1.5 border-t border-dashed pt-1.5')}><Flag className="mt-[3px] h-3.5 w-3.5 shrink-0 text-primary" /><span className="min-w-0 break-words">{i.endgame}</span></div>}
         </div>
       ) : null}
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        {([['热度', i.scores.heat], ['新颖', i.scores.novelty], ['适配', i.scores.fit]] as const).map(([l, v]) => (
-          <div key={l}>
-            <div className="flex justify-between text-[11.5px] text-muted-foreground"><span>{l}</span><span className="num">{v}</span></div>
-            <div className="mt-1 h-1 rounded-full bg-muted"><div className="h-full rounded-full bg-primary/70" style={{ width: `${v}%` }} /></div>
-          </div>
-        ))}
-      </div>
       {i.issue && <div className="mt-3 flex gap-1.5 text-[12.5px] leading-relaxed text-warning"><AlertCircle className="mt-[3px] h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-words">{i.issue}</span></div>}
       <TropeAlert hits={i.trope_hits} compact className="mt-3" busy={!!revJob} onReplace={i.chosen ? undefined : detrope} />
       {revJob && <div className="mt-3"><JobInline job={revJob} /></div>}
@@ -206,18 +195,6 @@ function IdeaCard({ idea: i, fresh, delay }: { idea: Idea; fresh: boolean; delay
         <Button variant="ghost" size="icon" aria-label="删除选题" loading={rm.isPending} onClick={() => rm.mutate()} className="shrink-0 text-muted-foreground hover:text-danger"><Trash2 className="h-4 w-4" /></Button>
       </div>
     </motion.div>
-  )
-}
-
-function RescoreAll({ count }: { count: number }) {
-  const { start } = useJobs()
-  const job = useActiveJob('ideas-rescore')
-  if (!count) return null
-  return (
-    <Button size="sm" variant="ghost" loading={!!job} icon={<RefreshCw className="h-3.5 w-3.5" />}
-      onClick={() => start(api.rescoreAllIdeas(), { key: 'ideas-rescore', label: '重新打分', successMsg: (j) => `已重新打分 ${j.result?.count ?? count} 个选题` })}>
-      全部重新打分
-    </Button>
   )
 }
 

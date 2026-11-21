@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from conftest import wait_job
@@ -87,6 +88,7 @@ def test_guided_decisions_and_guidance(client: TestClient) -> None:
         assert "【前情卷回顾】" in pack.suffix and "【作者导向】" in pack.suffix
 
 
+@pytest.mark.skip(reason="v0.20 一次写成不再在 write_next 中自动跑审稿与多轮自愈重写")
 def test_heal_and_retry(client: TestClient, monkeypatch: Any) -> None:
     """v0.17：按章自愈，最多 2 轮；还没过就停下「待你看」，不放行、不往下写；作者放行后接着写到完。"""
     from app.llm.gateway import LLMError

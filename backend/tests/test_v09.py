@@ -320,6 +320,7 @@ def _write_book(client: TestClient, platform: str = "fanqie") -> int:
     return bid
 
 
+@pytest.mark.skip(reason="v0.20 一次写成不再在 write_next 中自动审稿和应用审稿补丁")
 def test_write_flow_auto_applies_patches_and_manual_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import review as review_svc
     from app.services import writing
@@ -460,6 +461,6 @@ def test_context_includes_next_two_outlines(client: TestClient) -> None:
 def test_version_090(client: TestClient) -> None:
     from pathlib import Path
 
-    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18.", "0.19."))  # v0.9.1 起版本号由 test_v091 精确校验
+    assert client.get("/api/health").json()["version"].startswith(("0.9.", "0.10.", "0.11.", "0.12.", "0.13.", "0.14.", "0.15.", "0.16.", "0.17.", "0.18.", "0.19.", "0.20."))  # v0.9.1 起版本号由 test_v091 精确校验
     root = Path(__file__).resolve().parents[2]
     assert "## v0.9.0" in (root / "CHANGELOG.md").read_text(encoding="utf-8")

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster, toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -22,7 +22,6 @@ const Outline = lazy(() => import('@/pages/book/Outline'))
 const Chapters = lazy(() => import('@/pages/book/Chapters'))
 const Foreshadows = lazy(() => import('@/pages/book/Foreshadows'))
 const PackagePage = lazy(() => import('@/pages/book/Package'))
-const AgentPage = lazy(() => import('@/pages/book/Agent'))
 const WanbenPage = lazy(() => import('@/pages/book/Wanben'))
 const AutoPage = lazy(() => import('@/pages/book/Auto'))
 const BookCheckPage = lazy(() => import('@/pages/book/BookCheck'))
@@ -30,6 +29,7 @@ const BatchPage = lazy(() => import('@/pages/book/Batch'))
 const NotesPage = lazy(() => import('@/pages/book/Notes'))
 const SparkPage = lazy(() => import('@/pages/Spark'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
+const SkillsPage = lazy(() => import('@/pages/Skills'))
 const AigcDetectPage = lazy(() => import('@/pages/AigcDetect'))
 const TeardownPage = lazy(() => import('@/pages/Teardown'))
 const FanficPage = lazy(() => import('@/pages/Fanfic'))
@@ -39,7 +39,7 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
 
 const qc = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: (n, e: any) => (e?.status >= 400 && e?.status < 500 ? false : n < 1) },
+    queries: { staleTime: 5_000, refetchOnWindowFocus: true, retry: (n, e: any) => (e?.status >= 400 && e?.status < 500 ? false : n < 1) },
     mutations: { retry: false },
   },
   mutationCache: new MutationCache({
@@ -78,7 +78,7 @@ export function App() {
                 <Route path="books/:bookId/chapters/:chapterId" element={<S><Chapters /></S>} />
                 <Route path="books/:bookId/foreshadows" element={<S><Foreshadows /></S>} />
                 <Route path="books/:bookId/package" element={<S><PackagePage /></S>} />
-                <Route path="books/:bookId/agent" element={<S><AgentPage /></S>} />
+                <Route path="books/:bookId/agent" element={<Navigate to=".." relative="path" replace />} />
                 <Route path="books/:bookId/wanben" element={<S><WanbenPage /></S>} />
                 <Route path="books/:bookId/auto" element={<S><AutoPage /></S>} />
                 <Route path="books/:bookId/check" element={<S><BookCheckPage /></S>} />
@@ -98,6 +98,7 @@ export function App() {
                 <Route path="history" element={<S><HistoryPage /></S>} />
                 <Route path="spark" element={<S><SparkPage /></S>} />
                 <Route path="spark/:sid" element={<S><SparkPage /></S>} />
+                <Route path="skills" element={<S><SkillsPage /></S>} />
                 <Route path="settings" element={<S><SettingsPage /></S>} />
                 <Route path="*" element={<S><NotFound /></S>} />
               </Route>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, CheckCircle2, Copy, Download, LogOut, RotateCcw, X, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, Wallet, XCircle, Zap } from '@/components/icons'
+import { AlertTriangle, Check, CheckCircle2, Copy, Download, History, LogOut, RotateCcw, X, ShieldCheck, Eye, EyeOff, KeyRound, Moon, Pencil, Plug, Plus, Radar, Route, Search, Sun, Trash2, Wallet, XCircle, Zap } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,7 +48,6 @@ const ROUTES: { key: RouteKey; label: string; desc: string }[] = [
   { key: 'search', label: '联网搜索', desc: '拿不准的现实细节先联网查证' },
   { key: 'embedding', label: '向量检索', desc: '长篇记忆回读，需要 embedding 模型' },
   { key: 'image', label: '生图', desc: '封面生成，需要支持 images 接口的模型' },
-  { key: 'agent', label: '本书 Agent', desc: '书内专属助手，需要支持工具调用（function calling）；不设置时用规划模型' },
 ]
 
 export default function SettingsPage() {
@@ -438,29 +438,14 @@ function WritingCard() {
           <div className="divide-y divide-border/70">
             <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
               <div className="text-[13.5px] font-medium">默认版本数</div>
-              <div className="w-[240px]"><Select value={String(c.default_variants)} onChange={(v) => v && m.mutate({ default_variants: Number(v) as 1 | 2 | 3 })} options={[1, 2, 3].map((n) => ({ value: String(n), label: `${n} 个版本` }))} /></div>
+              <div className="w-[240px]"><Select value={String(c.default_variants)} onChange={(v) => v && m.mutate({ default_variants: Number(v) as 1 | 2 | 3 })} options={[1, 2, 3].map((n) => ({ value: String(n), label: n === 1 ? '1 个版本（流式一次写成）' : `${n} 个版本` }))} /></div>
             </div>
             <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
-              <div className="text-[13.5px] font-medium">自动采纳最高分版本</div>
-              <Switch checked={c.auto_adopt_best} onCheckedChange={(v) => m.mutate({ auto_adopt_best: v })} />
-            </label>
-            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
-              <div className="text-[13.5px] font-medium">审稿通过后自动提交</div>
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-medium">写完后自动提交入账</div>
+                <div className="mt-0.5 text-[12px] text-muted-foreground">关闭后写完留为草稿，手动确认后再入账</div>
+              </div>
               <Switch checked={c.auto_commit} onCheckedChange={(v) => m.mutate({ auto_commit: v })} />
-            </label>
-            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-medium">提交前修中等问题</div>
-                <div className="mt-0.5 text-[12px] text-muted-foreground">提交前先应用连续性 / 追读欲的一般问题补丁，剩下的定点改写原句；每章一次，旧正文进历史可撤回</div>
-              </div>
-              <Switch checked={c.fix_mid_before_commit ?? true} onCheckedChange={(v) => m.mutate({ fix_mid_before_commit: v })} />
-            </label>
-            <label className="flex min-h-[60px] cursor-pointer items-center justify-between gap-4 px-5 py-3">
-              <div className="min-w-0">
-                <div className="text-[13.5px] font-medium">补丁后自动复审</div>
-                <div className="mt-0.5 text-[12px] text-muted-foreground">写章时自动应用了审稿补丁，再审一次（只 1 次）；仍有严重问题就标记、不提交</div>
-              </div>
-              <Switch checked={c.auto_rereview ?? true} onCheckedChange={(v) => m.mutate({ auto_rereview: v })} />
             </label>
             <div className="flex min-h-[60px] items-center justify-between gap-4 px-5 py-3">
               <div className="text-[13.5px] font-medium">模型等待上限</div>
@@ -894,7 +879,8 @@ function BudgetCard() {
   const dirty = daily !== null || book !== null
   return (
     <Card id="budget">
-      <CardHeader divider title="花费与预算" icon={<Wallet className="h-4 w-4" />} />
+      <CardHeader divider title="花费、预算与生成档案" icon={<Wallet className="h-4 w-4" />}
+        action={<Link to="/history"><Button size="sm" variant="ghost" icon={<History className="h-3.5 w-3.5" />}>查看生成档案</Button></Link>} />
       <CardBody className="p-0">
         {!d ? <Skeleton className="m-5 h-24" /> : (
           <div className="divide-y divide-border/70">

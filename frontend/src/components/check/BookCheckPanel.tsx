@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardBody, CardHeader } from '@/components/ui/card'
 import { Sheet } from '@/components/ui/dialog'
-import { ScoreRing, Skeleton } from '@/components/ui/misc'
+import { Skeleton } from '@/components/ui/misc'
 import { Select } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/ui/tabs'
@@ -41,7 +41,7 @@ export function BookCheckPanel({ bookId }: { bookId: number }) {
   const hist = useQuery({ queryKey: wqk.bookCheckHistory(bookId), queryFn: () => checkApi.bookCheckHistory(bookId) })
   const run = () => start(checkApi.startBookCheck(bookId, llm), {
     key, label: '整书体检',
-    successMsg: (j) => `体检完成：${j.result?.verdict_label ?? ''} ${j.result?.score ?? ''} 分`,
+    successMsg: (j) => `体检完成：${j.result?.verdict_label ?? '已生成问题清单'}`,
     onSuccess: () => { setJobId(undefined); qc.invalidateQueries({ queryKey: ['book-check', bookId] }) },
   })
   const r = rep.data?.report
@@ -64,7 +64,7 @@ export function BookCheckPanel({ bookId }: { bookId: number }) {
               <span className="flex items-center gap-1 text-[12px] text-muted-foreground"><Clock className="h-3.5 w-3.5" />历史</span>
               <div className="w-full min-w-0 sm:w-[340px]">
                 <Select value={String(jobId ?? hist.data.items[0].job_id)} onChange={(v) => setJobId(v && Number(v) !== hist.data!.items[0].job_id ? Number(v) : undefined)}
-                  options={hist.data.items.map((h, i) => ({ value: String(h.job_id), label: `${fmtDateTime(h.updated_at)} · ${h.verdict ? VERDICT_LABEL[h.verdict] : '—'} ${h.score ?? ''} 分${h.llm_used ? '' : ' · 仅规则'}${i === 0 ? '（最新）' : ''}` }))} />
+                  options={hist.data.items.map((h, i) => ({ value: String(h.job_id), label: `${fmtDateTime(h.updated_at)} · ${h.verdict ? VERDICT_LABEL[h.verdict] : '—'}${h.llm_used ? '' : ' · 仅规则'}${i === 0 ? '（最新）' : ''}` }))} />
               </div>
             </div>
           )}
@@ -87,7 +87,6 @@ function ReportView({ bookId, r }: { bookId: number; r: BookCheckReport }) {
     <>
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-5 p-4 sm:p-5">
-          <ScoreRing value={r.score} size={76} stroke={6} label="分" />
           <div className="min-w-0 flex-1 basis-[220px]">
             <div className="flex flex-wrap items-center gap-2">
               <span className={cn('inline-flex h-8 items-center rounded-full px-3.5 text-[14px] font-semibold', v.ring)}>{r.verdict_label || VERDICT_LABEL[r.verdict]}</span>
@@ -106,7 +105,7 @@ function ReportView({ bookId, r }: { bookId: number; r: BookCheckReport }) {
           <Tile label="重复/近似章" value={st.duplicate_pairs?.length ?? 0} tone={st.duplicate_pairs?.length ? 'warning' : undefined} sub={st.duplicate_pairs?.[0] ? `如第 ${st.duplicate_pairs[0].chapters.join('/')} 章` : '没有'} />
           <Tile label="伏笔未回收" value={st.open_foreshadows} tone={st.open_foreshadows ? 'warning' : undefined} sub={<Link to={`/books/${bookId}/foreshadows`} className="text-primary hover:underline">去伏笔面板</Link>} />
           <Tile label="结局" value={end?.closed ? '已收束' : end?.cliff ? '停在悬念' : '未见收束'} tone={end?.closed ? 'success' : end?.cliff ? 'danger' : 'warning'}
-            sub={llmEnd ? `${llmEnd.rushed ? '模型：结局仓促' : '模型：结局完整'} ${llmEnd.score}/10` : end?.last_chapter ? `末章第 ${end.last_chapter} 章` : undefined} />
+            sub={llmEnd ? (llmEnd.rushed ? '模型：结局偏仓促' : '模型：结局收束自然') : end?.last_chapter ? `末章第 ${end.last_chapter} 章` : undefined} />
         </div>
         {(llmEnd?.comment || r.llm?.mainline?.comment) && (
           <div className="grid gap-2.5 border-t p-4 sm:grid-cols-2 sm:p-5">

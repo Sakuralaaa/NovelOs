@@ -1,5 +1,5 @@
 import type {
-  AutoOverview, AutoSettings, RoutingBackup,
+  AutoOverview, AutoSettings, RoutingBackup, AgentActivity, WriteStreamEvent, SkillItem, BookSkillsResp,
   AgentMessage, AgentProposal, AgentSession, AgentSessionDetail, AgentToolInfo,
   BibleOp, BibleSnapshot, BookInfo, ForeshadowOverview, ForeshadowPlanItem, Impact, Trope,
   Book, Card, CardType, CardVersion, Channel, ChannelInput, Chapter, Fact, Foreshadow, Gender, Idea, IdeaField, Job,
@@ -93,8 +93,63 @@ export const api = {
   apiKeys: () => get<{ keys: ApiKey[]; env_key_enabled: boolean }>('/auth/keys'),
   createApiKey: (name: string) => post<ApiKey & { token: string }>('/auth/keys', { name }),
   revokeApiKey: (id: string) => del<{ ok: boolean }>(`/auth/keys/${id}`),
-  /** v0.19 Agent 接入（MCP） */
+  /** v0.19/v0.20 Agent 接入（MCP） */
   mcpInfo: () => get<{ url: string; tools: { name: string; description: string }[] }>('/mcp-info'),
+  bookAgentActivity: (bookId: number, limit = 20) => get<AgentActivity[]>(`/books/${bookId}/agent-activity${qs({ limit })}`),
+  /** v0.20 流式写下一章（SSE） */
+  async writeStream(bookId: number, instruction: string, onEvent: (ev: WriteStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+    const res = await fetch(`/api/books/${bookId}/chapters/write-stream`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instruction }),
+      signal,
+    })
+    if (!res.ok) {
+      let msg = `请求失败（${res.status}）`
+      try { const j = await res.json(); if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) } catch { /* ignore */ }
+      throw new ApiError(res.status, msg)
+    }
+    const reader = res.body?.getReader()
+    if (!reader) throw new ApiError(500, '浏览器不支持流式读取')
+    const dec = new TextDecoder()
+    let buf = ''
+    const flushBlocks = (rawBuf: string, final = false): string => {
+      const normalized = rawBuf.replace(/\r\n/g, '\n')
+      const blocks = normalized.split('\n\n')
+      const rest = final ? '' : (blocks.pop() ?? '')
+      for (const blk of blocks) {
+        for (const line of blk.split('\n')) {
+          if (!line.startsWith('data:')) continue
+          const raw = line.slice(5).trim()
+          if (!raw) continue
+          try { onEvent(JSON.parse(raw) as WriteStreamEvent) } catch { /* ignore */ }
+        }
+      }
+      return rest
+    }
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf = flushBlocks(buf + dec.decode(value, { stream: true }))
+    }
+    buf += dec.decode()
+    if (buf.trim()) flushBlocks(buf, true)
+  },
+
+  /** v0.20 可插拔技能库 */
+  skills: (p?: { stage?: string; source?: string; q?: string }) =>
+    get<{ stages: { key: string; label: string }[]; items: SkillItem[] }>(`/skills${qs(p ?? {})}`),
+  skill: (id: number) => get<SkillItem>(`/skills/${id}`),
+  createSkill: (b: { name: string; description?: string; stage: string; body: string; enabled?: boolean; is_default?: boolean; references?: { name: string; content: string }[] }) =>
+    post<SkillItem>('/skills', b),
+  updateSkill: (id: number, b: Partial<SkillItem>) => put<SkillItem>(`/skills/${id}`, b),
+  duplicateSkill: (id: number) => post<SkillItem>(`/skills/${id}/duplicate`),
+  resetSkill: (id: number) => post<SkillItem>(`/skills/${id}/reset`),
+  deleteSkill: (id: number) => del<{ ok: boolean }>(`/skills/${id}`),
+  importGithubSkill: (b: { url: string; stage?: string; token?: string }) => post<SkillItem>('/skills/import-github', b),
+  bookSkills: (bookId: number) => get<BookSkillsResp>(`/books/${bookId}/skills`),
+  saveBookSkills: (bookId: number, skill_ids: number[]) => put<BookSkillsResp>(`/books/${bookId}/skills`, { skill_ids }),
 
   jobs: (bookId?: number) => get<Job[]>(`/jobs${qs({ book_id: bookId })}`),
   job: (id: number) => get<Job>(`/jobs/${id}`),
@@ -398,6 +453,9 @@ export const qk = {
   agentTools: ['agent', 'tools'] as const,
   agentSessions: (bookId: number) => ['agent', 'sessions', bookId] as const,
   agentSession: (sid: number) => ['agent', 'session', sid] as const,
+  agentActivity: (bookId: number) => ['agent-activity', bookId] as const,
+  skills: ['skills'] as const,
+  bookSkills: (bookId: number) => ['book-skills', bookId] as const,
   completeness: (bookId: number) => ['completeness', bookId] as const,
   onboarding: ['onboarding'] as const,
   refs: (bookId: number, q: string) => ['refs', bookId, q] as const,

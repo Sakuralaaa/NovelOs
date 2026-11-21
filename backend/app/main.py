@@ -18,9 +18,10 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import routes_agent, routes_auth, routes_books, routes_core, routes_dev, routes_fanfic, routes_v093
+from app.api import routes_auth, routes_books, routes_core, routes_dev, routes_fanfic, routes_v093
 from app.api import routes_bookcheck
 from app.api import routes_mcp
+from app.api import routes_skills
 from app.apikeys import ApiKeyStore, token_from_headers
 from app.auth import COOKIE_NAME, AuthManager
 from app.config import get_settings
@@ -37,6 +38,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     init_engine(settings)
+    from app.services.skills_store import seed_builtin_skills
+    seed_builtin_skills()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -121,7 +124,6 @@ def create_app() -> FastAPI:
 
     app.include_router(routes_v013.router)
     app.include_router(routes_books.router)
-    app.include_router(routes_agent.router)
     app.include_router(routes_v093.router)
     app.include_router(routes_fanfic.router)  # v0.10 同人创作
     app.include_router(routes_bookcheck.router)  # v0.11 完本模式·质检
@@ -133,7 +135,8 @@ def create_app() -> FastAPI:
     from app.api import routes_autopilot  # v0.16 一键成书
 
     app.include_router(routes_autopilot.router)
-    app.include_router(routes_mcp.router)  # v0.19 Agent 接入（MCP）
+    app.include_router(routes_skills.router)  # v0.20 可插拔技能库
+    app.include_router(routes_mcp.router)  # v0.19/v0.20 Agent 接入（MCP）
     app.include_router(routes_dev.router)
     app.mount("/media", StaticFiles(directory=settings.media_dir), name="media")
 

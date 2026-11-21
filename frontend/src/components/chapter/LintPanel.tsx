@@ -4,7 +4,6 @@ import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
 import type { Lint } from '@/lib/types'
 import { cn, platformLabel } from '@/lib/utils'
-import { Gauge } from './RadarChart'
 
 export interface LocalStats { avg_sentence_len: number; short_sentence_ratio: number; bare_dialogue_ratio: number; summary_ratio: number; dialogue_ratio: number; bareCount: number; summaryCount: number }
 
@@ -25,7 +24,12 @@ export function LintPanel({ lint, local, showBare, showSummary, onToggleBare, on
   return (
     <div className="space-y-5">
       <div className="rounded-xl bg-subtle p-4">
-        <Gauge value={lint?.ai_score ?? 0} label={lint ? 'AI 味（越低越好）' : '尚未检测'} invert />
+        <div className="flex items-center justify-between text-[13px]">
+          <span className="font-medium">文本质检速览</span>
+          <span className="num text-xs text-muted-foreground">
+            {lint ? `禁用词 ${lint.banned_hits.length} · 提醒 ${lint.warnings.length}` : '保存后自动检测'}
+          </span>
+        </div>
         <div className="mt-3">
           <div className="mb-1 flex justify-between text-[11.5px] text-muted-foreground">
             <span>叙述 {Math.round((1 - (lint?.dialogue_ratio ?? local.dialogue_ratio)) * 100)}%</span>
