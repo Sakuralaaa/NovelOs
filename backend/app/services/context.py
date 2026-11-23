@@ -660,6 +660,20 @@ def chapter_task_lines(beats: dict[str, Any], number: int, protagonist: str | No
         lines.append(f"章末最后一拍：{beats['hook_end']}" + (f"（类型：{ht}）" if ht else "") + "，停在事件进行中或一句话上")
     if beats.get("time"):
         lines.append(f"故事时间：{beats['time']}")
+    if beats.get("core_scene"):
+        lines.append(f"核心场景：{beats['core_scene']}")
+    if beats.get("underlying_game"):
+        lines.append(f"底层博弈：{beats['underlying_game']}")
+    if beats.get("chapter_reward"):
+        lines.append(f"本章收益：{beats['chapter_reward']}")
+    if beats.get("phase_check"):
+        lines.append(f"阶段检查：{beats['phase_check']}")
+    stages = [(lab, beats.get(k)) for k, lab in (
+        ("stage_qi", "起（入局冲突）"), ("stage_cheng", "承（加压博弈）"),
+        ("stage_zhuan", "转（反转爆点）"), ("stage_he", "合（收益与钩子）"),
+    ) if str(beats.get(k) or "").strip()]
+    if stages:
+        lines.append("【起承转合详纲（严格按四拍推进，1:2 扩写为紧凑正文，严禁跑偏注水）】\n" + "\n".join(f"- {lab}：{val}" for lab, val in stages))
     for a in beats.get("must_avoid") or []:
         lines.append(f"本章换个写法：{a}")
     return lines

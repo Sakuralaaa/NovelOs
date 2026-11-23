@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, ListTree, Lock, Pencil, Plus, RotateCcw, Sparkles, Trash2, UnfoldVertical, Unlock, X } from '@/components/icons'
+import { Check, ChevronRight, ChevronsDownUp, ChevronsUpDown, FileText, Layers3, ListTree, Lock, Pencil, Plus, RotateCcw, Sparkles, Trash2, UnfoldVertical, Unlock, X } from '@/components/icons'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Dialog, DialogContent, Sheet } from '@/components/ui/dialog'
-import { Field, Input } from '@/components/ui/input'
+import { Field, Input, Textarea } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { MentionTextarea } from '@/components/bible/MentionTextarea'
 import { Skeleton } from '@/components/ui/misc'
 import { Tip } from '@/components/ui/tooltip'
@@ -47,8 +48,16 @@ export default function Outline() {
   const tree = useMemo(() => buildTree(q.data ?? []), [q.data])
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const [editing, setEditing] = useState<OutlineNode | null>(null)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchCount, setBatchCount] = useState(10)
+  const [batchHeavy, setBatchHeavy] = useState(true)
+  const [batchInst, setBatchInst] = useState('')
+  const [goldenOpen, setGoldenOpen] = useState(false)
+  const [goldenInst, setGoldenInst] = useState('')
   const { start } = useJobs()
   const job = useActiveJob(`outline:${id}`)
+  const batchJob = useActiveJob(`outline-batch:${id}`)
+  const goldenJob = useActiveJob(`golden-three:${id}`)
   const counts = useMemo(() => {
     const c = { volume: 0, arc: 0, chapter: 0, written: 0 }
     ;(q.data ?? []).forEach((n) => { if (n.level !== 'book') c[n.level]++; if (n.level === 'chapter' && n.status === 'written') c.written++ })
@@ -57,7 +66,23 @@ export default function Outline() {
 
   const toggle = (nid: number) => setCollapsed((s) => { const n = new Set(s); n.has(nid) ? n.delete(nid) : n.add(nid); return n })
   const collapseAll = () => setCollapsed(new Set((q.data ?? []).filter((n) => n.level === 'arc' || n.level === 'volume').map((n) => n.id)))
-  const gen = () => start(api.generateOutline(id), { key: `outline:${id}`, label: '生成大纲', successMsg: '大纲已生成' })
+  const gen = () => start(api.generateOutline(id), { key: `outline:${id}`, label: '生成大纲', successMsg: counts.written > 0 ? '总纲已生成并自动锚定已写开篇' : '大纲已生成' })
+  const runBatch = () => {
+    setBatchOpen(false)
+    start(api.batchOutlineChapters(id, { count: batchCount, heavy: batchHeavy, instruction: batchInst.trim() }), {
+      key: `outline-batch:${id}`,
+      label: `批量生成 ${batchCount} 章细纲`,
+      successMsg: `已生成 ${batchCount} 章${batchHeavy ? '千字起承转合' : ''}章纲`,
+    })
+  }
+  const runGolden = () => {
+    setGoldenOpen(false)
+    start(api.writeGoldenThree(id, goldenInst.trim()), {
+      key: `golden-three:${id}`,
+      label: '黄金三章先行',
+      successMsg: '黄金三章已写完！现在可点「生成大纲」锚定前三章展开全书',
+    })
+  }
 
   return (
     <div className="page">
@@ -68,13 +93,30 @@ export default function Outline() {
             <Button size="sm" variant="ghost" icon={<ChevronsUpDown className="h-4 w-4" />} onClick={() => setCollapsed(new Set())}>全部展开</Button>
             <Button size="sm" variant="ghost" icon={<ChevronsDownUp className="h-4 w-4" />} onClick={collapseAll}>收起</Button>
           </>}
+          {counts.written < 3 && (
+            <Button size="sm" variant="soft" loading={!!goldenJob} icon={<Sparkles className="h-4 w-4" />} onClick={() => setGoldenOpen(true)}>
+              黄金三章先行
+            </Button>
+          )}
+          <Button size="sm" variant="soft" loading={!!batchJob} icon={<Layers3 className="h-4 w-4" />} onClick={() => setBatchOpen(true)}>
+            批量章纲
+          </Button>
           <Button variant="primary" loading={!!job} icon={<Sparkles className="h-4 w-4" />} onClick={gen}>{q.data?.length ? '重新生成大纲' : '生成大纲'}</Button>
         </>} />
-      {job && <JobInline job={job} className="mb-5" />}
+      {job && <JobInline job={job} className="mb-4" />}
+      {batchJob && <JobInline job={batchJob} className="mb-4" />}
+      {goldenJob && <JobInline job={goldenJob} className="mb-4" />}
 
       {q.isLoading ? <div className="space-y-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
         : q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} />
-        : !tree.length ? <EmptyState kind="outline" title="还没有大纲" action={<Button variant="primary" loading={!!job} icon={<ListTree className="h-4 w-4" />} onClick={gen}>生成大纲</Button>} />
+        : !tree.length ? (
+          <EmptyState kind="outline" title="还没有大纲"
+            desc="推荐「黄金三章先行」先写出强情绪前三章，满意后再点「生成大纲」自动锚定前三章展开全书；也可以直接生成整书总纲。"
+            action={<div className="flex flex-wrap justify-center gap-2">
+              <Button variant="soft" loading={!!goldenJob} icon={<Sparkles className="h-4 w-4" />} onClick={() => setGoldenOpen(true)}>黄金三章先行</Button>
+              <Button variant="primary" loading={!!job} icon={<ListTree className="h-4 w-4" />} onClick={gen}>生成大纲</Button>
+            </div>} />
+        )
         : (
           <>
             <div className="mb-4 flex flex-wrap gap-2 text-[12.5px] text-muted-foreground">
@@ -88,6 +130,37 @@ export default function Outline() {
           </>
         )}
       <NodeEditor node={editing} onClose={() => setEditing(null)} bookId={id} />
+
+      <Dialog open={batchOpen} onOpenChange={setBatchOpen}>
+        <DialogContent title="批量生成起承转合章纲"
+          desc="重纲轻写：一次规划 5–15 章详纲，每章配齐起/承/转/合四拍与核心收益，按 1:2 比例扩写成紧凑短章。"
+          footer={<><Button variant="ghost" onClick={() => setBatchOpen(false)}>取消</Button><Button variant="primary" onClick={runBatch}>生成 {batchCount} 章纲</Button></>}>
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <input type="range" min={3} max={15} value={batchCount} onChange={(e) => setBatchCount(Number(e.target.value))} className="flex-1 accent-[hsl(var(--primary))]" />
+              <div className="num w-16 rounded-md bg-muted py-1 text-center text-base font-semibold">{batchCount}<span className="ml-0.5 text-xs font-normal text-muted-foreground">章</span></div>
+            </div>
+            <label className="flex cursor-pointer items-center justify-between rounded-lg bg-subtle/60 px-3 py-2.5 text-[13px]">
+              <span>启用「千字起承转合详纲」模式</span>
+              <Switch checked={batchHeavy} onCheckedChange={setBatchHeavy} />
+            </label>
+            <Field label="本批走势要求（可选）">
+              <Textarea rows={3} value={batchInst} onChange={(e) => setBatchInst(e.target.value)} placeholder="例如：这10章围绕拍卖会与家族夺权推进，第8章完成一次大打脸并升级金手指…" />
+            </Field>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={goldenOpen} onOpenChange={setGoldenOpen}>
+        <DialogContent title="黄金三章先行（倒序开书）"
+          desc="不急着先写几十万字总纲——先一次性打磨并生成强情绪第 1–3 章，确认开篇爆点够硬后，再点「生成大纲」自动锚定前三章展开全书。"
+          footer={<><Button variant="ghost" onClick={() => setGoldenOpen(false)}>取消</Button><Button variant="primary" onClick={runGolden}>立即生成黄金三章</Button></>}>
+          <Field label="开篇定向要求（可选）" hint="将同时作用于前三章详纲与正文写作">
+            <Textarea rows={3} value={goldenInst} onChange={(e) => setGoldenInst(e.target.value)}
+              placeholder="例如：第1章前三句直接进高情绪冲突对话；全程大白话无专业黑话；每章约2100字…" />
+          </Field>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -115,7 +188,7 @@ function NodeRow({ node: n, depth, collapsed, toggle, onEdit, bookId }: { node: 
           </div>
           {n.summary && <p className={cn('mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground', isChapter ? 'line-clamp-1' : 'line-clamp-2')}>{n.summary}</p>}
           {isChapter && n.beats && Object.keys(n.beats).length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(n.beats).slice(0, 4).map(([k, v]) => <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{beatLabel(k)}：{typeof v === 'string' ? v : JSON.stringify(v)}</span>)}</div>
+            <div className="mt-1.5 flex flex-wrap gap-1">{Object.entries(n.beats).slice(0, 4).map(([k, v]) => <span key={k} className="max-w-[260px] truncate rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{beatLabel(k)}：{typeof v === 'string' ? v : JSON.stringify(v)}</span>)}</div>
           )}
           {job && <JobInline job={job} className="mt-2 max-w-md" />}
         </div>
@@ -234,13 +307,20 @@ function NodeEditor({ node, onClose, bookId }: { node: OutlineNode | null; onClo
           <div>
             <div className="mb-1.5 flex items-center justify-between"><span className="text-[13px] font-medium">节拍</span><Button size="xs" variant="ghost" icon={<Plus className="h-3 w-3" />} onClick={() => setF({ ...f, beats: [...f.beats, { k: '', v: '' }] })}>添加</Button></div>
             <div className="space-y-1.5">
-              {f.beats.map((b, i) => (
-                <div key={i} className="flex gap-1.5">
-                  {BEAT_LABELS[b.k] ? <span className="flex w-[110px] shrink-0 items-center text-[13px] text-muted-foreground">{BEAT_LABELS[b.k]}</span> : <Input className="w-[110px] shrink-0" value={b.k} placeholder="如：章尾钩子" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} />}
-                  <Input value={b.v} className={cn(b.json && 'font-mono text-xs')} onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
-                  <Button size="icon" variant="ghost" onClick={() => setF({ ...f, beats: f.beats.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></Button>
-                </div>
-              ))}
+              {f.beats.map((b, i) => {
+                const isHeavyStage = b.k === 'stage_qi' || b.k === 'stage_cheng' || b.k === 'stage_zhuan' || b.k === 'stage_he'
+                return (
+                  <div key={i} className="flex items-start gap-1.5">
+                    {BEAT_LABELS[b.k] ? <span className="flex w-[110px] shrink-0 items-center pt-2 text-[13px] text-muted-foreground">{BEAT_LABELS[b.k]}</span> : <Input className="w-[110px] shrink-0" value={b.k} placeholder="如：章尾钩子" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, k: e.target.value } : x)) })} />}
+                    {isHeavyStage ? (
+                      <Textarea rows={3} value={b.v} className="flex-1 text-sm" onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
+                    ) : (
+                      <Input value={b.v} className={cn(b.json && 'font-mono text-xs')} onChange={(e) => setF({ ...f, beats: f.beats.map((x, j) => (j === i ? { ...x, v: e.target.value } : x)) })} />
+                    )}
+                    <Button size="icon" variant="ghost" onClick={() => setF({ ...f, beats: f.beats.filter((_, j) => j !== i) })}><X className="h-4 w-4" /></Button>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

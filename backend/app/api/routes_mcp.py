@@ -601,6 +601,18 @@ def _normalize_beats(raw: Any, item: dict[str, Any] | None = None) -> dict[str, 
         b["payoff_type"] = b["payoff"]
     if "foreshadow" not in b and isinstance(b.get("foreshadows"), list):
         b["foreshadow"] = b["foreshadows"]
+    # v0.21 重纲轻写：起/承/转/合及扩展元字段中英文别名归一化
+    for std, aliases in (
+        ("stage_qi", ("起", "qi")), ("stage_cheng", ("承", "cheng")),
+        ("stage_zhuan", ("转", "zhuan")), ("stage_he", ("合", "he")),
+        ("core_scene", ("核心场景",)), ("underlying_game", ("底层博弈",)),
+        ("chapter_reward", ("本章收益",)), ("phase_check", ("阶段检查",)),
+    ):
+        if std not in b:
+            for al in aliases:
+                if b.get(al):
+                    b[std] = b[al]
+                    break
     # 卷节点前情回顾快捷字段：recap_text / recap_state / start_chapter / end_chapter
     if isinstance(item, dict):
         rtxt = item.get("recap_text")

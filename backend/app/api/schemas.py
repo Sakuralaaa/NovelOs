@@ -483,6 +483,19 @@ class WriteNextIn(BaseModel):
 class WriteBatchIn(BaseModel):
     count: int = Field(default=3, ge=1, le=10)
     variants: int | None = Field(default=None, ge=1, le=3)
+    instruction: str = Field(default="", max_length=1000)  # v0.21：本批续写的统一额外要求
+
+
+class OutlineBatchChaptersIn(BaseModel):
+    """v0.21 批量生成千字起承转合章纲。"""
+    count: int = Field(default=10, ge=1, le=20)
+    instruction: str = Field(default="", max_length=1000)
+    heavy: bool = True
+
+
+class GoldenThreeIn(BaseModel):
+    """v0.21 黄金三章先行：开篇定向要求。"""
+    instruction: str = Field(default="", max_length=1000)
 
 
 class AdoptVariantIn(BaseModel):

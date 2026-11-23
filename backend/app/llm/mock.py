@@ -301,6 +301,13 @@ def chapter_beats(number: int, meta: dict[str, Any]) -> dict[str, Any]:
         fs.append({"action": "resolve", "id": None, "desc": f"{ctx['ally']}隐瞒的过去"})
     beats["foreshadow"] = fs
     beats["number"] = number
+    beats["core_scene"] = f"{ctx['loc']}，人物面对面交锋"
+    beats["underlying_game"] = f"{ctx['p']}借信息差逼{ctx['villain']}亮底牌"
+    beats["chapter_reward"] = beats.get("payoff", "")[:60]
+    beats["stage_qi"] = f"在{ctx['loc']}刚一照面，{beats.get('conflict', '')}，三句对白把火药味直接点着。"
+    beats["stage_cheng"] = f"{ctx['villain']}仗着势大步步紧逼，{ctx['p']}顺势示弱套出对方破绽，把局面拖到众人眼前。"
+    beats["stage_zhuan"] = f"{ctx['p']}亮出底牌反手压制，{beats.get('payoff', '')}，在场众人态度瞬间逆转。"
+    beats["stage_he"] = f"{ctx['p']}收下这一局的实在好处，刚转身准备离场，{beats.get('hook_end', '')}。"
     return beats
 
 

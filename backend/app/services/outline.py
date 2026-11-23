@@ -82,6 +82,8 @@ CHAPTER_SCHEMA = (
     '"conflict_type":"武力挑衅|擂台比试|猎杀探险|阴谋暗算|利益争夺|规则刁难|身份质疑|情感关系|外敌危机",'
     '"expectation":"本章挂起或兑现的读者期待","info_gap":"读者知道而角色不知道的事（可空）","time":"本章故事内时间",'
     '"opening_hook":"第1–3章必填：正文前三行就出现的冲突或异常（写成画面）","cheat_beat":"每章必填：金手指本章怎么用、兑现了什么（可写“本章不用”，但每 3 章至少一次可见兑现且有收获）",'
+    '"core_scene":"核心场景（地点与画面氛围）","underlying_game":"底层博弈（谁算计谁、信息差在哪）","chapter_reward":"本章收益（具体可比较的收获）",'
+    '"stage_qi":"起（入局冲突，150–250字）","stage_cheng":"承（加压博弈，200–300字）","stage_zhuan":"转（反转爆点，200–300字）","stage_he":"合（收益与章末卡点，150–250字）",'
     '"characters":[],"location":"","foreshadow":[{"action":"plant|advance|resolve","id":null,"desc":"","tier":"short|mid|long"}],'
     '"hook_end":"章末最后一拍：停在哪个事件进行中或谁的哪句话上（写要发生什么，不写台词原句）","hook_type":"危机突降|悬念反转|挑衅叫板|倒计时|信息缺口|选择悬置|后果预示|决定|发现|误判|代价","must_avoid":[]}]}'
 )
@@ -140,6 +142,37 @@ def normalize_beats(raw: dict[str, Any], number: int, chapter_words: int) -> dic
     for k in ("expectation", "info_gap", "time", "opening_hook", "cheat_beat", "want", "turn", "result", "payoff_mechanism"):
         if raw.get(k):
             out[k] = str(raw[k])[:200]
+    # v0.21 重纲轻写：起/承/转/合千字详纲字段（支持中英文别名）
+    heavy_aliases = (
+        ("stage_qi", ("起", "qi")),
+        ("stage_cheng", ("承", "cheng")),
+        ("stage_zhuan", ("转", "zhuan")),
+        ("stage_he", ("合", "he")),
+    )
+    for k, aliases in heavy_aliases:
+        v = raw.get(k)
+        if not v:
+            for a in aliases:
+                if raw.get(a):
+                    v = raw[a]
+                    break
+        if v:
+            out[k] = str(v).strip()[:600]
+    meta_aliases = (
+        ("core_scene", ("核心场景",)),
+        ("underlying_game", ("底层博弈",)),
+        ("chapter_reward", ("本章收益",)),
+        ("phase_check", ("阶段检查",)),
+    )
+    for k, aliases in meta_aliases:
+        v = raw.get(k)
+        if not v:
+            for a in aliases:
+                if raw.get(a):
+                    v = raw[a]
+                    break
+        if v:
+            out[k] = str(v).strip()[:300]
     avoid = raw.get("must_avoid")
     if isinstance(avoid, list) and avoid:
         out["must_avoid"] = [str(x)[:80] for x in avoid if x][:5]
@@ -479,16 +512,32 @@ def _add_chapters(s: Session, book: Book, arc: OutlineNode, chapters: list[dict[
 
 
 def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
+    from app.models.tables import Chapter
+
     gw = get_gateway()
+    anchored_chapters = 0
     with common_session() as s:
         book = common.get_book(s, book_id)
         meta = {**common.kit_meta(s, book), "chapters_per_arc": CHAPTERS_PER_ARC}
+        written = list(s.exec(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)))
         user = render(
             "outline", book_context=common.book_context(s, book), target_words=book.target_words,
             chapter_words=book.chapter_words,
         )
+        if written:
+            # v0.21 黄金三章先行倒序开书：已有开篇正文时，总纲、卷纲与后续章纲必须严格锚定已写内容
+            anchored_chapters = len(written)
+            anchor_lines = []
+            for ch in written[:5]:
+                brief = (ch.summary or "").strip() or (ch.content or "").strip()[:360].replace("\n", " ")
+                anchor_lines.append(f"- 第{ch.number}章《{ch.title}》：{brief}")
+            user += (
+                "\n\n【已写成的黄金开篇（总纲、第一卷与后续章节必须严格承接以下已写正文，不得推翻设定与剧情）】\n"
+                + "\n".join(anchor_lines)
+                + f"\n（第 1–{written[-1].number} 章已落稿保留，第 1 弧的 chapters 请直接从第 {written[-1].number + 1} 章开始规划，不要重复规划已写章节。）"
+            )
     user += research_notes("outline", user, book_id, ctx, 5)
-    ctx.progress(10, "生成总纲、卷与前两弧")
+    ctx.progress(10, "生成总纲、卷与前两弧" + ("（锚定已写开篇）" if anchored_chapters else ""))
     data = gw.chat_json("outline", system_prompt("outline"), user, meta=meta)
     if not isinstance(data, dict) or not data.get("volumes"):
         raise ValueError("大纲结构不完整（缺少 volumes）")
@@ -507,10 +556,23 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
     ctx.progress(70, "写入大纲")
     with common_session() as s:
         book = common.get_book(s, book_id)
-        if any(n.locked for n in common.outline_nodes(s, book_id)):
+        existing_nodes = common.outline_nodes(s, book_id)
+        if any(n.locked for n in existing_nodes):
             raise Conflict("大纲里有锁定的节点，整体重新生成会覆盖它们；先解锁再重新生成")
-        for n in common.outline_nodes(s, book_id):
-            s.delete(n)
+        # 保留已成文章节对应的大纲节点（黄金三章先行时避免冲掉已写章节的绑定）
+        written_chs = list(s.exec(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)))
+        keep_by_num: dict[int, tuple[OutlineNode, Chapter]] = {}
+        node_by_id = {n.id: n for n in existing_nodes}
+        for ch in written_chs:
+            nd = node_by_id.get(ch.outline_node_id) if ch.outline_node_id else None
+            if nd is None:
+                nd = next((n for n in existing_nodes if n.level == "chapter" and (n.chapter_id == ch.id or n.order == ch.number)), None)
+            if nd is not None:
+                keep_by_num[ch.number] = (nd, ch)
+        keep_ids = {nd.id for nd, _ in keep_by_num.values()}
+        for n in existing_nodes:
+            if n.id not in keep_ids:
+                s.delete(n)
         s.flush()
         bk = data.get("book") or {}
         root_summary = str(bk.get("summary", ""))
@@ -530,7 +592,12 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
         s.flush()
         arc_count: dict[int, int] = {}
         chapters_total = 0
-        for a in data.get("arcs") or []:
+        first_arc: OutlineNode | None = None
+        max_written = max((ch.number for ch in written_chs), default=0)
+        raw_arcs = data.get("arcs") or []
+        if not raw_arcs and written_chs:
+            raw_arcs = [{"volume": 1, "title": "第1弧 黄金开篇", "summary": "承接已写开篇章节，继续推进主线。", "chapters": []}]
+        for idx_a, a in enumerate(raw_arcs):
             vi = int(a.get("volume") or 1)
             vol = vols[min(max(vi, 1), len(vols)) - 1]
             arc_count[vol.id or 0] = arc_count.get(vol.id or 0, 0) + 1
@@ -538,17 +605,164 @@ def generate_outline(book_id: int, ctx: JobContext) -> dict[str, Any]:
                               title=str(a.get("title") or "未命名弧"), summary=str(a.get("summary", "")), status="planned")
             s.add(arc)
             s.flush()
+            if first_arc is None:
+                first_arc = arc
             vol.status = "expanded"
             s.add(vol)
-            chapters_total += len(_add_chapters(s, book, arc, a.get("chapters") or []))
+            if idx_a == 0 and written_chs:
+                # 先把已写章节挂回第 1 弧，保护已写正文与节点绑定
+                for ch in written_chs:
+                    if ch.number in keep_by_num:
+                        kept, _ = keep_by_num[ch.number]
+                        kept.parent_id = arc.id
+                        kept.order = ch.number
+                        kept.chapter_id = ch.id
+                        kept.status = "written"
+                        s.add(kept)
+                    else:
+                        kept = OutlineNode(
+                            book_id=book_id, parent_id=arc.id, level="chapter", order=ch.number,
+                            title=ch.title or f"第{ch.number}章", summary=(ch.summary or "")[:300],
+                            beats={"number": ch.number, "title": ch.title or f"第{ch.number}章", "words": book.chapter_words},
+                            status="written", chapter_id=ch.id,
+                        )
+                        s.add(kept)
+                        s.flush()
+                        ch.outline_node_id = kept.id
+                        s.add(ch)
+                    chapters_total += 1
+                s.flush()
+                # 只跳过模型里显式重复了已写章号（number <= max_written）或同标题的章节，避免误删从 max_written+1 起的新章
+                written_titles = {(ch.title or "").strip() for ch in written_chs if (ch.title or "").strip()}
+                cand: list[dict[str, Any]] = []
+                for raw_c in (a.get("chapters") or []):
+                    if not isinstance(raw_c, dict):
+                        continue
+                    try:
+                        cnum = int(raw_c.get("number") or 0)
+                    except (TypeError, ValueError):
+                        cnum = 0
+                    ctitle = str(raw_c.get("title") or "").strip()
+                    if (cnum and cnum <= max_written) or (ctitle and ctitle in written_titles):
+                        continue
+                    cand.append(raw_c)
+                chapters_total += len(_add_chapters(s, book, arc, cand))
+            else:
+                chapters_total += len(_add_chapters(s, book, arc, a.get("chapters") or []))
         if book.status in ("idea", "bible"):
-            book.status = "outline"
+            book.status = "writing" if written_chs else "outline"
         book.updated_at = utcnow()
         s.add(book)
         s.flush()
         pacing = pacing_audit(chapter_beats_list(s, book_id))
         s.commit()
-    return {"volumes": len(vols), "chapters": chapters_total, "pacing_warnings": pacing}
+    return {"volumes": len(vols), "chapters": chapters_total, "anchored_chapters": anchored_chapters, "pacing_warnings": pacing}
+
+
+def _ensure_arc_for_batch(s: Session, book: Book, batch_title: str = "") -> OutlineNode:
+    """找到或创建用于挂载新一批章纲的弧节点（没有大纲时自动创建最小总纲/第1卷/第1弧骨架）。"""
+    nodes = common.outline_nodes(s, book.id or 0)
+    root = next((n for n in nodes if n.level == "book"), None)
+    if root is None:
+        root = OutlineNode(book_id=book.id or 0, level="book", order=1, title=book.title or "总纲",
+                           summary=book.tagline or book.premise or "", status="expanded")
+        s.add(root)
+        s.flush()
+    vols = sorted([n for n in nodes if n.level == "volume"], key=lambda n: n.order)
+    vol = vols[-1] if vols else None
+    if vol is None:
+        vol = OutlineNode(book_id=book.id or 0, parent_id=root.id, level="volume", order=1,
+                          title="第一卷", summary=book.tagline or "开篇立局", status="expanded")
+        s.add(vol)
+        s.flush()
+    arcs = sorted([n for n in nodes if n.level == "arc" and n.parent_id == vol.id], key=lambda n: n.order)
+    if arcs:
+        last_arc = arcs[-1]
+        existing_chs = [n for n in nodes if n.level == "chapter" and n.parent_id == last_arc.id]
+        if len(existing_chs) < 10 and not batch_title:
+            return last_arc
+    next_order = (arcs[-1].order + 1) if arcs else 1
+    arc = OutlineNode(
+        book_id=book.id or 0, parent_id=vol.id, level="arc", order=next_order,
+        title=batch_title or f"第{next_order}弧", summary="批量重纲轻写章纲弧", status="planned",
+    )
+    s.add(arc)
+    s.flush()
+    return arc
+
+
+def expand_chapters_batch(book_id: int, count: int, ctx: JobContext, instruction: str = "", heavy: bool = True,
+                          arc_title: str = "") -> dict[str, Any]:
+    """v0.21 批量生成千字起承转合章纲（默认 10 章，支持 1–20 章，重纲轻写 1:2 扩写比）。"""
+    from app.services.skills_store import active_skills_for_book, render_skills_text
+
+    count = max(1, min(20, int(count or 10)))
+    gw = get_gateway()
+    with common_session() as s:
+        book = common.get_book(s, book_id)
+        next_no = max_chapter_number(s, book_id) + 1
+        all_beats = chapter_beats_list(s, book_id)
+        recent = common.written_chapters(s, book_id)[-3:]
+        opens = common.open_foreshadows(s, book_id)
+        ledger = rhythm_ledger(all_beats, next_no)
+        audit = pacing_audit(all_beats[-15:], opens, next_no)
+        pt = promises_text(book_promises(s, book_id), next_no + count - 1)
+        if pt:
+            audit = [*audit, "卖点兑现表（到期的必须排进章细纲的 payoff）：\n" + pt]
+        sk_plan = active_skills_for_book(s, book_id, "chapter_plan")
+        sk_txt = render_skills_text(sk_plan, platform=getattr(book, "platform_style", "fanqie")) if sk_plan else ""
+        heavy_note = (
+            "【重纲轻写模式（千字详纲 → 2000字短章）】每章必须填满起承转合四拍（stage_qi / stage_cheng / stage_zhuan / stage_he，"
+            "四拍合计 700–1000 字），写清具体画面、动作、对白冲突点、金手指触发与落袋收益，以及 core_scene、underlying_game、chapter_reward。"
+        ) if heavy else ""
+        extra_req = f"【作者本批附加要求】{instruction.strip()}" if instruction.strip() else ""
+        req_lines = [
+            f"请一次性规划第 {next_no} 章到第 {next_no + count - 1} 章共 {count} 章细纲（章号连续递增）。",
+            heavy_note,
+            extra_req,
+            (f"【本书启用的章细纲技能】\n{sk_txt}" if sk_txt else ""),
+        ]
+        meta = {**common.kit_meta(s, book), "level": "arc", "existing": next_no - 1,
+                "next_number": next_no, "chapters_per_arc": count, "number": next_no, "heavy": heavy}
+        user = render(
+            "expand", book_context=common.book_context(s, book), node_level="batch_chapters",
+            node_title=arc_title or f"第{next_no}–{next_no + count - 1}章",
+            node_summary=f"目标单章字数约 {book.chapter_words} 字，批量生成 {count} 章{'千字起承转合' if heavy else ''}细纲。",
+            siblings="、".join(str(b.get("title") or "") for b in all_beats[-5:]) or "无",
+            recent="\n".join(f"第{c.number}章《{c.title}》：{c.summary or (c.content or '')[:160]}" for c in recent) or "无",
+            open_foreshadows=("\n".join(f"#{f.id} {f.desc}（第{f.planted_ch}章埋，{foreshadow_age_label(f, next_no)}）" for f in opens) or "无")
+            + _planned_text(s, book_id),
+            rhythm=ledger or "（尚无节奏标注）",
+            pacing="\n".join(f"- {x}" for x in audit) or "（无）",
+            instruction="\n".join(x for x in req_lines if x),
+            schema=CHAPTER_SCHEMA,
+        )
+    ctx.progress(20, f"规划第 {next_no}–{next_no + count - 1} 章{'详纲' if heavy else '细纲'}")
+    data = gw.chat_json("expand", system_prompt("expand"), user, meta=meta)
+    if not isinstance(data, dict) or not data.get("chapters"):
+        raise ValueError("批量章纲生成为空")
+    raw_chs = list(data.get("chapters") or [])[:count]
+    ctx.progress(80, "写入章纲")
+    with common_session() as s:
+        book = common.get_book(s, book_id)
+        arc = _ensure_arc_for_batch(s, book, batch_title=arc_title)
+        created = _add_chapters(s, book, arc, raw_chs)
+        if book.status in ("idea", "bible"):
+            book.status = "outline"
+        book.updated_at = utcnow()
+        s.add(book)
+        s.flush()
+        pacing = pacing_audit(chapter_beats_list(s, book_id)[-15:])
+        s.commit()
+        return {
+            "arc_id": arc.id,
+            "start_chapter": next_no,
+            "end_chapter": next_no + len(created) - 1,
+            "created": [c.id for c in created],
+            "count": len(created),
+            "heavy": heavy,
+            "pacing_warnings": pacing,
+        }
 
 
 def expand_node(node_id: int, ctx: JobContext) -> dict[str, Any]:

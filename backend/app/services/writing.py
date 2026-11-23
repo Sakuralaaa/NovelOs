@@ -1756,15 +1756,60 @@ def thicken_chapter_job(chapter_id: int, ctx: JobContext) -> dict[str, Any]:
     }
 
 
-def write_batch(book_id: int, count: int, ctx: JobContext, variants: int | None = None) -> dict[str, Any]:
+def write_batch(book_id: int, count: int, ctx: JobContext, variants: int | None = None, instruction: str = "") -> dict[str, Any]:
     done: list[int] = []
     for i in range(count):
         sub = _SubContext(ctx, i, count)
-        r = write_next(book_id, sub, variants)  # type: ignore[arg-type]
+        r = write_next(book_id, sub, variants, instruction=instruction)  # type: ignore[arg-type]
         done.append(r["chapter_id"])
         if not r.get("committed"):
             return {"chapter_ids": done, "stopped": True, "reason": r.get("reason") or "等待作者选定版本", "last": r}
     return {"chapter_ids": done, "stopped": False}
+
+
+def write_golden_three(book_id: int, ctx: JobContext, instruction: str = "") -> dict[str, Any]:
+    """v0.21 黄金三章先行（倒序开书）：
+    不需要先写完几十卷总纲，直接先规划并生成第 1–3 章强情绪开篇；
+    作者确认前三章满意后，再点「生成大纲」自动锚定前三章展开全书总纲与卷纲。"""
+    from app.services.outline import expand_chapters_batch, max_chapter_number
+
+    with session_scope() as s:
+        common.get_book(s, book_id)
+        written = list(s.exec(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.number)))
+        if len(written) >= 3:
+            raise Conflict("本书已有前三章，可以直接生成总纲或继续续写")
+        pending = next((c for c in written if c.status != "committed"), None)
+        if pending is not None:
+            raise Conflict(f"第{pending.number}章尚未提交（{pending.status}），请先提交或删除草稿")
+        existing_outline_max = max_chapter_number(s, book_id)
+
+    outline_created = 0
+    if existing_outline_max < 3:
+        need_outline = 3 - existing_outline_max
+        ctx.progress(5, f"黄金三章先行：生成第 {existing_outline_max + 1}–3 章起承转合详纲")
+        g_inst = (
+            "按番茄黄金三章「第1章三句强情绪入局+金手指露苗头 → 第2章加压反击+首次清晰兑现 → 第3章当众打脸小胜+引出长线大目标」规划。"
+            + (f" 附加要求：{instruction.strip()}" if instruction.strip() else "")
+        )
+        res_o = expand_chapters_batch(book_id, need_outline, ctx, instruction=g_inst, heavy=True, arc_title="第1弧 黄金三章")
+        outline_created = int(res_o.get("count") or 0)
+
+    need_write = 3 - len(written)
+    done: list[int] = []
+    for i in range(need_write):
+        sub = _SubContext(ctx, i, need_write)
+        r = write_next(book_id, sub, variants=1, instruction=instruction)  # type: ignore[arg-type]
+        done.append(r["chapter_id"])
+        if not r.get("committed"):
+            return {
+                "chapter_ids": done, "outline_created": outline_created, "stopped": True,
+                "reason": r.get("reason") or "等待作者确认",
+                "next_step": "确认前三章满意后，点击「生成大纲」将自动锚定前三章展开总纲与全书卷纲。",
+            }
+    return {
+        "chapter_ids": done, "outline_created": outline_created, "stopped": False,
+        "next_step": "黄金三章已写完！现在点击「生成大纲」将自动锚定前三章展开总纲、分卷与后续章纲。",
+    }
 
 
 class _SubContext:

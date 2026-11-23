@@ -100,6 +100,8 @@ export const JOB_KIND_LABEL: Record<string, string> = {
   'outline.generate': '生成大纲',
   outline_expand: '滚动展开大纲',
   'outline.expand': '滚动展开大纲',
+  outline_batch_chapters: '批量生成章纲',
+  golden_three: '黄金三章先行',
   write_next: '写下一章',
   'chapters.write_next': '写下一章',
   write_batch: '批量写章',
@@ -189,6 +191,8 @@ export const BEAT_LABELS: Record<string, string> = {
   result: '结果', outcome: '结果走向', payoff: '爽点', payoff_mechanism: '爽点机制', payoff_type: '爽点模式', payoff_level: '爽点强度',
   strand: '叙事线', emotion: '情绪走向', expectation: '读者期待', info_gap: '信息差', time: '故事时间', opening_hook: '开篇三行',
   cheat_beat: '金手指', characters: '出场人物', location: '地点', foreshadow: '伏笔', hook_end: '章末一拍', hook_type: '钩子类型',
+  core_scene: '核心场景', underlying_game: '底层博弈', chapter_reward: '本章收益', phase_check: '阶段检查',
+  stage_qi: '起 · 入局', stage_cheng: '承 · 加压', stage_zhuan: '转 · 爆点', stage_he: '合 · 钩子',
   must_avoid: '本章避开', words: '字数', scenes: '段落安排', promises: '卖点兑现表',
 }
 export const beatLabel = (k: string) => BEAT_LABELS[k] ?? k

@@ -737,10 +737,28 @@ on('POST', '/books/:id/outline/generate', (m) => { const b = bookOf(m[1]); retur
     db.outline.push(v)
     const a = { id: nid(), book_id: b.id, parent_id: v.id, level: 'arc', order: 0, title: '弧一 · 黄金三章', summary: '三章内完成困境、金手指、第一次打脸。', beats: null, status: 'expanded', chapter_id: null } as OutlineNode
     db.outline.push(a)
-    for (let i = 1; i <= 5; i++) db.outline.push({ id: nid(), book_id: b.id, parent_id: a.id, level: 'chapter', order: i, title: `第${i}章`, summary: '本章细纲：开场冲突 → 金手指显现 → 章尾钩子。', beats: { 钩子: '章尾悬念' }, status: 'planned', chapter_id: null })
+    for (let i = 1; i <= 5; i++) db.outline.push({ id: nid(), book_id: b.id, parent_id: a.id, level: 'chapter', order: i, title: `第${i}章`, summary: '本章细纲：开场冲突 → 金手指显现 → 章尾钩子。', beats: { stage_qi: '三句强情绪对话直接引爆冲突。', stage_cheng: '反派步步紧逼，主角顺势下套。', stage_zhuan: '金手指兑现，当众打脸翻盘。', stage_he: '收下具体好处，章末停在新变故半拍上。', hook_end: '章尾悬念' }, status: 'planned', chapter_id: null })
   }
   b.status = 'writing'
   return {}
+}) })
+on('POST', '/books/:id/outline/batch-chapters', (m, body) => { const b = bookOf(m[1]); const count = Math.min(20, Math.max(1, Number(body?.count) || 10)); return createJob('outline_batch_chapters', b.id, 3000, ['读取前情与设定…', `批量生成 ${count} 章起承转合详纲…`], () => {
+  let arc = db.outline.filter((o) => o.book_id === b.id && o.level === 'arc').slice(-1)[0]
+  if (!arc) {
+    const r = { id: nid(), book_id: b.id, parent_id: null, level: 'book', order: 1, title: b.title, summary: b.tagline || '', beats: null, status: 'expanded', chapter_id: null } as OutlineNode
+    const v = { id: nid(), book_id: b.id, parent_id: r.id, level: 'volume', order: 1, title: '第一卷', summary: '开篇立局', beats: null, status: 'expanded', chapter_id: null } as OutlineNode
+    arc = { id: nid(), book_id: b.id, parent_id: v.id, level: 'arc', order: 1, title: '第1弧', summary: '批量章纲', beats: null, status: 'expanded', chapter_id: null } as OutlineNode
+    db.outline.push(r, v, arc)
+  }
+  const start = Math.max(0, ...db.outline.filter((o) => o.book_id === b.id && o.level === 'chapter').map((o) => o.order)) + 1
+  const created: number[] = []
+  for (let i = 0; i < count; i++) {
+    const num = start + i
+    const id = nid()
+    db.outline.push({ id, book_id: b.id, parent_id: arc.id, level: 'chapter', order: num, title: `第${num}章 推进与反转`, summary: '起承转合千字详纲章节', beats: { stage_qi: '开场直接切冲突。', stage_cheng: '对手加码施压。', stage_zhuan: '主角亮底牌反杀。', stage_he: '落袋收益并埋章末悬念。', hook_end: '新变故上门' }, status: 'planned', chapter_id: null })
+    created.push(id)
+  }
+  return { arc_id: arc.id, start_chapter: start, end_chapter: start + count - 1, created, count, heavy: body?.heavy ?? true }
 }) })
 on('POST', '/outline/:id/expand', (m) => { const n = must(db.outline.find((o) => o.id === +m[1]), '节点'); return createJob('outline_expand', n.book_id, 3000, ['读取上层大纲…', '滚动展开下一层…'], () => {
   const next = n.level === 'book' ? 'volume' : n.level === 'volume' ? 'arc' : 'chapter'
@@ -795,6 +813,7 @@ function writeOne(bookId: number, variants: number) {
 }
 on('POST', '/books/:id/chapters/write-next', (m, b) => { const book = bookOf(m[1]); const v = Math.min(3, Math.max(1, b.variants || 1)); return createJob('write_next', book.id, 5200 + v * 800, ['取下一章细纲…', '组装上下文包…', v > 1 ? `并行写作 ${v} 个版本…` : '写作正文…', '一致性检查…', '证据式审稿…', '人味 lint…', '定点重写…'], () => ({ chapter_id: writeOne(book.id, v).id })) })
 on('POST', '/books/:id/chapters/write-batch', (m, b) => { const book = bookOf(m[1]); const n = Math.min(10, b.count || 3); return createJob('write_batch', book.id, 2500 * n, Array.from({ length: n }, (_, i) => `写作第 ${i + 1}/${n} 章…`), () => ({ chapter_ids: Array.from({ length: n }, () => writeOne(book.id, 1).id) })) })
+on('POST', '/books/:id/chapters/golden-three', (m) => { const book = bookOf(m[1]); const have = db.chapters.filter((c) => c.book_id === book.id).length; const need = Math.max(0, 3 - have); return createJob('golden_three', book.id, 4500, ['规划黄金三章详纲…', '写作第 1 章…', '写作第 2 章…', '写作第 3 章…'], () => ({ chapter_ids: Array.from({ length: need }, () => writeOne(book.id, 1).id), outline_created: need, stopped: false })) })
 on('POST', '/chapters/:id/review', (m) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); return createJob('review', c.book_id, 3000, ['节奏编辑审稿…', '爽点编辑审稿…', '人物编辑审稿…', '汇总分数…'], () => { c.review = mkReview(c.number + 1, c.content ?? ''); c.lint = mkLint(c.content ?? ''); c.status = 'reviewing'; return {} }) })
 on('POST', '/chapters/:id/humanize', (m) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); return createJob('humanize', c.book_id, 3200, ['确定性 lint…', '定位 AI 腔片段…', '定点重写…'], () => { c.content = (c.content ?? '').replace(/不禁/g, '').replace(/一切都在往好的方向发展/g, '日子好像真的松动了一点'); c.lint = mkLint(c.content); c.words = countWords(c.content); return {} }) })
 on('POST', '/chapters/:id/thicken', (m) => { const c = must(db.chapters.find((x) => x.id === +m[1]), '章节'); return createJob('thicken', c.book_id, 3600, ['识别干对白与概述段落…', '补动作与神态…', '补环境与心理…', '校验情节未改变…'], () => {

@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from app.api.schemas import (
     AiAsk, BibleApplyIn, ChapterAigcIn, BibleProposeIn, BookInfoApply, ChapterApplyIn, ChapterRewriteIn, DetropeIn, ForeshadowBatchIn, ForeshadowIn,
     ForeshadowPatch, ForeshadowPlanIn, ImpactIn, OutlineApplyIn, SyncIn,
-    AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, IdeasGenerate, OutlineUpdate,
+    AdoptVariantIn, BookCreate, BookTestAdoptIn, BookPatch, CardIn, CardUpdate, ChapterUpdate, CardSuggest, CoverDelete, CoverPromptRevise, CoversIn, GoldenThreeIn, IdeasGenerate, OutlineBatchChaptersIn, OutlineUpdate,
     IdeaFusionIn, IdeaOrganizeIn, IdeaRevise, IdeaSeedIn, IdeaSuggest, IdeaUpdate, PackageUpdate, PatchApplyIn, merge_soul, StyleIn, WriteBatchIn, WriteNextIn, book_out, card_out, chapter_out, fact_out, foreshadow_out, idea_out,
     job_out, node_out, package_out, style_out,
 )
@@ -482,6 +482,20 @@ async def outline_generate(book_id: int, s: Session = Depends(get_session)) -> d
     return job_out(submit("outline_generate", lambda ctx: outline.generate_outline(book_id, ctx), book_id=book_id, lock_book=True))
 
 
+@router.post("/books/{book_id}/outline/batch-chapters")
+async def outline_batch_chapters(book_id: int, body: OutlineBatchChaptersIn | None = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.21 批量生成千字起承转合章纲（默认 10 章，支持重纲轻写 1:2 扩写比）。"""
+    _book(s, book_id)
+    count = body.count if body else 10
+    instruction = body.instruction if body else ""
+    heavy = body.heavy if body else True
+    return job_out(submit(
+        "outline_batch_chapters",
+        lambda ctx: outline.expand_chapters_batch(book_id, count, ctx, instruction=instruction, heavy=heavy),
+        book_id=book_id, lock_book=True,
+    ))
+
+
 @router.post("/outline/{node_id}/expand")
 async def outline_expand(node_id: int, s: Session = Depends(get_session)) -> dict[str, Any]:
     node = s.get(OutlineNode, node_id)
@@ -672,7 +686,16 @@ async def write_batch(book_id: int, body: WriteBatchIn | None = Body(default=Non
     _book(s, book_id)
     count = body.count if body else 3
     variants = body.variants if body else None
-    return job_out(submit("chapter_write_batch", lambda ctx: writing.write_batch(book_id, count, ctx, variants), book_id=book_id, lock_book=True))
+    instruction = body.instruction if body else ""
+    return job_out(submit("chapter_write_batch", lambda ctx: writing.write_batch(book_id, count, ctx, variants, instruction=instruction), book_id=book_id, lock_book=True))
+
+
+@router.post("/books/{book_id}/chapters/golden-three")
+async def write_golden_three(book_id: int, body: GoldenThreeIn | None = Body(default=None), s: Session = Depends(get_session)) -> dict[str, Any]:
+    """v0.21 黄金三章先行（倒序开书）：先写前三章强情绪开篇，满意后再点生成大纲锚定全书。"""
+    _book(s, book_id)
+    instruction = body.instruction if body else ""
+    return job_out(submit("golden_three", lambda ctx: writing.write_golden_three(book_id, ctx, instruction=instruction), book_id=book_id, lock_book=True))
 
 
 def _chapter_book(s: Session, chapter_id: int) -> int:
